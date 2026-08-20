@@ -40,6 +40,8 @@ export function Toolbar() {
                 id="doc-title"
                 className="h-8 w-56"
                 value={titleValue}
+                disabled={title.locked !== null}
+                title={title.locked ? `편집할 수 없다 — ${title.locked}` : undefined}
                 onChange={(e) => onEdit(title.id, e.target.value)}
               />
             </div>

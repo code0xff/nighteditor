@@ -66,6 +66,8 @@ function openViaInput(): Promise<OpenedFile | null> {
       if (!file) return resolve(null);
       void readDroppedFile(file).then(resolve);
     };
+    // 취소를 처리하지 않으면 프라미스가 영영 안 풀려 busy 가 걸린 채 굳는다.
+    input.oncancel = () => resolve(null);
     input.click();
   });
 }
@@ -86,6 +88,9 @@ function download(name: string, text: string): void {
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
+  // 문서에 붙이지 않거나 곧바로 revoke 하면 브라우저에 따라 내려받기가 취소된다.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
