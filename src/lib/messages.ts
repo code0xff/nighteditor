@@ -25,7 +25,7 @@ export function isLocale(value: unknown): value is Locale {
 }
 
 const ko = {
-  'app.emptyTitle': '아티팩트 HTML 을 여기에 놓거나 열기를 누른다',
+  'app.emptyTitle': '한 파일로 된 HTML 을 여기에 놓거나 열기를 누른다',
   'app.emptyHint': '글자를 클릭해 고치고, 저장하면 원본에서 고친 부분만 바뀐다',
   'app.blocked': '이 블록은 편집할 수 없다 — {reason}',
 
@@ -82,7 +82,7 @@ export type MessageKey = keyof typeof ko;
 export const MESSAGE_KEYS = Object.keys(ko) as MessageKey[];
 
 const en: Record<MessageKey, string> = {
-  'app.emptyTitle': 'Drop an artifact HTML here, or click Open',
+  'app.emptyTitle': 'Drop a single-file HTML here, or click Open',
   'app.emptyHint': 'Click text to fix it — saving changes only what you edited',
   'app.blocked': "This block can't be edited — {reason}",
 
