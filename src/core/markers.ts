@@ -1,4 +1,5 @@
 import type { Block } from './types.js';
+import { applyEdits, type Edit } from './edits.js';
 
 /** 프리뷰에서 DOM 노드를 원본 블록으로 되짚기 위한 표식 (ADR-003) */
 export const MARKER_ATTR = 'data-ne-id';
@@ -22,20 +23,19 @@ export class MarkerError extends Error {}
  * 결과물은 **프리뷰 전용**이다. 저장 경로는 언제나 원본 문자열에서 출발하므로
  * 마커가 저장본에 섞일 수 없다 (INV-3).
  */
-export function injectMarkers(source: string, blocks: readonly Block[]): string {
-  // 뒤에서부터 넣어야 앞쪽 offset 이 밀리지 않는다 (INV-4 와 같은 이유).
-  const ordered = [...blocks].sort((a, b) => b.innerStart - a.innerStart);
-
-  let out = source;
-  for (const block of ordered) {
+export function markerEdits(source: string, blocks: readonly Block[]): Edit[] {
+  return blocks.map((block) => {
     // innerStart 는 여는 태그의 '>' 다음이다. 그 '>' 바로 앞에 넣는다.
     const at = block.innerStart - 1;
-    if (out[at] !== '>') {
+    if (source[at] !== '>') {
       throw new MarkerError(`여는 태그 끝을 찾지 못했다: id=${block.id} <${block.tag}>`);
     }
-    out = `${out.slice(0, at)} ${MARKER_ATTR}="${block.id}"${out.slice(at)}`;
-  }
-  return out;
+    return { start: at, end: at, text: ` ${MARKER_ATTR}="${block.id}"` };
+  });
+}
+
+export function injectMarkers(source: string, blocks: readonly Block[]): string {
+  return applyEdits(source, markerEdits(source, blocks));
 }
 
 /**
