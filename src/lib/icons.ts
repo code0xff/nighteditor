@@ -25,9 +25,11 @@ import {
 
 export type { LucideIcon };
 
-/** 브랜드 — 앱 아이콘 파일은 public/ 한곳에 있고, index.html · site.webmanifest 가 같은 경로를 쓴다.
+/** 브랜드 — 앱 아이콘 파일은 public/ 한곳에 있고, index.html 과 PWA 매니페스트가 같은 파일을 쓴다.
+ *  경로는 BASE_URL 로 맞춘다. GitHub Pages 는 하위 경로(/nighteditor/)로 서빙되므로
+ *  절대 경로로 박으면 배포본에서 404 다 (index.html 안의 링크는 Vite 가 고쳐주지만 이건 런타임 문자열이다).
  *  IconBrand 는 이미지를 쓰지 않을 때의 대체 그림이다. */
-export const APP_ICON = '/apple-touch-icon.png';
+export const APP_ICON = import.meta.env.BASE_URL + 'apple-touch-icon.png';
 export const IconBrand = FilePen;
 
 /** 파일 */
