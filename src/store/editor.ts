@@ -25,6 +25,7 @@ export interface EditorState {
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
+  adopt: (file: OpenedFile) => void;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
@@ -97,6 +98,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ busy: false });
     }
   },
+
+  // OS 가 열어준 파일(PWA file_handlers)을 그대로 받는다.
+  adopt: (file) => set(load(file)),
 
   loadDropped: async (file) => {
     set({ busy: true, message: null });

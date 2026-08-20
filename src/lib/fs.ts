@@ -15,6 +15,11 @@ interface PickerWindow {
   showOpenFilePicker?: (options: unknown) => Promise<FileHandle[]>;
 }
 
+/** File Handling API — 설치된 PWA 가 OS 에서 파일과 함께 실행될 때 넘어온다 */
+interface LaunchQueue {
+  setConsumer(consumer: (params: { files: FileHandle[] }) => void): void;
+}
+
 export interface OpenedFile {
   name: string;
   text: string;
@@ -31,6 +36,27 @@ export function canOverwrite(): boolean {
   return typeof picker() === 'function';
 }
 
+/** 핸들에서 읽는다. 핸들이 있으므로 나중에 원본을 덮어쓸 수 있다. */
+export async function fromHandle(handle: FileHandle): Promise<OpenedFile> {
+  const file = await handle.getFile();
+  return { name: handle.name, text: await file.text(), handle };
+}
+
+/**
+ * OS 가 이 앱으로 파일을 열었을 때 받는다 (manifest 의 file_handlers).
+ *
+ * 파일 선택 대화상자를 거치지 않고도 핸들이 오므로 덮어쓰기 저장이 그대로 된다.
+ * 지원하지 않는 환경에서는 아무 일도 하지 않는다.
+ */
+export function onFileLaunch(handler: (file: OpenedFile) => void): void {
+  const queue = (window as unknown as { launchQueue?: LaunchQueue }).launchQueue;
+  if (!queue) return;
+  queue.setConsumer((params) => {
+    const handle = params.files[0];
+    if (handle) void fromHandle(handle).then(handler);
+  });
+}
+
 /** 사용자가 취소하면 null 을 돌려준다 */
 export async function openHtmlFile(): Promise<OpenedFile | null> {
   const show = picker();
@@ -42,8 +68,7 @@ export async function openHtmlFile(): Promise<OpenedFile | null> {
       multiple: false,
     });
     if (!handle) return null;
-    const file = await handle.getFile();
-    return { name: handle.name, text: await file.text(), handle };
+    return fromHandle(handle);
   } catch (e) {
     // 사용자가 취소한 경우는 오류가 아니다.
     if (e instanceof DOMException && e.name === 'AbortError') return null;

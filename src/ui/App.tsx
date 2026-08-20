@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { onFileLaunch } from '@/lib/fs';
 import { cn } from '@/lib/utils';
 import { useEditor } from '@/store/editor';
 import { ChangeList } from './ChangeList';
@@ -12,7 +13,11 @@ export function App() {
   const blockedId = useEditor((s) => s.blockedId);
   const blocks = useEditor((s) => s.blocks);
   const loadDropped = useEditor((s) => s.loadDropped);
+  const adopt = useEditor((s) => s.adopt);
   const [dragging, setDragging] = useState(false);
+
+  // 설치된 PWA 를 OS 에서 "이 앱으로 열기" 했을 때 파일이 여기로 들어온다.
+  useEffect(() => onFileLaunch(adopt), [adopt]);
 
   const blocked = blocks.find((b) => b.id === blockedId);
 

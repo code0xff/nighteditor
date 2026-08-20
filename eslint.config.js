@@ -15,6 +15,13 @@ export default tseslint.config(
     },
   },
   {
+    // 아이콘 생성기는 Node 에서 직접 돈다
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { Buffer: 'readonly', process: 'readonly', console: 'readonly' },
+    },
+  },
+  {
     // INV-6 · core/ 는 브라우저 API를 모른다 (docs/rules.md)
     files: ['src/core/**/*.ts'],
     ignores: ['src/core/**/*.test.ts'],
