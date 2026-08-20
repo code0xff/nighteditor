@@ -40,6 +40,8 @@ const ko = {
   'preview.title': '프리뷰',
 
   'confirm.discard': '저장하지 않은 변경이 {count}개 있다. 버리고 새 파일을 열까?',
+  'confirm.discardForAssets':
+    '저장하지 않은 변경이 {count}개 있다. 자원을 붙이려면 프리뷰를 다시 그려야 해서 사라진다. 계속할까?',
 
   'changes.blocks': '블록',
   'changes.total': '전체 {count}',
@@ -65,6 +67,15 @@ const ko = {
   'notice.copyDownloaded': '{name} 사본을 내려받았다 ({count}개 블록 반영)',
   'notice.saveRejected': '저장 거부: {detail}',
   'notice.saveFailed': '저장하지 못했다',
+  'notice.assetsLinked': '외부 파일 {count}개를 붙였다',
+  'notice.assetsNotFound': '이 폴더에서 참조된 파일을 찾지 못했다',
+  'notice.folderTruncated': '폴더가 너무 커서 {count}개까지만 읽었다',
+  'notice.folderUnsupported': '이 브라우저는 폴더 열기를 지원하지 않는다',
+
+  'assets.missing':
+    '외부 파일 {count}개를 불러오지 못했다 — 화면만 다르게 보이고 편집·저장은 정확하다',
+  'assets.link': '폴더 연결',
+  'assets.linking': '읽는 중…',
 
   'patch.unknownId': '알 수 없는 블록 id: {id}',
   'patch.locked': '잠긴 블록은 수정할 수 없다: id={id} ({reason})',
@@ -97,6 +108,8 @@ const en: Record<MessageKey, string> = {
   'preview.title': 'Preview',
 
   'confirm.discard': '{count} unsaved changes will be lost. Open another file anyway?',
+  'confirm.discardForAssets':
+    "{count} unsaved changes. Attaching assets redraws the preview, so they'll be lost. Continue?",
 
   'changes.blocks': 'Blocks',
   'changes.total': '{count} total',
@@ -122,6 +135,15 @@ const en: Record<MessageKey, string> = {
   'notice.copyDownloaded': 'Downloaded a copy of {name} ({count} blocks applied)',
   'notice.saveRejected': 'Save rejected: {detail}',
   'notice.saveFailed': "Couldn't save",
+  'notice.assetsLinked': 'Attached {count} external files',
+  'notice.assetsNotFound': "Couldn't find the referenced files in that folder",
+  'notice.folderTruncated': 'The folder is too large — read only the first {count} files',
+  'notice.folderUnsupported': "This browser can't open folders",
+
+  'assets.missing':
+    "Couldn't load {count} external files — only the preview differs; editing and saving are exact",
+  'assets.link': 'Link folder',
+  'assets.linking': 'Reading…',
 
   'patch.unknownId': 'Unknown block id: {id}',
   'patch.locked': "Locked blocks can't be edited: id={id} ({reason})",

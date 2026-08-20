@@ -3,7 +3,17 @@ import { applyPatches, PatchError } from '@/core/patch';
 import { applyLiveLocks } from '@/core/verify';
 import type { Block, LockReason } from '@/core/types';
 import { patchNotice, type Notice } from '@/lib/messages';
-import { downloadFile, openHtmlFile, readDroppedFile, saveFile, type OpenedFile } from '@/lib/fs';
+import {
+  canPickFolder,
+  downloadFile,
+  openHtmlFile,
+  pickFolder,
+  readDroppedFile,
+  saveFile,
+  type OpenedFile,
+} from '@/lib/fs';
+import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/assets';
+import type { AssetRef } from '@/core/assets';
 
 export interface EditorState {
   file: OpenedFile | null;
@@ -28,6 +38,13 @@ export interface EditorState {
   /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
   notice: Notice | null;
 
+  /** 문서가 참조하는 외부 자원 (spec §5.1) */
+  assetRefs: AssetRef[];
+  /** 붙인 자원. 파일을 바꿔 열면 이전 것을 반드시 놓아준다 */
+  assets: AssetBundle;
+  /** 묶음 안에서 문서가 놓인 디렉터리. 폴더·zip 으로 열었을 때만 루트가 아니다 */
+  docDir: string;
+
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
   adopt: (file: OpenedFile) => Promise<void>;
@@ -42,6 +59,24 @@ export interface EditorState {
   drainReverts: () => void;
   save: () => Promise<void>;
   downloadCopy: () => void;
+  /** 폴더를 열어 외부 자원을 붙인다 (spec §5.1) */
+  linkFolder: () => Promise<void>;
+}
+
+/**
+ * 붙인 자원과 못 붙인 자원의 수. 같은 파일을 여러 번 참조해도 하나로 센다 —
+ * 사용자가 세는 단위는 참조가 아니라 파일이다.
+ */
+export function countAssets(state: Pick<EditorState, 'assetRefs' | 'assets'>): {
+  linked: number;
+  missing: number;
+} {
+  const linked = new Set<string>();
+  const missing = new Set<string>();
+  for (const ref of state.assetRefs) {
+    (state.assets.urls.has(ref.path) ? linked : missing).add(ref.path);
+  }
+  return { linked: linked.size, missing: missing.size };
 }
 
 /** 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다 */
@@ -66,6 +101,22 @@ export function titleBlock(blocks: readonly Block[]): Block | undefined {
   return blocks.find((b) => b.rcdata);
 }
 
+/**
+ * 새로 연 문서로 갈아탄다. 이전 blob URL 을 여기서 놓아준다 —
+ * 안 놓으면 파일을 여러 번 열수록 탭이 계속 무거워진다.
+ *
+ * 새 상태를 다 만든 **뒤에** 놓는다. 만들다 실패하면 지금 보고 있는 화면이
+ * 그대로 살아 있어야 하고, 그 화면은 이전 blob 을 쓰고 있다.
+ */
+async function replace(
+  get: () => EditorState,
+  loading: Promise<Partial<EditorState>>
+): Promise<Partial<EditorState>> {
+  const next = await loading;
+  get().assets.dispose();
+  return next;
+}
+
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   return e instanceof Error && e.message
@@ -77,17 +128,29 @@ function openFailedNotice(e: unknown): Notice {
  * parse5 와 프리뷰 조립기는 **파일을 열 때 처음** 필요하다. 초기 화면은 드롭 영역뿐이라
  * 파서를 같이 실어 보낼 이유가 없다 — 그래서 여기서 동적으로 불러온다 (코드 분할).
  */
-async function load(file: OpenedFile): Promise<Partial<EditorState>> {
-  const [{ parseBlocks }, { buildPreviewDocument }] = await Promise.all([
-    import('@/core/parse'),
-    import('@/lib/preview'),
-  ]);
+async function load(
+  file: OpenedFile,
+  files?: ReadonlyMap<string, Blob>
+): Promise<Partial<EditorState>> {
+  const [{ parseBlocks }, { buildPreviewDocument }, { dirOf, parseAssetRefs }, { buildAssets }] =
+    await Promise.all([
+      import('@/core/parse'),
+      import('@/lib/preview'),
+      import('@/core/assets'),
+      import('@/lib/assets'),
+    ]);
+  const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
+  const refs = parseAssetRefs(file.text, docDir);
+  const assets = files ? await buildAssets(files) : EMPTY_BUNDLE;
   return {
     file,
     source: file.text,
     blocks,
-    previewDoc: buildPreviewDocument(file.text, blocks),
+    assetRefs: refs,
+    assets,
+    docDir,
+    previewDoc: buildPreviewDocument(file.text, blocks, { refs, dir: docDir, urls: assets.urls }),
     patches: new Map(),
     selectedId: null,
     blockedId: null,
@@ -111,12 +174,15 @@ export const useEditor = create<EditorState>((set, get) => ({
   scanned: false,
   busy: false,
   notice: null,
+  assetRefs: [],
+  assets: EMPTY_BUNDLE,
+  docDir: '',
 
   openFile: async () => {
     set({ busy: true, notice: null });
     try {
       const file = await openHtmlFile();
-      if (file) set(await load(file));
+      if (file) set(await replace(get, load(file)));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       set({ notice: openFailedNotice(e) });
@@ -130,7 +196,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   adopt: async (file) => {
     set({ busy: true, notice: null });
     try {
-      set(await load(file));
+      set(await replace(get, load(file)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {
@@ -141,7 +207,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   loadDropped: async (file) => {
     set({ busy: true, notice: null });
     try {
-      set(await load(await readDroppedFile(file)));
+      set(await replace(get, load(await readDroppedFile(file))));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
       set({ notice: openFailedNotice(e) });
@@ -225,6 +291,42 @@ export const useEditor = create<EditorState>((set, get) => ({
             ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
             : { key: 'notice.saveFailed' },
       });
+    }
+  },
+
+  /**
+   * 폴더를 열어 외부 자원을 붙인다 (spec §5.1).
+   *
+   * 파일 핸들은 그대로 두므로 **덮어쓰기 저장은 계속 된다.** 폴더는 읽기 전용으로만 받는다.
+   * 프리뷰를 다시 그리므로 편집 상태는 사라진다 — 버려도 되는지는 부르는 쪽이 먼저 묻는다.
+   */
+  linkFolder: async () => {
+    const { file } = get();
+    if (!file) return;
+    if (!canPickFolder()) {
+      set({ notice: { key: 'notice.folderUnsupported' } });
+      return;
+    }
+
+    set({ busy: true, notice: null });
+    try {
+      // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
+      const read = await pickFolder(file.handle);
+      if (!read) return;
+
+      set(await replace(get, load(file, read.files)));
+      const attached = countAssets(get()).linked;
+      set({
+        notice: read.truncated
+          ? { key: 'notice.folderTruncated', params: { count: read.files.size } }
+          : attached > 0
+            ? { key: 'notice.assetsLinked', params: { count: attached } }
+            : { key: 'notice.assetsNotFound' },
+      });
+    } catch (e) {
+      set({ notice: openFailedNotice(e) });
+    } finally {
+      set({ busy: false });
     }
   },
 

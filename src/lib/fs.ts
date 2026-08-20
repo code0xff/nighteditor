@@ -11,8 +11,19 @@ interface FileHandle {
   createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void> }>;
 }
 
+/** 폴더 안을 훑기 위한 최소한의 모양 (lib.dom 에 아직 없다) */
+interface DirectoryHandle {
+  readonly name: string;
+  entries(): AsyncIterableIterator<[string, FileHandle | DirectoryHandle]>;
+}
+
+function isDirectory(handle: FileHandle | DirectoryHandle): handle is DirectoryHandle {
+  return 'entries' in handle;
+}
+
 interface PickerWindow {
   showOpenFilePicker?: (options: unknown) => Promise<FileHandle[]>;
+  showDirectoryPicker?: (options?: unknown) => Promise<DirectoryHandle>;
 }
 
 /** File Handling API — 설치된 PWA 가 OS 에서 파일과 함께 실행될 때 넘어온다 */
@@ -25,6 +36,11 @@ export interface OpenedFile {
   text: string;
   /** null 이면 덮어쓰기가 불가능해 내려받기로만 저장한다 */
   handle: FileHandle | null;
+  /**
+   * 묶음(폴더·zip) 안에서의 경로. 자원의 상대 경로를 이 자리 기준으로 푼다.
+   * 파일 하나만 열었으면 없다 — 그때는 이름이 곧 경로다.
+   */
+  path?: string;
 }
 
 export type SaveResult = 'overwritten' | 'downloaded';
@@ -34,6 +50,78 @@ const picker = (): PickerWindow['showOpenFilePicker'] =>
 
 export function canOverwrite(): boolean {
   return typeof picker() === 'function';
+}
+
+/**
+ * 폴더 하나를 통째로 읽는 데 두는 한도.
+ *
+ * 사용자가 실수로 홈 디렉터리를 고를 수 있다. 한도가 없으면 탭이 굳는다.
+ * 넘치면 조용히 자르지 않고 거기서 멈춘 사실을 부르는 쪽에 알린다 (대원칙 3).
+ */
+export const FOLDER_LIMITS = { files: 500, bytes: 64 * 1024 * 1024, depth: 8 } as const;
+
+export interface FolderRead {
+  files: Map<string, File>;
+  /** 한도에 걸려 다 읽지 못했다 */
+  truncated: boolean;
+}
+
+/** 걸어가는 동안의 누계. 한도를 재귀 사이에서 이어 세려면 한 곳에 모아야 한다 */
+interface Walk extends FolderRead {
+  bytes: number;
+}
+
+export function canPickFolder(): boolean {
+  return typeof (window as unknown as PickerWindow).showDirectoryPicker === 'function';
+}
+
+async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<void> {
+  const depth = prefix ? prefix.split('/').length : 0;
+
+  for await (const [name, handle] of dir.entries()) {
+    // 숨김 폴더와 의존성 더미는 자원일 리 없고 파일 수만 폭발시킨다.
+    if (name.startsWith('.') || name === 'node_modules') continue;
+    if (into.files.size >= FOLDER_LIMITS.files || into.bytes >= FOLDER_LIMITS.bytes) {
+      into.truncated = true;
+      return;
+    }
+
+    const path = prefix ? `${prefix}/${name}` : name;
+    if (isDirectory(handle)) {
+      if (depth + 1 >= FOLDER_LIMITS.depth) {
+        into.truncated = true;
+        continue;
+      }
+      await walk(handle, path, into);
+      continue;
+    }
+    const file = await handle.getFile();
+    into.bytes += file.size;
+    into.files.set(path, file);
+  }
+}
+
+/**
+ * 폴더를 열어 안의 파일을 전부 읽는다. 사용자가 취소하면 null.
+ *
+ * 파일 하나를 여는 것만으로는 형제 파일을 볼 권한이 없다 (spec §5.1).
+ * 자원을 붙이려면 사용자가 폴더를 직접 내줘야 한다.
+ *
+ * @param startIn 이 파일이 있던 자리에서 대화상자를 연다 — 대개 그 폴더가 정답이다
+ */
+export async function pickFolder(startIn?: FileHandle | null): Promise<FolderRead | null> {
+  const show = (window as unknown as PickerWindow).showDirectoryPicker;
+  if (!show) return null;
+
+  try {
+    const dir = await show(startIn ? { mode: 'read', startIn } : { mode: 'read' });
+    const read: Walk = { files: new Map(), truncated: false, bytes: 0 };
+    await walk(dir, '', read);
+    return { files: read.files, truncated: read.truncated };
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') return null;
+    throw e;
+  }
 }
 
 /** 핸들에서 읽는다. 핸들이 있으므로 나중에 원본을 덮어쓸 수 있다. */

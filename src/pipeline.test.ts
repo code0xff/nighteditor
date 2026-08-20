@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { parseAssetRefs } from './core/assets.js';
 import { parseBlocks } from './core/parse.js';
 import { applyPatches } from './core/patch.js';
 import { applyLiveLocks } from './core/verify.js';
@@ -85,5 +86,59 @@ describe('전체 파이프라인 · 합성 아티팩트', () => {
   it('아무것도 고치지 않고 저장하면 원본과 바이트 단위로 같다', () => {
     const blocks = parseBlocks(source);
     expect(applyPatches(source, blocks, [])).toBe(source);
+  });
+});
+
+describe('전체 파이프라인 · 외부 자원 (spec §5.1)', () => {
+  const multi =
+    '<html><head><link rel="stylesheet" href="deck.css">' +
+    '<style>body{background:url(bg.png)}</style></head>' +
+    '<body><h1>제목</h1><img src="img/logo.png"><a href="next.html">다음</a></body></html>';
+
+  const urls = new Map([
+    ['deck.css', 'blob:css'],
+    ['bg.png', 'blob:bg'],
+    ['img/logo.png', 'blob:logo'],
+  ]);
+
+  it('프리뷰에서만 자원 경로를 blob URL 로 바꾼다', () => {
+    const blocks = parseBlocks(multi);
+    const refs = parseAssetRefs(multi, '');
+    const doc = buildPreviewDocument(multi, blocks, { refs, dir: '', urls });
+
+    expect(doc).toContain('href="blob:css"');
+    expect(doc).toContain('src="blob:logo"');
+    expect(doc).toContain('url(blob:bg)');
+    // 링크는 이동할 곳이지 붙일 자원이 아니다.
+    expect(doc).toContain('href="next.html"');
+    // 마커도 함께 들어간다 — 둘 다 같은 원본 offset 을 쓰므로 한 번에 적용해야 한다.
+    expect(doc).toContain(`<h1 ${MARKER_ATTR}=`);
+  });
+
+  it('저장본에는 blob 이 한 글자도 들어가지 않는다 (ADR-009)', () => {
+    const blocks = parseBlocks(multi);
+    const target = blocks.find((b) => b.tag === 'h1');
+    const out = applyPatches(multi, blocks, [{ id: target?.id ?? -1, newInnerHtml: '고친 제목' }]);
+
+    expect(out).not.toContain('blob:');
+    expect(out).toContain('href="deck.css"');
+    expect(out).toContain('src="img/logo.png"');
+    expect(changedLines(multi, out)).toBe(1);
+  });
+
+  it('자원이 없어도 문서는 그대로 열린다', () => {
+    const blocks = parseBlocks(multi);
+    const refs = parseAssetRefs(multi, '');
+    const doc = buildPreviewDocument(multi, blocks, { refs, dir: '', urls: new Map() });
+
+    // 없는 자원을 있는 척 바꾸지 않는다. 화면만 다르고 편집은 그대로 된다.
+    expect(doc).toContain('href="deck.css"');
+    expect(doc).toContain(`<h1 ${MARKER_ATTR}=`);
+  });
+
+  it('하위 폴더의 문서는 자기 자리를 기준으로 자원을 찾는다', () => {
+    const refs = parseAssetRefs(multi, 'slides');
+
+    expect(refs.map((r) => r.path)).toEqual(['slides/deck.css', 'slides/img/logo.png']);
   });
 });

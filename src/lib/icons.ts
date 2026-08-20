@@ -11,6 +11,8 @@ import {
   Download,
   FileUp,
   FolderOpen,
+  FolderSearch,
+  Unplug,
   Info,
   Languages,
   LoaderCircle,
@@ -46,6 +48,9 @@ export const IconRevertAll = RotateCcw;
 /** 상태 — 잠금(대원칙 3)과 안내는 다른 그림을 쓴다 */
 export const IconLocked = Lock;
 export const IconNotice = Info;
+/** 자원을 못 붙였다 — 참조는 있는데 파일이 없다 */
+export const IconUnlinked = Unplug;
+export const IconLinkFolder = FolderSearch;
 export const IconScanning = LoaderCircle;
 
 /** 블록 집계 */

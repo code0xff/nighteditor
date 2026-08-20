@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { onFileLaunch } from '@/lib/fs';
-import { IconDrop, IconLocked, IconNotice } from '@/lib/icons';
+import { IconDrop, IconLinkFolder, IconLocked, IconNotice, IconUnlinked } from '@/lib/icons';
 import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
-import { useEditor } from '@/store/editor';
+import { countAssets, useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
 import { ChangeList } from './ChangeList';
 import { PreviewFrame } from './PreviewFrame';
@@ -23,6 +24,10 @@ export function App() {
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
   const patches = useEditor((s) => s.patches);
+  const busy = useEditor((s) => s.busy);
+  const linkFolder = useEditor((s) => s.linkFolder);
+  // 참조는 있는데 못 붙인 자원. 조용히 깨진 채로 두지 않는다 (대원칙 3 · spec §5.1).
+  const missing = useEditor((s) => countAssets(s).missing);
   const { t, tn } = useI18n();
   // 저장 전 편집은 메모리에만 있다. 탭을 닫기 전에 브라우저가 되묻게 한다.
   useEffect(() => onBeforeUnload(() => patches.size > 0), [patches]);
@@ -70,6 +75,35 @@ export function App() {
           <Alert>
             <NoticeIcon className="h-3.5 w-3.5" />
             <AlertDescription>{alert}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+
+      {file && missing > 0 && (
+        <div className="px-3 pt-2">
+          <Alert>
+            <IconUnlinked className="h-3.5 w-3.5" />
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{t('assets.missing', { count: missing })}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  // 프리뷰를 다시 그리므로 고친 내용은 사라진다. 조용히 버리지 않는다.
+                  if (
+                    patches.size > 0 &&
+                    !confirm(t('confirm.discardForAssets', { count: patches.size }))
+                  ) {
+                    return;
+                  }
+                  void linkFolder();
+                }}
+              >
+                <IconLinkFolder />
+                {busy ? t('assets.linking') : t('assets.link')}
+              </Button>
+            </AlertDescription>
           </Alert>
         </div>
       )}
