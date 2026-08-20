@@ -242,6 +242,74 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
   });
 });
 
+describe('previewAgent · Ctrl+S', () => {
+  const ctrlS = (init = {}) => {
+    const e = new KeyboardEvent('keydown', {
+      key: 's',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+    document.dispatchEvent(e);
+    return e;
+  };
+
+  it('편집 중이면 확정하고 저장을 부탁한다 — 방금 고친 내용이 빠지면 안 된다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    el(0)!.innerHTML = '고친 본문';
+
+    ctrlS();
+
+    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '고친 본문', pristine: false });
+    expect(sent).toContainEqual({ type: 'save' });
+    expect(sent.findIndex((m) => m.type === 'edit')).toBeLessThan(
+      sent.findIndex((m) => m.type === 'save')
+    );
+  });
+
+  it('편집 중이 아니어도 저장을 부탁한다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    ctrlS();
+
+    expect(sent).toContainEqual({ type: 'save' });
+  });
+
+  it('브라우저의 페이지 저장을 막고 아티팩트로도 넘기지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    const artifact = vi.fn();
+    document.addEventListener('keydown', artifact);
+
+    const e = ctrlS();
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(artifact).not.toHaveBeenCalled();
+  });
+
+  it('조합 중에는 저장하지 않는다 — 글자가 아직 확정되지 않았다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+
+    const e = ctrlS();
+
+    expect(sent.some((m) => m.type === 'save')).toBe(false);
+    // 저장은 미루더라도 브라우저 대화상자는 뜨지 않아야 한다.
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('Ctrl+Shift+S 는 잡지 않는다 — 사본 내려받기 자리다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    const e = ctrlS({ shiftKey: true });
+
+    expect(sent.some((m) => m.type === 'save')).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+  });
+});
+
 describe('previewAgent · 클릭의 기본 동작', () => {
   it('블록 안의 링크를 눌러도 문서가 이동하지 않는다', () => {
     mount(`<p ${MARKER_ATTR}="0">본문 <a href="#next">링크</a></p>`);

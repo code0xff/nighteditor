@@ -26,3 +26,14 @@ describe('editor · 파일 열기 (동적 import 경로)', () => {
     expect(useEditor.getState().busy).toBe(false);
   });
 });
+
+describe('editor · 저장', () => {
+  it('고친 것이 없으면 저장하지 않는다 — Ctrl+S 가 같은 내용을 다시 쓰지 않게', async () => {
+    await useEditor.getState().loadDropped(dropped());
+
+    await useEditor.getState().save();
+
+    // 아무 일도 없었으니 알릴 것도 없다.
+    expect(useEditor.getState().notice).toBeNull();
+  });
+});

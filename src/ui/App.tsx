@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { onFileLaunch } from '@/lib/fs';
 import { IconDrop, IconLocked, IconNotice } from '@/lib/icons';
+import { onSaveShortcut } from '@/lib/shortcuts';
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { useEditor } from '@/store/editor';
@@ -17,11 +18,15 @@ export function App() {
   const blocks = useEditor((s) => s.blocks);
   const loadDropped = useEditor((s) => s.loadDropped);
   const adopt = useEditor((s) => s.adopt);
+  const save = useEditor((s) => s.save);
   const { t, tn } = useI18n();
   const [dragging, setDragging] = useState(false);
 
   // 설치된 PWA 를 OS 에서 "이 앱으로 열기" 했을 때 파일이 여기로 들어온다.
   useEffect(() => onFileLaunch((f) => void adopt(f)), [adopt]);
+
+  // 프리뷰 밖(툴바·사이드바)에 포커스가 있을 때의 Ctrl+S. 프리뷰 안쪽은 에이전트가 넘긴다.
+  useEffect(() => onSaveShortcut(() => void save()), [save]);
 
   const blocked = blocks.find((b) => b.id === blockedId);
   const NoticeIcon = notice ? IconNotice : IconLocked;

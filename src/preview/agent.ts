@@ -131,6 +131,18 @@ export function previewAgent(): () => void {
   }) as EventListener);
 
   on(document, 'keydown', ((e: KeyboardEvent) => {
+    // Ctrl/⌘+S — 브라우저의 "페이지 저장"을 막고 호스트에 저장을 부탁한다.
+    // iframe 안의 키 이벤트는 호스트 창까지 올라가지 않으므로 여기서 넘겨야 한다.
+    // (호스트에도 같은 판정이 있다. 이 함수는 모듈을 불러올 수 없어 공유가 안 된다, ADR-007)
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+      consume(e);
+      // 조합 중이면 글자가 아직 확정되지 않았다. 저장하지 않고 입력을 끝내게 둔다.
+      if (composing || e.isComposing) return;
+      // 열려 있는 편집을 먼저 확정한다. 안 하면 방금 고친 내용이 빠진 채 저장된다.
+      commit();
+      post({ type: 'save' });
+      return;
+    }
     if (editingId === null) return;
     // Enter 는 편집을 확정하고 닫는다. 블록은 한 덩어리라(대원칙 4) 줄바꿈을
     // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다.

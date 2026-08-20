@@ -186,7 +186,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   save: async () => {
     const { file, source, blocks, patches } = get();
-    if (!file) return;
+    // 고친 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
+    // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
+    if (!file || patches.size === 0) return;
     set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));

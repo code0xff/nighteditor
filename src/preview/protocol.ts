@@ -12,7 +12,9 @@ export type FromPreview =
   | { type: 'select'; id: number | null }
   /** pristine 이면 편집 결과가 원래 내용과 같다 — 호스트는 패치를 지운다 */
   | { type: 'edit'; id: number; html: string; pristine: boolean }
-  | { type: 'blocked'; id: number };
+  | { type: 'blocked'; id: number }
+  /** 프리뷰 안에서 Ctrl+S 를 눌렀다. iframe 의 키 이벤트는 호스트 창에 닿지 않는다 */
+  | { type: 'save' };
 
 /** 호스트 → 프리뷰 */
 export type ToPreview =
