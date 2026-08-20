@@ -169,6 +169,11 @@ src/
 **이유** 본인 아티팩트를 본인이 고치는 도구다. 서버가 생기는 순간 신뢰할 수 없는 HTML을 호스팅하게 되고
 저장형 XSS·오리진 격리·인증이 전부 따라온다. 없애는 편이 싸고 안전하다.
 
+**배포** GitHub Pages(정적 호스팅)에 올린다. HTTPS 라 secure context 조건을 만족하므로
+덮어쓰기 저장이 그대로 동작한다. PWA 로 설치하면 앱 전체가 프리캐시되어 오프라인에서도 돌고,
+manifest 의 `file_handlers` 로 OS 에서 HTML 을 바로 열 수 있다. 이때 `launchQueue` 로
+`FileSystemFileHandle` 이 넘어오므로 대화상자 없이도 덮어쓰기가 된다.
+
 **제약** 원본 덮어쓰기는 Chromium 계열에서만 된다. Firefox·Safari는 다운로드 폴백이라
 "열었던 파일에 그대로 저장"이 안 된다. **Chromium 우선**으로 간다.
 
