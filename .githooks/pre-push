@@ -1,0 +1,9 @@
+#!/bin/sh
+# docs/rules.md §5.3 — CI에서 처음 실패를 발견하는 일이 없게 한다.
+# 클론 후 1회: git config core.hooksPath .githooks
+echo "pre-push: pnpm verify 실행"
+if ! pnpm verify; then
+  echo ""
+  echo "verify 실패 — push 중단. 고치고 다시 시도할 것."
+  exit 1
+fi
