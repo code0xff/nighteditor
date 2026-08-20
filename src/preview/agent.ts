@@ -159,9 +159,10 @@ export function previewAgent(): () => void {
     }
     if (editingId === null) return;
     // Enter 는 편집을 확정하고 닫는다. 블록은 한 덩어리라(대원칙 4) 줄바꿈을
-    // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다.
+    // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다. 줄바꿈은 Shift+Enter 다.
     // 조합 중이라면 IME 확정 키이므로 건드리지 않는다 — 막으면 글자를 완성할 수 없다.
-    if (e.key === 'Enter' && !composing && !e.isComposing) {
+    // (그때 남는 줄바꿈은 아래 beforeinput 이 치운다)
+    if (e.key === 'Enter' && !e.shiftKey && !composing && !e.isComposing) {
       commit();
       consume(e);
       return;
@@ -169,6 +170,17 @@ export function previewAgent(): () => void {
     if (e.key === 'Escape') cancel();
     // 편집 중에는 방향키·스페이스가 아티팩트 네비게이션으로 새지 않게 한다.
     e.stopImmediatePropagation();
+  }) as EventListener);
+
+  // 조합 중의 Enter 가 남기는 줄바꿈을 막는다.
+  // 그 Enter 는 IME 확정 키라 keydown 에서 기본 동작을 막을 수 없다. 막으면 글자가 완성되지
+  // 않는다. 그런데 흘려보내면 브라우저가 확정과 함께 줄바꿈까지 넣어 <p> 안에 <div> 가 생기고,
+  // 고치지도 않은 구조가 패치에 실린다. 그래서 키가 아니라 입력 단계에서 끊는다.
+  // 조합이 아닌 Enter 는 위 keydown 이 이미 소비했으므로 여기까지 오지 않는다.
+  // Shift+Enter 는 insertLineBreak 라 걸리지 않는다 — 블록 안 줄바꿈은 그대로 들어간다.
+  on(document, 'beforeinput', ((e: InputEvent) => {
+    if (editingId === null) return;
+    if (e.inputType === 'insertParagraph') e.preventDefault();
   }) as EventListener);
 
   // 아티팩트의 스와이프 핸들러가 편집 중 발동하지 않게 한다.

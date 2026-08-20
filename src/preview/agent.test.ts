@@ -25,9 +25,16 @@ const clickEvent = (node: Element): MouseEvent => {
 };
 const click = (node: Element) => clickEvent(node);
 
-const keydown = (key: string): KeyboardEvent => {
-  const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+const keydown = (key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
+  const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
   document.dispatchEvent(e);
+  return e;
+};
+
+/** 브라우저가 실제 편집을 반영하기 직전에 보내는 이벤트 */
+const beforeinput = (inputType: string): InputEvent => {
+  const e = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true });
+  (document.activeElement ?? document.body).dispatchEvent(e);
   return e;
 };
 
@@ -228,6 +235,36 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
     expect(e.defaultPrevented).toBe(false);
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
     expect(sent.some((m) => m.type === 'edit')).toBe(false);
+  });
+
+  it('조합 중 Enter 가 남기려는 줄바꿈은 입력 단계에서 막는다', () => {
+    // 브라우저는 조합 확정과 줄바꿈을 함께 처리한다. 키를 막을 수 없으니 입력을 막는다.
+    // 놓치면 <p> 안에 <div> 가 생겨 고치지도 않은 구조가 패치에 실린다.
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    keydown('Enter');
+
+    expect(beforeinput('insertParagraph').defaultPrevented).toBe(true);
+  });
+
+  it('편집 중이 아니면 줄바꿈 입력에 손대지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    expect(beforeinput('insertParagraph').defaultPrevented).toBe(false);
+  });
+
+  it('Shift+Enter 는 편집을 닫지 않고 블록 안에 줄바꿈을 넣는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+
+    const e = keydown('Enter', { shiftKey: true });
+
+    // 기본 동작이 살아 있어야 브라우저가 <br> 을 넣는다.
+    expect(e.defaultPrevented).toBe(false);
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+    expect(sent.some((m) => m.type === 'edit')).toBe(false);
+    expect(beforeinput('insertLineBreak').defaultPrevented).toBe(false);
   });
 
   it('편집 중이 아니면 Enter 를 아티팩트로 넘긴다', () => {
