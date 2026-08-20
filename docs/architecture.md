@@ -25,13 +25,18 @@ src/
     parse.ts            소스 → 블록 목록 + offset 매핑
     blocks.ts           편집 블록 판정 규칙 (spec.md §2)
     markers.ts          data-ne-id 주입 / 제거
+    edits.ts            offset 편집 목록을 내림차순으로 한 번에 적용
+    assets.ts           외부 자원 참조 찾기 · 경로 해석 · 프리뷰 URL 치환
+    zip.ts              zip 중앙 디렉터리 파싱 (해제는 lib/zip.ts)
     patch.ts            패치 목록 → 원본 문자열 스플라이스
     verify.ts           소스-라이브 대조 검사
   preview/              ← iframe 내부에서 실행되는 에이전트 스크립트
     protocol.ts         호스트↔프리뷰 메시지 타입 (타입 전용, 런타임 코드 없음)
     agent.ts            자기완결 함수 하나. 클릭·키·IME·postMessage
   lib/                  ← 브라우저 API 래퍼와 호스트 쪽 헬퍼
-    fs.ts               파일 열기·저장 (File System Access API + 폴백)
+    fs.ts               파일 열기·저장·폴더 읽기 (File System Access API + 폴백)
+    assets.ts           읽은 파일 → blob URL 묶음 (수명 관리 포함)
+    zip.ts              zip 해제 (DecompressionStream)
     icons.ts            아이콘 단일 출처 — 의미 이름 → lucide 그림, 앱 아이콘 경로
     messages.ts         언어팩 — ko/en 사전, 키 타입, 보간. 화면 문구의 유일한 출처
     preview.ts          프리뷰 문서 조립 (마커 + 에이전트 주입)
@@ -187,6 +192,26 @@ manifest 의 `file_handlers` 로 OS 에서 HTML 을 바로 열 수 있다. 이�
 이 전제는 대원칙 5에 묶여 있다 — 서버가 생기면 이 결정부터 뒤집어야 한다.
 
 ---
+
+### ADR-009 · 외부 자원은 프리뷰에서만 blob URL 로 바꿔 붙인다
+
+**결정** 옆 파일을 참조하는 문서는 폴더·zip 으로 자원을 함께 받아 `blob:` URL 을 만들고,
+**프리뷰 문서 안의 상대 경로만** 바꾼다. 원본 문자열과 패치 경로는 그대로다.
+
+**이유** `srcdoc` 프리뷰의 기준 URL 은 이 앱이라 상대 경로가 앱 폴더에서 404 로 끝난다.
+`<base href>` 로는 못 고친다 — 원본은 `file://` 이고 `https://` 페이지는 그것을 읽지 못한다.
+파일 하나를 열면 권한도 그 하나뿐이라, 형제 파일을 보려면 사용자가 폴더를 열어 주거나
+zip 을 통째로 줘야 한다. 곧 iframe 이 아니라 **권한**의 문제이고, 해법도 권한 쪽에 있다.
+
+**제약** 치환은 마커 주입과 **같은 자리**에서 한다. 둘 다 원본 offset 기준이라
+따로 적용하면 앞선 삽입이 뒤쪽 offset 을 밀어 엉뚱한 곳을 자른다. 그래서 편집 목록을
+한데 모아 내림차순으로 한 번에 적용한다 (`core/edits.ts`, INV-4 와 같은 규칙).
+
+blob URL 에는 디렉터리가 없다. 스타일시트를 그대로 붙이면 그 안의 `url(글꼴)` 이
+기준을 잃어 깨지므로, CSS 텍스트의 `url()` 도 그 파일의 위치를 기준으로 다시 푼다.
+
+**결과** 저장본에는 `blob:` 이 한 글자도 들어가지 않는다. 자원을 못 붙인 상태에서도
+편집과 저장은 정확하다 — 화면이 깨져 보이는 것과 diff 의 정확성은 서로 무관하다.
 
 ### ADR-008 · 초기 번들에 파서를 싣지 않는다
 
