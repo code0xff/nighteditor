@@ -1,7 +1,6 @@
 /** Day/night theme toggle button (persists to localStorage via useTheme). */
-import { Moon, Sun } from 'lucide-react';
-
 import { Button } from '@/components/ui/button';
+import { IconThemeDark, IconThemeLight } from '@/lib/icons';
 import { useTheme } from '@/lib/theme';
 
 export function ThemeToggle() {
@@ -14,7 +13,11 @@ export function ThemeToggle() {
       aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
       title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
     >
-      {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      {theme === 'dark' ? (
+        <IconThemeLight className="h-4 w-4" />
+      ) : (
+        <IconThemeDark className="h-4 w-4" />
+      )}
     </Button>
   );
 }

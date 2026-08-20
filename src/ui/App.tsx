@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { onFileLaunch } from '@/lib/fs';
+import { IconDrop, IconLocked, IconNotice } from '@/lib/icons';
 import { cn } from '@/lib/utils';
 import { useEditor } from '@/store/editor';
 import { ChangeList } from './ChangeList';
@@ -20,6 +21,7 @@ export function App() {
   useEffect(() => onFileLaunch(adopt), [adopt]);
 
   const blocked = blocks.find((b) => b.id === blockedId);
+  const NoticeIcon = message ? IconNotice : IconLocked;
 
   return (
     <div
@@ -41,6 +43,7 @@ export function App() {
       {(message ?? blocked) && (
         <div className="px-3 pt-2">
           <Alert>
+            <NoticeIcon className="h-3.5 w-3.5" />
             <AlertDescription>
               {message ?? `이 블록은 편집할 수 없다 — ${blocked?.locked}`}
             </AlertDescription>
@@ -60,6 +63,7 @@ export function App() {
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
+                <IconDrop className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
                 <p className="text-sm font-medium">아티팩트 HTML 을 여기에 놓거나 열기를 누른다</p>
                 <p className="mt-1.5 text-xs text-muted-foreground">
                   글자를 클릭해 고치고, 저장하면 원본에서 고친 부분만 바뀐다

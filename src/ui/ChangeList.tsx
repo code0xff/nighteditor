@@ -1,6 +1,14 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  IconBlocks,
+  IconEditable,
+  IconLocked,
+  IconRevert,
+  IconRevertAll,
+  IconScanning,
+} from '@/lib/icons';
 import { lockSummary, useEditor } from '@/store/editor';
 
 const LOCK_LABEL: Record<string, string> = {
@@ -28,15 +36,29 @@ export function ChangeList() {
       <section>
         <h2 className="mb-2 text-xs font-semibold">블록</h2>
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="secondary">전체 {blocks.length}</Badge>
-          <Badge variant="success">편집 가능 {editable}</Badge>
-          {!scanned && blocks.length > 0 && <Badge variant="info">대조 중…</Badge>}
+          <Badge variant="secondary">
+            <IconBlocks />
+            전체 {blocks.length}
+          </Badge>
+          <Badge variant="success">
+            <IconEditable />
+            편집 가능 {editable}
+          </Badge>
+          {!scanned && blocks.length > 0 && (
+            <Badge variant="info">
+              <IconScanning className="animate-spin" />
+              대조 중…
+            </Badge>
+          )}
         </div>
       </section>
 
       {scanned && (
         <section>
-          <h2 className="mb-2 text-xs font-semibold">잠긴 이유</h2>
+          <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
+            <IconLocked className="h-3 w-3 text-muted-foreground" />
+            잠긴 이유
+          </h2>
           <ul className="space-y-1">
             {lockSummary(blocks).map(({ reason, count }) => (
               <li key={reason} className="flex justify-between text-xs text-muted-foreground">
@@ -58,6 +80,7 @@ export function ChangeList() {
           <h2 className="text-xs font-semibold">변경 {changed.length}</h2>
           {changed.length > 0 && (
             <Button variant="ghost" size="sm" onClick={revertAll}>
+              <IconRevertAll />
               전체 되돌리기
             </Button>
           )}
@@ -78,6 +101,7 @@ export function ChangeList() {
                       #{id} &lt;{block?.tag}&gt;
                     </code>
                     <Button variant="ghost" size="sm" onClick={() => revert(id)}>
+                      <IconRevert />
                       되돌리기
                     </Button>
                   </div>

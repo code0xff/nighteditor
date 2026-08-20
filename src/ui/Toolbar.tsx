@@ -1,10 +1,10 @@
-import { FileUp, Save } from 'lucide-react';
 import { Brand } from '@/components/Brand';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
+import { IconOpen, IconSave } from '@/lib/icons';
 import { titleBlock, useEditor } from '@/store/editor';
 
 export function Toolbar() {
@@ -21,9 +21,10 @@ export function Toolbar() {
 
   return (
     <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur">
-      <Brand name="night" suffix="editor" icon={FileUp} />
+      <Brand name="night" suffix="editor" />
 
       <Button variant="outline" size="sm" onClick={() => void openFile()} disabled={busy}>
+        <IconOpen />
         열기
       </Button>
 
@@ -57,7 +58,7 @@ export function Toolbar() {
         )}
         {file && (
           <Button size="sm" onClick={() => void save()} disabled={busy || patches.size === 0}>
-            <Save className="mr-1.5 h-3.5 w-3.5" />
+            <IconSave />
             저장 {patches.size > 0 && `(${patches.size})`}
           </Button>
         )}

@@ -19,6 +19,7 @@
 ## 모듈 구조
 
 ```
+public/                 ← 파비콘·앱 아이콘·site.webmanifest (빌드 시 dist 루트로 복사)
 src/
   core/                 ← 브라우저 API 비의존. 순수 로직. 테스트 100% 대상
     parse.ts            소스 → 블록 목록 + offset 매핑
@@ -31,6 +32,7 @@ src/
     agent.ts            자기완결 함수 하나. 클릭·키·IME·postMessage
   lib/                  ← 브라우저 API 래퍼와 호스트 쪽 헬퍼
     fs.ts               파일 열기·저장 (File System Access API + 폴백)
+    icons.ts            아이콘 단일 출처 — 의미 이름 → lucide 그림, 앱 아이콘 경로
     preview.ts          프리뷰 문서 조립 (마커 + 에이전트 주입)
   ui/                   ← React 컴포넌트
   store/                ← Zustand
