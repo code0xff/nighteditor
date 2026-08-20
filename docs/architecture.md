@@ -29,6 +29,9 @@ src/
   preview/              ← iframe 내부에서 실행되는 에이전트 스크립트
     protocol.ts         호스트↔프리뷰 메시지 타입 (타입 전용, 런타임 코드 없음)
     agent.ts            자기완결 함수 하나. 클릭·키·IME·postMessage
+  lib/                  ← 브라우저 API 래퍼와 호스트 쪽 헬퍼
+    fs.ts               파일 열기·저장 (File System Access API + 폴백)
+    preview.ts          프리뷰 문서 조립 (마커 + 에이전트 주입)
   ui/                   ← React 컴포넌트
   store/                ← Zustand
 ```
