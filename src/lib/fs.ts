@@ -145,18 +145,37 @@ export function onFileLaunch(handler: (file: OpenedFile) => void): void {
   });
 }
 
+/**
+ * 고른 파일 — 아직 HTML 인지 zip 인지 가리지 않은 상태다.
+ *
+ * 내용을 읽어 무엇인지 판단하는 것은 스토어의 몫이다. 여기서는 파일과 핸들만 건넨다.
+ */
+export interface Picked {
+  name: string;
+  blob: Blob;
+  /** null 이면 덮어쓸 수 없다 (드롭·zip) */
+  handle: FileHandle | null;
+}
+
+export const ACCEPT = '.html,.htm,.zip';
+
 /** 사용자가 취소하면 null 을 돌려준다 */
-export async function openHtmlFile(): Promise<OpenedFile | null> {
+export async function pickFile(): Promise<Picked | null> {
   const show = picker();
-  if (!show) return openViaInput();
+  if (!show) return pickViaInput();
 
   try {
     const [handle] = await show({
-      types: [{ description: 'HTML', accept: { 'text/html': ['.html', '.htm'] } }],
+      types: [
+        {
+          description: 'HTML · zip',
+          accept: { 'text/html': ['.html', '.htm'], 'application/zip': ['.zip'] },
+        },
+      ],
       multiple: false,
     });
     if (!handle) return null;
-    return fromHandle(handle);
+    return { name: handle.name, blob: await handle.getFile(), handle };
   } catch (e) {
     // 사용자가 취소한 경우는 오류가 아니다.
     if (e instanceof DOMException && e.name === 'AbortError') return null;
@@ -165,19 +184,18 @@ export async function openHtmlFile(): Promise<OpenedFile | null> {
 }
 
 /** 드래그&드롭이나 <input type=file> 로 받은 파일 — 핸들이 없어 덮어쓸 수 없다 */
-export async function readDroppedFile(file: File): Promise<OpenedFile> {
-  return { name: file.name, text: await file.text(), handle: null };
+export function droppedFile(file: File): Picked {
+  return { name: file.name, blob: file, handle: null };
 }
 
-function openViaInput(): Promise<OpenedFile | null> {
+function pickViaInput(): Promise<Picked | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.html,.htm,text/html';
+    input.accept = ACCEPT;
     input.onchange = () => {
       const file = input.files?.[0];
-      if (!file) return resolve(null);
-      void readDroppedFile(file).then(resolve);
+      resolve(file ? droppedFile(file) : null);
     };
     // 취소를 처리하지 않으면 프라미스가 영영 안 풀려 busy 가 걸린 채 굳는다.
     input.oncancel = () => resolve(null);

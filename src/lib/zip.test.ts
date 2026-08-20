@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { unzip } from './zip.js';
+import { pickDocument } from '@/core/bundle';
+import { dirOf, parseAssetRefs } from '@/core/assets';
+import { fixtureBundle } from '../__fixtures__/load.js';
+
+const zip = (): Blob => new Blob([fixtureBundle() as BlobPart]);
+
+describe('unzip', () => {
+  it('압축을 풀어 원래 내용을 돌려준다', async () => {
+    const files = await unzip(zip());
+    const html = await files.get('deck/index.html')?.text();
+
+    expect(html).toContain('<link rel="stylesheet" href="css/deck.css">');
+    expect(html).toContain('바깥에 자원을 둔 문서');
+  });
+
+  it('스타일시트에 형식을 붙인다', async () => {
+    // 형식이 없으면 브라우저가 blob 을 스타일시트로 쓰지 않을 수 있다.
+    const files = await unzip(zip());
+
+    expect(files.get('deck/css/deck.css')?.type).toBe('text/css');
+    expect(files.get('deck/img/logo.svg')?.type).toBe('image/svg+xml');
+    expect(files.get('deck/fonts/mono.woff2')?.type).toBe('font/woff2');
+  });
+
+  it('푼 묶음에서 열 문서를 고르고 그 자리를 기준으로 자원을 찾는다', async () => {
+    const files = await unzip(zip());
+    const path = pickDocument(files.keys());
+    expect(path).toBe('deck/index.html');
+
+    const source = (await files.get(path ?? '')?.text()) ?? '';
+    const refs = parseAssetRefs(source, dirOf(path ?? ''));
+
+    // 문서가 deck/ 안에 있으므로 참조도 그 자리에서 풀려야 zip 안의 경로와 맞는다.
+    expect(refs.map((r) => r.path)).toEqual([
+      'deck/css/deck.css',
+      'deck/img/logo.svg',
+      'deck/js/deck.js',
+    ]);
+    for (const ref of refs) expect(files.has(ref.path)).toBe(true);
+  });
+
+  it('바깥 링크는 자원으로 세지 않는다', async () => {
+    const files = await unzip(zip());
+    const source = (await files.get('deck/index.html')?.text()) ?? '';
+
+    expect(source).toContain('href="https://example.com/"');
+    expect(parseAssetRefs(source, 'deck').some((r) => r.url.startsWith('http'))).toBe(false);
+  });
+});

@@ -15,3 +15,21 @@ import { join } from 'node:path';
 export function fixtureSource(): string {
   return readFileSync(join(process.cwd(), 'src/__fixtures__/artifact.html'), 'utf8');
 }
+
+/**
+ * 여러 파일로 흩어진 문서를 담은 **진짜 zip**.
+ *
+ * 손으로 조립한 바이트가 아니라 `zip` 이 만든 것이다 — 직접 만든 헤더는 내 오해까지
+ * 그대로 베껴 담아서, 파서가 맞는지 틀리는지를 가리지 못한다.
+ *
+ * ```
+ * deck/index.html   css/deck.css, img/logo.svg, js/deck.js 를 참조
+ * deck/css/deck.css url(../fonts/mono.woff2) — 상위로 올라가는 경로
+ * __MACOSX/         맥에서 압축하면 딸려오는 것
+ * ```
+ *
+ * 다시 만들려면: `cd <폴더> && zip -q -r -X bundle.zip deck __MACOSX`
+ */
+export function fixtureBundle(): Uint8Array {
+  return new Uint8Array(readFileSync(join(process.cwd(), 'src/__fixtures__/bundle.zip')));
+}

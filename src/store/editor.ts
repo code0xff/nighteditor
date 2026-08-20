@@ -6,11 +6,12 @@ import { patchNotice, type Notice } from '@/lib/messages';
 import {
   canPickFolder,
   downloadFile,
-  openHtmlFile,
+  droppedFile,
+  pickFile,
   pickFolder,
-  readDroppedFile,
   saveFile,
   type OpenedFile,
+  type Picked,
 } from '@/lib/fs';
 import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/assets';
 import type { AssetRef } from '@/core/assets';
@@ -119,6 +120,7 @@ async function replace(
 
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
+  if (e instanceof ZipEmptyError) return { key: 'notice.zipNoDocument' };
   return e instanceof Error && e.message
     ? { key: 'notice.openFailedDetail', params: { detail: e.message } }
     : { key: 'notice.openFailed' };
@@ -161,6 +163,45 @@ async function load(
   };
 }
 
+/**
+ * 고른 파일이 zip 이면 풀어서 그 안의 문서를 연다 (spec §5.1).
+ *
+ * zip 안의 HTML 에는 핸들이 없다 — 압축을 풀어 봐야 메모리 안의 바이트라
+ * 되쓸 자리가 없다. 그래서 저장은 사본 내려받기로 간다.
+ */
+async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
+  if (!/\.zip$/i.test(picked.name)) {
+    const file: OpenedFile = {
+      name: picked.name,
+      text: await picked.blob.text(),
+      handle: picked.handle,
+    };
+    return load(file);
+  }
+
+  const [{ unzip }, { documentCandidates }] = await Promise.all([
+    import('@/lib/zip'),
+    import('@/core/bundle'),
+  ]);
+  const files = await unzip(picked.blob);
+  const candidates = documentCandidates(files.keys());
+  const path = candidates[0];
+  const entry = path ? files.get(path) : undefined;
+  if (!path || !entry) throw new ZipEmptyError();
+
+  const next = await load(
+    { name: path.split('/').pop() ?? path, text: await entry.text(), handle: null, path },
+    files
+  );
+  // 후보가 여럿이면 어느 것을 열었는지 말한다. 조용히 하나 고르면 나머지는 없는 셈이 된다.
+  return candidates.length > 1
+    ? { ...next, notice: { key: 'notice.zipPicked', params: { path, count: candidates.length } } }
+    : next;
+}
+
+/** zip 은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
+class ZipEmptyError extends Error {}
+
 export const useEditor = create<EditorState>((set, get) => ({
   file: null,
   source: '',
@@ -181,8 +222,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   openFile: async () => {
     set({ busy: true, notice: null });
     try {
-      const file = await openHtmlFile();
-      if (file) set(await replace(get, load(file)));
+      const picked = await pickFile();
+      if (picked) set(await replace(get, openPicked(picked)));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       set({ notice: openFailedNotice(e) });
@@ -207,7 +248,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   loadDropped: async (file) => {
     set({ busy: true, notice: null });
     try {
-      set(await replace(get, load(await readDroppedFile(file))));
+      set(await replace(get, openPicked(droppedFile(file))));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
       set({ notice: openFailedNotice(e) });

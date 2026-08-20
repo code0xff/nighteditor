@@ -25,7 +25,7 @@ export function isLocale(value: unknown): value is Locale {
 }
 
 const ko = {
-  'app.emptyTitle': '한 파일로 된 HTML 을 여기에 놓거나 열기를 누른다',
+  'app.emptyTitle': 'HTML 이나 zip 을 여기에 놓거나 열기를 누른다',
   'app.emptyHint': '글자를 클릭해 고치고, 저장하면 원본에서 고친 부분만 바뀐다',
   'app.blocked': '이 블록은 편집할 수 없다 — {reason}',
 
@@ -71,6 +71,8 @@ const ko = {
   'notice.assetsNotFound': '이 폴더에서 참조된 파일을 찾지 못했다',
   'notice.folderTruncated': '폴더가 너무 커서 {count}개까지만 읽었다',
   'notice.folderUnsupported': '이 브라우저는 폴더 열기를 지원하지 않는다',
+  'notice.zipPicked': 'zip 안의 문서 {count}개 중 {path} 를 열었다',
+  'notice.zipNoDocument': 'zip 안에 HTML 문서가 없다',
 
   'assets.missing':
     '외부 파일 {count}개를 불러오지 못했다 — 화면만 다르게 보이고 편집·저장은 정확하다',
@@ -93,7 +95,7 @@ export type MessageKey = keyof typeof ko;
 export const MESSAGE_KEYS = Object.keys(ko) as MessageKey[];
 
 const en: Record<MessageKey, string> = {
-  'app.emptyTitle': 'Drop a single-file HTML here, or click Open',
+  'app.emptyTitle': 'Drop an HTML or zip here, or click Open',
   'app.emptyHint': 'Click text to fix it — saving changes only what you edited',
   'app.blocked': "This block can't be edited — {reason}",
 
@@ -139,6 +141,8 @@ const en: Record<MessageKey, string> = {
   'notice.assetsNotFound': "Couldn't find the referenced files in that folder",
   'notice.folderTruncated': 'The folder is too large — read only the first {count} files',
   'notice.folderUnsupported': "This browser can't open folders",
+  'notice.zipPicked': 'Opened {path} — {count} documents in the zip',
+  'notice.zipNoDocument': 'No HTML document inside the zip',
 
   'assets.missing':
     "Couldn't load {count} external files — only the preview differs; editing and saving are exact",
