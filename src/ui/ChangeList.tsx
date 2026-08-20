@@ -10,8 +10,14 @@ import {
   IconScanning,
 } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
+import { cn } from '@/lib/utils';
 import { lockSummary, useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
+
+/** 편집 결과는 innerHTML 이다. 목록에는 태그를 걷어낸 글자만 보여준다 */
+function plainText(html: string | undefined): string {
+  return (html ?? '').replace(/<[^>]*>/g, '');
+}
 
 /** 잠금 사유를 사람 말로 — 못 고치는 이유는 반드시 보인다 (대원칙 3) */
 export function ChangeList() {
@@ -20,6 +26,7 @@ export function ChangeList() {
   const revert = useEditor((s) => s.revert);
   const revertAll = useEditor((s) => s.revertAll);
   const scanned = useEditor((s) => s.scanned);
+  const selectedId = useEditor((s) => s.selectedId);
   const { t, tn } = useI18n();
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
@@ -90,7 +97,14 @@ export function ChangeList() {
             {changed.map((id) => {
               const block = byId.get(id);
               return (
-                <li key={id} className="rounded-md border border-border bg-card p-2">
+                <li
+                  key={id}
+                  className={cn(
+                    'rounded-md border border-border bg-card p-2',
+                    // 프리뷰에서 고르고 있는 블록을 목록에서도 짚어준다.
+                    id === selectedId && 'border-primary'
+                  )}
+                >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <code className="font-mono text-[10px] text-muted-foreground">
                       #{id} &lt;{block?.tag}&gt;
@@ -100,7 +114,11 @@ export function ChangeList() {
                       {t('changes.revert')}
                     </Button>
                   </div>
-                  <p className="line-clamp-2 text-xs">{patches.get(id)?.replace(/<[^>]*>/g, '')}</p>
+                  {/* 무엇이 무엇으로 바뀌었는지 보여준다 — 새 값만 보면 확인이 안 된다 (spec §4) */}
+                  <p className="line-clamp-2 text-xs text-muted-foreground line-through">
+                    {block?.sourceText}
+                  </p>
+                  <p className="line-clamp-2 text-xs">{plainText(patches.get(id))}</p>
                 </li>
               );
             })}

@@ -1,4 +1,4 @@
-import { injectAgentScript, injectMarkers } from '@/core/markers';
+import { injectAgentScript, injectEditorStyle, injectMarkers } from '@/core/markers';
 import { previewAgent } from '@/preview/agent';
 import type { Block } from '@/core/types';
 
@@ -9,5 +9,8 @@ import type { Block } from '@/core/types';
  * 일어나므로 호스트와 프리뷰는 여전히 별개 실행 컨텍스트이고, 통신은 postMessage 뿐이다.
  */
 export function buildPreviewDocument(source: string, blocks: readonly Block[]): string {
-  return injectAgentScript(injectMarkers(source, blocks), previewAgent.toString());
+  return injectAgentScript(
+    injectEditorStyle(injectMarkers(source, blocks)),
+    previewAgent.toString()
+  );
 }

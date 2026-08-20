@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewAgent } from './agent.js';
-import { MARKER_ATTR } from '../core/markers.js';
+import { LOCKED_ATTR, MARKER_ATTR } from '../core/markers.js';
 
 /** 에이전트가 parent 로 보낸 메시지를 모은다 */
 let sent: Record<string, unknown>[] = [];
@@ -239,6 +239,32 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
 
     expect(artifact).toHaveBeenCalled();
     expect(e.defaultPrevented).toBe(false);
+  });
+});
+
+describe('previewAgent · 잠금 표식', () => {
+  it('호스트가 알려준 잠긴 블록에 표식을 붙인다 — 스타일이 이걸 보고 표시한다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p><p ${MARKER_ATTR}="1">코드</p>`);
+
+    fromHost({ type: 'locked', ids: [1] });
+
+    expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
+    expect(el(1)?.hasAttribute(LOCKED_ATTR)).toBe(true);
+  });
+
+  it('목록이 바뀌면 이전 표식을 지운다 — 풀린 블록이 잠긴 척하면 안 된다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p><p ${MARKER_ATTR}="1">코드</p>`);
+
+    fromHost({ type: 'locked', ids: [0, 1] });
+    fromHost({ type: 'locked', ids: [1] });
+
+    expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
+    expect(el(1)?.hasAttribute(LOCKED_ATTR)).toBe(true);
+  });
+
+  it('core 와 같은 잠금 표식 이름을 쓴다', () => {
+    // 에이전트는 모듈을 불러올 수 없어 상수를 다시 적는다. 어긋나면 여기서 잡힌다.
+    expect(previewAgent.toString()).toContain(LOCKED_ATTR);
   });
 });
 

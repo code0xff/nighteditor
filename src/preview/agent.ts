@@ -10,6 +10,7 @@
  */
 export function previewAgent(): () => void {
   const MARKER = 'data-ne-id';
+  const LOCKED = 'data-ne-locked';
 
   // 떼어낼 수 있어야 한다. 파일을 바꿔 열 때 이전 에이전트가 남아 있으면
   // 옛 상태로 이벤트를 가로채 새 문서의 편집을 방해한다.
@@ -196,6 +197,12 @@ export function previewAgent(): () => void {
     if (msg.type === 'locked' && msg.ids) {
       locked.clear();
       for (const id of msg.ids) locked.add(id);
+      // 잠금 표식을 DOM 에도 붙인다. 주입된 스타일이 이걸 보고 커서와 테두리를 바꾼다.
+      // 매번 전체를 다시 칠한다 — 이전 목록이 남으면 풀린 블록이 잠긴 척한다.
+      for (const el of document.querySelectorAll('[' + MARKER + ']')) {
+        if (locked.has(Number(el.getAttribute(MARKER)))) el.setAttribute(LOCKED, '');
+        else el.removeAttribute(LOCKED);
+      }
     } else if (msg.type === 'revert' && typeof msg.id === 'number') {
       const el = elementFor(msg.id);
       if (el) el.innerHTML = msg.html ?? '';

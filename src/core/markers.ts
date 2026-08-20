@@ -3,6 +3,9 @@ import type { Block } from './types.js';
 /** 프리뷰에서 DOM 노드를 원본 블록으로 되짚기 위한 표식 (ADR-003) */
 export const MARKER_ATTR = 'data-ne-id';
 
+/** 잠긴 블록에 붙는 표식. 에이전트가 대조 결과를 받은 뒤 붙인다 */
+export const LOCKED_ATTR = 'data-ne-locked';
+
 export class MarkerError extends Error {}
 
 /**
@@ -49,4 +52,34 @@ export function injectAgentScript(html: string, agentSource: string): string {
 
   const at = anchor.index + anchor[0].length;
   return html.slice(0, at) + script + html.slice(at);
+}
+
+/**
+ * 편집 가능 여부를 화면에 보여주는 스타일을 주입한다 (spec §4).
+ *
+ * 무엇을 고칠 수 있고 무엇이 잠겼는지 보이지 않으면 사용자는 클릭해 보며 추측해야 한다.
+ * 못 고치는 것은 못 고친다고 **보여준다** (대원칙 3).
+ *
+ * 아티팩트의 레이아웃을 흔들지 않는 것이 조건이다.
+ * - `outline` 만 쓴다. `border` 는 박스 크기를 바꿔 문서가 밀린다
+ * - 색·글꼴·간격은 건드리지 않는다
+ * - 아티팩트 CSS 가 이겨 표시가 사라지면 안 되므로 이 몇 줄만 `!important` 다
+ */
+export function injectEditorStyle(html: string): string {
+  const editable = `[${MARKER_ATTR}]:not([${LOCKED_ATTR}])`;
+  const style =
+    '<style>' +
+    `${editable}{cursor:text}` +
+    `${editable}:hover{outline:2px solid rgba(34,197,94,.9)!important;outline-offset:2px!important}` +
+    `[${MARKER_ATTR}][contenteditable="true"]{outline:2px solid rgb(34,197,94)!important;` +
+    'outline-offset:2px!important;background:rgba(34,197,94,.08)!important}' +
+    `[${LOCKED_ATTR}]{cursor:not-allowed}` +
+    `[${LOCKED_ATTR}]:hover{outline:2px dashed rgba(148,163,184,.9)!important;outline-offset:2px!important}` +
+    '</style>';
+
+  const anchor = /<head[^>]*>/i.exec(html) ?? /<html[^>]*>/i.exec(html);
+  if (!anchor) return style + html;
+
+  const at = anchor.index + anchor[0].length;
+  return html.slice(0, at) + style + html.slice(at);
 }

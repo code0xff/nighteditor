@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
-import { injectAgentScript, injectMarkers, MARKER_ATTR, MarkerError } from './markers.js';
+import {
+  injectAgentScript,
+  injectEditorStyle,
+  injectMarkers,
+  LOCKED_ATTR,
+  MARKER_ATTR,
+  MarkerError,
+} from './markers.js';
 import { fixtureSource } from '../__fixtures__/load.js';
 
 const source = fixtureSource();
@@ -89,5 +96,45 @@ describe('injectAgentScript (ADR-007)', () => {
     for (const b of blocks) {
       expect(source.slice(b.innerStart, b.innerEnd)).toBe(b.sourceInner);
     }
+  });
+});
+
+describe('injectEditorStyle', () => {
+  const styled = injectEditorStyle(source);
+
+  it('<head> 맨 앞에 한 덩어리만 넣는다 — 픽스처에도 <style> 이 있다', () => {
+    const head = /<head[^>]*>/i.exec(source);
+    expect(styled.indexOf('<style>')).toBe((head?.index ?? 0) + (head?.[0].length ?? 0));
+    // 주입한 규칙은 딱 한 벌이어야 한다.
+    expect(styled.match(new RegExp(`\\[${MARKER_ATTR}\\]:not`, 'g'))).toHaveLength(2);
+  });
+
+  it('마커와 잠금 표식을 선택자로 쓴다 — 이름이 어긋나면 표시가 안 된다', () => {
+    const style = /<style>(.*?)<\/style>/s.exec(styled)?.[1] ?? '';
+    expect(style).toContain(`[${MARKER_ATTR}]`);
+    expect(style).toContain(`[${LOCKED_ATTR}]`);
+  });
+
+  it('잠긴 블록은 편집 가능 표시에서 빠진다', () => {
+    const style = /<style>(.*?)<\/style>/s.exec(styled)?.[1] ?? '';
+    expect(style).toContain(`[${MARKER_ATTR}]:not([${LOCKED_ATTR}]):hover`);
+  });
+
+  it('레이아웃을 흔드는 속성을 쓰지 않는다 — 문서가 밀리면 안 된다', () => {
+    const style = /<style>(.*?)<\/style>/s.exec(styled)?.[1] ?? '';
+    for (const forbidden of ['border', 'margin', 'padding', 'font', 'display', 'position']) {
+      expect(style, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it('head 가 없으면 문서 앞에 붙인다', () => {
+    expect(injectEditorStyle('<p>본문</p>').startsWith('<style>')).toBe(true);
+  });
+
+  it('원본 문자열의 블록 offset 을 건드리지 않는다 (INV-3)', () => {
+    // 주입은 프리뷰 전용이다. 저장 경로는 언제나 원본에서 출발한다.
+    const after = parseBlocks(injectEditorStyle(injectMarkers(source, blocks)));
+    expect(after.map((b) => b.sourceText)).toEqual(blocks.map((b) => b.sourceText));
+    expect(source).toBe(fixtureSource());
   });
 });
