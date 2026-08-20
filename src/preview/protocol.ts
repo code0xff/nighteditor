@@ -10,7 +10,8 @@
 export type FromPreview =
   | { type: 'ready'; blocks: { id: number; text: string }[] }
   | { type: 'select'; id: number | null }
-  | { type: 'edit'; id: number; html: string }
+  /** pristine 이면 편집 결과가 원래 내용과 같다 — 호스트는 패치를 지운다 */
+  | { type: 'edit'; id: number; html: string; pristine: boolean }
   | { type: 'blocked'; id: number };
 
 /** 호스트 → 프리뷰 */

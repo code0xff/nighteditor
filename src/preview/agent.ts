@@ -23,7 +23,11 @@ export function previewAgent(): () => void {
   };
 
   let editingId: number | null = null;
+  /** 편집을 열 때의 innerHTML. Escape 복원과 pristine 판정에 쓴다. */
+  let snapshot: string | null = null;
   let composing = false;
+  /** 조합 중이라 미뤄둔 확정이 있는지 */
+  let pendingCommit = false;
   const locked = new Set<number>();
 
   const elementFor = (id: number): HTMLElement | null =>
@@ -40,13 +44,42 @@ export function previewAgent(): () => void {
 
   /** 편집을 확정하고 결과를 호스트로 보낸다 */
   const commit = (): void => {
-    if (editingId === null || composing) return;
+    if (editingId === null) return;
+    // 조합 중에는 확정하지 않는다. 대신 미뤄뒀다가 compositionend 에서 마저 한다.
+    // 그냥 건너뛰면 조합 중 포커스가 빠졌을 때 편집이 통째로 사라진다.
+    if (composing) {
+      pendingCommit = true;
+      return;
+    }
     const el = elementFor(editingId);
     if (el) {
       el.removeAttribute('contenteditable');
-      post({ type: 'edit', id: editingId, html: el.innerHTML });
+      // 브라우저가 직렬화한 원본과 비교한다. 소스 문자열과 비교하면
+      // <br/> → <br> 같은 정규화 차이 때문에 고치지도 않은 블록에 패치가 생긴다.
+      post({
+        type: 'edit',
+        id: editingId,
+        html: el.innerHTML,
+        pristine: el.innerHTML === snapshot,
+      });
     }
     editingId = null;
+    snapshot = null;
+    pendingCommit = false;
+    post({ type: 'select', id: null });
+  };
+
+  /** 편집을 버리고 열기 전 내용으로 되돌린다 */
+  const cancel = (): void => {
+    if (editingId === null) return;
+    const el = elementFor(editingId);
+    if (el) {
+      el.removeAttribute('contenteditable');
+      if (snapshot !== null) el.innerHTML = snapshot;
+    }
+    editingId = null;
+    snapshot = null;
+    pendingCommit = false;
     post({ type: 'select', id: null });
   };
 
@@ -58,7 +91,11 @@ export function previewAgent(): () => void {
     }
     if (editingId === id) return;
     commit();
+    // 조합 중이라 확정이 미뤄졌다면 이전 편집이 아직 열려 있다.
+    // 여기서 새로 열면 이전 블록이 contenteditable 인 채로 남는다.
+    if (editingId !== null) return;
     editingId = id;
+    snapshot = el.innerHTML;
     el.setAttribute('contenteditable', 'true');
     el.focus();
     post({ type: 'select', id });
@@ -87,14 +124,7 @@ export function previewAgent(): () => void {
 
   on(document, 'keydown', ((e: KeyboardEvent) => {
     if (editingId === null) return;
-    if (e.key === 'Escape') {
-      const el = elementFor(editingId);
-      el?.removeAttribute('contenteditable');
-      const id = editingId;
-      editingId = null;
-      post({ type: 'select', id: null });
-      post({ type: 'blocked', id });
-    }
+    if (e.key === 'Escape') cancel();
     // 편집 중에는 방향키·스페이스가 아티팩트 네비게이션으로 새지 않게 한다.
     e.stopImmediatePropagation();
   }) as EventListener);
@@ -111,11 +141,14 @@ export function previewAgent(): () => void {
   });
   on(document, 'compositionend', () => {
     composing = false;
+    // 조합 중에 포커스가 빠져 미뤄둔 확정이 있으면 지금 마저 한다.
+    if (pendingCommit) commit();
   });
 
   on(document, 'focusout', () => {
-    // 조합이 끝나기 전에 확정하면 마지막 글자를 잃는다.
-    if (!composing) commit();
+    // commit 이 조합 여부를 직접 처리한다. 여기서 걸러내면 pendingCommit 이
+    // 세팅되지 않아 조합 중 포커스가 빠졌을 때 편집이 통째로 사라진다.
+    commit();
   });
 
   // 붙여넣기는 서식을 버리고 평문만 넣는다.
@@ -128,7 +161,10 @@ export function previewAgent(): () => void {
 
   // --- 호스트와의 통신 --------------------------------------------------
   on(window, 'message', ((e: MessageEvent) => {
-    const msg = e.data as { type?: string; ids?: number[]; id?: number; html?: string };
+    // 호스트가 보낸 것만 받는다. 아무나 locked 를 비우면 INV-5 의 두 번째 방어선이 뚫린다.
+    if (e.source !== parent) return;
+    const msg = e.data as { type?: string; ids?: number[]; id?: number; html?: string } | null;
+    if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'locked' && msg.ids) {
       locked.clear();
       for (const id of msg.ids) locked.add(id);

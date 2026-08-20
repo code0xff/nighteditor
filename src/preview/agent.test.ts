@@ -19,6 +19,10 @@ function mount(html: string): void {
 const el = (id: number) => document.querySelector<HTMLElement>(`[${MARKER_ATTR}="${id}"]`);
 const click = (node: Element) => node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
+/** 에이전트는 호스트가 보낸 메시지만 받는다 */
+const fromHost = (data: unknown) =>
+  window.dispatchEvent(new MessageEvent('message', { data, source: window.parent }));
+
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
@@ -143,13 +147,18 @@ describe('previewAgent · 편집 흐름', () => {
     el(0)!.innerHTML = '고친 <b>본문</b>';
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
 
-    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '고친 <b>본문</b>' });
+    expect(sent).toContainEqual({
+      type: 'edit',
+      id: 0,
+      html: '고친 <b>본문</b>',
+      pristine: false,
+    });
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
   it('잠긴 블록은 편집을 열지 않고 blocked 를 보낸다 (INV-5)', () => {
     mount(`<p ${MARKER_ATTR}="3">코드</p>`);
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'locked', ids: [3] } }));
+    fromHost({ type: 'locked', ids: [3] });
 
     click(el(3)!);
 
@@ -167,9 +176,7 @@ describe('previewAgent · 편집 흐름', () => {
 
   it('revert 메시지로 원래 내용을 되돌린다', () => {
     mount(`<p ${MARKER_ATTR}="0">고쳐진 값</p>`);
-    window.dispatchEvent(
-      new MessageEvent('message', { data: { type: 'revert', id: 0, html: '원래 값' } })
-    );
+    fromHost({ type: 'revert', id: 0, html: '원래 값' });
     expect(el(0)?.innerHTML).toBe('원래 값');
   });
 });
@@ -192,7 +199,7 @@ describe('previewAgent · IME (한글 조합)', () => {
     document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
 
-    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '한글' });
+    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '한글', pristine: false });
   });
 });
 
@@ -223,5 +230,60 @@ describe('previewAgent · 렌더 후 대조 (ADR-005)', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(sent).toContainEqual({ type: 'ready', blocks: [{ id: 9, text: '원본' }] });
+  });
+});
+
+describe('previewAgent · 리뷰 회귀', () => {
+  it('Escape 는 내용을 열기 전으로 되돌린다', () => {
+    mount(`<p ${MARKER_ATTR}="0">원래 내용</p>`);
+    click(el(0)!);
+    el(0)!.innerHTML = '고친 내용';
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    expect(el(0)?.innerHTML).toBe('원래 내용');
+    // 잠긴 것도 아닌데 blocked 를 보내면 호스트가 "편집 불가 — null" 을 띄운다.
+    expect(sent.filter((m) => m.type === 'blocked')).toHaveLength(0);
+  });
+
+  it('고치지 않고 빠져나오면 pristine 으로 알린다', () => {
+    // 소스 문자열과 브라우저 직렬화는 다를 수 있다(<br/> → <br>).
+    // 호스트가 소스와 비교하면 만지지도 않은 블록에 패치가 생긴다.
+    mount(`<p ${MARKER_ATTR}="0">건드리지 않음</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+
+    const edit = sent.find((m) => m.type === 'edit');
+    expect(edit?.pristine).toBe(true);
+  });
+
+  it('조합 중 포커스가 빠져도 편집을 잃지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    el(0)!.innerHTML = '한글 입력';
+    // 조합이 열린 채로 iframe 밖(호스트 툴바)을 클릭한 상황
+    document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    expect(sent.filter((m) => m.type === 'edit')).toHaveLength(0);
+
+    document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+
+    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '한글 입력', pristine: false });
+  });
+
+  it('호스트가 아닌 곳에서 온 메시지는 무시한다', () => {
+    mount(`<p ${MARKER_ATTR}="3">본문</p>`);
+    fromHost({ type: 'locked', ids: [3] });
+    // 제3자가 잠금을 비우려 시도한다
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'locked', ids: [] } }));
+
+    click(el(3)!);
+
+    expect(sent).toContainEqual({ type: 'blocked', id: 3 });
+    expect(el(3)?.hasAttribute('contenteditable')).toBe(false);
+  });
+
+  it('null 메시지에 죽지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    expect(() => fromHost(null)).not.toThrow();
   });
 });
