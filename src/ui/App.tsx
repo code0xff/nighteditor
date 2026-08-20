@@ -19,6 +19,7 @@ export function App() {
   const blockedId = useEditor((s) => s.blockedId);
   const blocks = useEditor((s) => s.blocks);
   const loadDropped = useEditor((s) => s.loadDropped);
+  const loadDroppedFolder = useEditor((s) => s.loadDroppedFolder);
   const adopt = useEditor((s) => s.adopt);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
@@ -62,10 +63,14 @@ export function App() {
         e.preventDefault();
         setDragging(false);
         const dropped = e.dataTransfer.files[0];
-        if (!dropped) return;
+        const { items } = e.dataTransfer;
+        if (!dropped && items.length === 0) return;
         // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
         if (patches.size > 0 && !confirm(t('confirm.discard', { count: patches.size }))) return;
-        void loadDropped(dropped);
+        // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
+        void loadDroppedFolder(items).then((wasFolder) => {
+          if (!wasFolder && dropped) void loadDropped(dropped);
+        });
       }}
     >
       <Toolbar />

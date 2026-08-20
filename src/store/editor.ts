@@ -8,6 +8,7 @@ import {
   downloadFile,
   droppedFile,
   pickFile,
+  readDroppedFolder,
   pickFolder,
   saveFile,
   type OpenedFile,
@@ -48,6 +49,8 @@ export interface EditorState {
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
+  /** 드롭한 것에 폴더가 있으면 그 안의 문서를 연다. 폴더가 없었으면 false */
+  loadDroppedFolder: (items: DataTransferItemList) => Promise<boolean>;
   adopt: (file: OpenedFile) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
@@ -120,7 +123,7 @@ async function replace(
 
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
-  if (e instanceof ZipEmptyError) return { key: 'notice.zipNoDocument' };
+  if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
   return e instanceof Error && e.message
     ? { key: 'notice.openFailedDetail', params: { detail: e.message } }
     : { key: 'notice.openFailed' };
@@ -170,24 +173,30 @@ async function load(
  * 되쓸 자리가 없다. 그래서 저장은 사본 내려받기로 간다.
  */
 async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
-  if (!/\.zip$/i.test(picked.name)) {
-    const file: OpenedFile = {
-      name: picked.name,
-      text: await picked.blob.text(),
-      handle: picked.handle,
-    };
-    return load(file);
+  if (/\.zip$/i.test(picked.name)) {
+    const { unzip } = await import('@/lib/zip');
+    return openBundle(await unzip(picked.blob));
   }
 
-  const [{ unzip }, { documentCandidates }] = await Promise.all([
-    import('@/lib/zip'),
-    import('@/core/bundle'),
-  ]);
-  const files = await unzip(picked.blob);
+  const file: OpenedFile = {
+    name: picked.name,
+    text: await picked.blob.text(),
+    handle: picked.handle,
+  };
+  return load(file);
+}
+
+/**
+ * 여러 파일을 한꺼번에 받았을 때(폴더·zip) 그중 문서 하나를 연다 (spec §5.1).
+ *
+ * 묶음으로 온 문서에는 핸들이 없다 — 되쓸 자리가 없어 저장은 사본 내려받기로 간다.
+ */
+async function openBundle(files: ReadonlyMap<string, Blob>): Promise<Partial<EditorState>> {
+  const { documentCandidates } = await import('@/core/bundle');
   const candidates = documentCandidates(files.keys());
   const path = candidates[0];
   const entry = path ? files.get(path) : undefined;
-  if (!path || !entry) throw new ZipEmptyError();
+  if (!path || !entry) throw new BundleEmptyError();
 
   const next = await load(
     { name: path.split('/').pop() ?? path, text: await entry.text(), handle: null, path },
@@ -195,12 +204,15 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
   );
   // 후보가 여럿이면 어느 것을 열었는지 말한다. 조용히 하나 고르면 나머지는 없는 셈이 된다.
   return candidates.length > 1
-    ? { ...next, notice: { key: 'notice.zipPicked', params: { path, count: candidates.length } } }
+    ? {
+        ...next,
+        notice: { key: 'notice.bundlePicked', params: { path, count: candidates.length } },
+      }
     : next;
 }
 
-/** zip 은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
-class ZipEmptyError extends Error {}
+/** 묶음은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
+class BundleEmptyError extends Error {}
 
 export const useEditor = create<EditorState>((set, get) => ({
   file: null,
@@ -240,6 +252,26 @@ export const useEditor = create<EditorState>((set, get) => ({
       set(await replace(get, load(file)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  // 폴더를 놓으면 그 안의 문서를 연다. 옛 드롭 API 는 쓰기 권한을 주지 않으므로
+  // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
+  loadDroppedFolder: async (items) => {
+    set({ busy: true, notice: null });
+    try {
+      const read = await readDroppedFolder(items);
+      if (!read) return false;
+      set(await replace(get, openBundle(read.files)));
+      if (read.truncated) {
+        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+      }
+      return true;
+    } catch (e) {
+      set({ notice: openFailedNotice(e) });
+      return true;
     } finally {
       set({ busy: false });
     }

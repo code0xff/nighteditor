@@ -188,6 +188,66 @@ export function droppedFile(file: File): Picked {
   return { name: file.name, blob: file, handle: null };
 }
 
+/**
+ * 드롭한 것 중 **폴더**를 읽는다. 폴더가 없으면 null (그때는 파일로 처리한다).
+ *
+ * 드롭은 `showDirectoryPicker` 와 다른 옛 API 로만 폴더를 준다. 쓰기 권한은 없어서
+ * 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
+ */
+export async function readDroppedFolder(items: DataTransferItemList): Promise<FolderRead | null> {
+  const roots: FileSystemDirectoryEntry[] = [];
+  // items 는 이벤트가 끝나면 비므로 지금 다 꺼내 둔다.
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry?.();
+    if (entry?.isDirectory) roots.push(entry as FileSystemDirectoryEntry);
+  }
+  if (roots.length === 0) return null;
+
+  const read: Walk = { files: new Map(), truncated: false, bytes: 0 };
+  for (const root of roots) await walkEntry(root, root.name, read);
+  return { files: read.files, truncated: read.truncated };
+}
+
+/** 옛 API 는 콜백뿐이다. 한 번에 다 주지 않으므로 빈 배열이 올 때까지 다시 읽는다 */
+function readEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+
+function fileOf(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Walk): Promise<void> {
+  const depth = prefix.split('/').length;
+  const reader = dir.createReader();
+
+  for (;;) {
+    const batch = await readEntries(reader);
+    if (batch.length === 0) return;
+
+    for (const entry of batch) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if (into.files.size >= FOLDER_LIMITS.files || into.bytes >= FOLDER_LIMITS.bytes) {
+        into.truncated = true;
+        return;
+      }
+
+      const path = `${prefix}/${entry.name}`;
+      if (entry.isDirectory) {
+        if (depth + 1 >= FOLDER_LIMITS.depth) {
+          into.truncated = true;
+          continue;
+        }
+        await walkEntry(entry as FileSystemDirectoryEntry, path, into);
+        continue;
+      }
+      const file = await fileOf(entry as FileSystemFileEntry);
+      into.bytes += file.size;
+      into.files.set(path, file);
+    }
+  }
+}
+
 function pickViaInput(): Promise<Picked | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
