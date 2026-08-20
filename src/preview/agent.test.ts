@@ -40,6 +40,23 @@ describe('previewAgent · 자기완결 제약 (ADR-007)', () => {
   it('외부 스코프를 참조하지 않는다 — 문자열화해도 동작해야 한다', () => {
     expect(previewAgent.toString()).not.toMatch(/\bimport\b|\brequire\(/);
   });
+
+  it('문자열화해서 되살린 함수가 그대로 동작한다', () => {
+    // 실제 주입 방식과 같다. 클로저로 바깥 값을 참조하고 있었다면 여기서 죽는다.
+    // 번들 최소화 후에도 살아남는 성질이 바로 이것이다.
+    document.body.innerHTML = `<p ${MARKER_ATTR}="0">본문</p>`;
+    sent = [];
+    vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
+      sent.push(msg as Record<string, unknown>);
+    }) as typeof window.parent.postMessage);
+
+    const revived = new Function(`return (${previewAgent.toString()})`)() as typeof previewAgent;
+    dispose = revived();
+
+    click(el(0)!);
+    expect(sent).toContainEqual({ type: 'select', id: 0 });
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+  });
 });
 
 describe('previewAgent · 정리', () => {
