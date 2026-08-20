@@ -1,10 +1,8 @@
 import { create } from 'zustand';
 import { applyPatches, PatchError } from '@/core/patch';
-import { parseBlocks } from '@/core/parse';
 import { applyLiveLocks } from '@/core/verify';
 import type { Block, LockReason } from '@/core/types';
 import { patchNotice, type Notice } from '@/lib/messages';
-import { buildPreviewDocument } from '@/lib/preview';
 import { openHtmlFile, readDroppedFile, saveFile, type OpenedFile } from '@/lib/fs';
 
 export interface EditorState {
@@ -27,7 +25,7 @@ export interface EditorState {
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
-  adopt: (file: OpenedFile) => void;
+  adopt: (file: OpenedFile) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
@@ -67,7 +65,15 @@ function openFailedNotice(e: unknown): Notice {
     : { key: 'notice.openFailed' };
 }
 
-function load(file: OpenedFile): Partial<EditorState> {
+/**
+ * parse5 와 프리뷰 조립기는 **파일을 열 때 처음** 필요하다. 초기 화면은 드롭 영역뿐이라
+ * 파서를 같이 실어 보낼 이유가 없다 — 그래서 여기서 동적으로 불러온다 (코드 분할).
+ */
+async function load(file: OpenedFile): Promise<Partial<EditorState>> {
+  const [{ parseBlocks }, { buildPreviewDocument }] = await Promise.all([
+    import('@/core/parse'),
+    import('@/lib/preview'),
+  ]);
   const blocks = parseBlocks(file.text);
   return {
     file,
@@ -100,7 +106,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ busy: true, notice: null });
     try {
       const file = await openHtmlFile();
-      if (file) set(load(file));
+      if (file) set(await load(file));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       set({ notice: openFailedNotice(e) });
@@ -110,12 +116,22 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   // OS 가 열어준 파일(PWA file_handlers)을 그대로 받는다.
-  adopt: (file) => set(load(file)),
+  // load 가 파서 청크를 받아오므로 여기도 실패할 수 있다 — 조용히 굳지 않게 감싼다 (ADR-008).
+  adopt: async (file) => {
+    set({ busy: true, notice: null });
+    try {
+      set(await load(file));
+    } catch (e) {
+      set({ notice: openFailedNotice(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
 
   loadDropped: async (file) => {
     set({ busy: true, notice: null });
     try {
-      set(load(await readDroppedFile(file)));
+      set(await load(await readDroppedFile(file)));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
       set({ notice: openFailedNotice(e) });

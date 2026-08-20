@@ -21,7 +21,7 @@ export function App() {
   const [dragging, setDragging] = useState(false);
 
   // 설치된 PWA 를 OS 에서 "이 앱으로 열기" 했을 때 파일이 여기로 들어온다.
-  useEffect(() => onFileLaunch(adopt), [adopt]);
+  useEffect(() => onFileLaunch((f) => void adopt(f)), [adopt]);
 
   const blocked = blocks.find((b) => b.id === blockedId);
   const NoticeIcon = notice ? IconNotice : IconLocked;

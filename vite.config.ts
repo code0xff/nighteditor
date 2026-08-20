@@ -13,7 +13,15 @@ export default defineConfig(({ command }) => ({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'],
+      includeAssets: [
+        'icon-192.png',
+        'icon-512.png',
+        'icon-maskable-512.png',
+        'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+      ],
       manifest: {
         name: 'nighteditor',
         short_name: 'nighteditor',
@@ -49,5 +57,22 @@ export default defineConfig(({ command }) => ({
   ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
+  build: {
+    // 청크는 **바뀌는 주기**로 나눈다. 앱 코드를 고쳐 배포해도 react·radix 청크의
+    // 해시는 그대로라 사용자는 그 부분을 다시 받지 않는다.
+    //
+    // parse5 는 여기서 나누지 않는다 — `store/editor.ts` 가 파일을 열 때 동적으로
+    // 불러오므로 이미 별도 청크이고, 초기 화면에는 실리지 않는다 (ADR-008).
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules\/(react|react-dom|scheduler)\// },
+            { name: 'radix', test: /node_modules\/@radix-ui\// },
+          ],
+        },
+      },
+    },
   },
 }));
