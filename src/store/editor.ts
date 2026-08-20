@@ -17,6 +17,8 @@ export interface EditorState {
   selectedId: number | null;
   /** 잠긴 블록을 눌렀을 때 이유를 보여주기 위한 표시 */
   blockedId: number | null;
+  /** 프리뷰에 되돌리라고 보낼 목록. PreviewFrame 이 보내고 비운다 */
+  revertQueue: { id: number; html: string }[];
   scanned: boolean;
   busy: boolean;
   message: string | null;
@@ -24,21 +26,28 @@ export interface EditorState {
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
-  onEdit: (id: number, html: string) => void;
+  onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
   select: (id: number | null) => void;
   revert: (id: number) => void;
   revertAll: () => void;
+  drainReverts: () => void;
   save: () => Promise<void>;
 }
 
 /** 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다 */
-function nextPatches(prev: Map<number, string>, block: Block, html: string): Map<number, string> {
+function nextPatches(
+  prev: Map<number, string>,
+  block: Block,
+  html: string,
+  pristine: boolean
+): Map<number, string> {
   const next = new Map(prev);
-  // RCDATA 는 평문으로 다루므로 원본 비교도 디코딩된 텍스트와 해야 한다.
-  // sourceInner 와 비교하면 엔티티가 든 제목이 늘 "변경됨"으로 잡힌다.
-  const baseline = block.rcdata ? block.sourceText : block.sourceInner;
-  if (html === baseline) next.delete(block.id);
+  // 프리뷰에서 온 편집은 pristine 판정을 그대로 믿는다. 브라우저가 직렬화한 값과
+  // 소스 문자열은 <br/> → <br> 같은 정규화 차이가 있어 여기서 비교하면 안 된다.
+  // 제목처럼 호스트에서 직접 고치는 평문은 sourceText 와 비교한다.
+  const unchanged = block.rcdata ? html === block.sourceText : pristine;
+  if (unchanged) next.delete(block.id);
   else next.set(block.id, html);
   return next;
 }
@@ -58,6 +67,7 @@ function load(file: OpenedFile): Partial<EditorState> {
     patches: new Map(),
     selectedId: null,
     blockedId: null,
+    revertQueue: [],
     scanned: false,
     message: null,
   };
@@ -71,6 +81,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   patches: new Map(),
   selectedId: null,
   blockedId: null,
+  revertQueue: [],
   scanned: false,
   busy: false,
   message: null,
@@ -91,6 +102,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ busy: true, message: null });
     try {
       set(load(await readDroppedFile(file)));
+    } catch (e) {
+      // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
+      set({ message: e instanceof Error ? `열지 못했다: ${e.message}` : '열지 못했다' });
     } finally {
       set({ busy: false });
     }
@@ -99,25 +113,46 @@ export const useEditor = create<EditorState>((set, get) => ({
   // 렌더 결과와 소스를 대조해 스크립트가 만든 블록을 잠근다 (ADR-005).
   onReady: (live) => {
     const liveText = new Map(live.map((b) => [b.id, b.text]));
-    set({ blocks: applyLiveLocks(get().blocks, liveText), scanned: true });
+    const blocks = applyLiveLocks(get().blocks, liveText);
+    // 대조 전에 편집된 블록이 뒤늦게 잠길 수 있다. 그대로 두면 저장 때
+    // applyPatches 가 목록 전체를 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
+    const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));
+    const patches = new Map([...get().patches].filter(([id]) => !lockedIds.has(id)));
+    set({ blocks, patches, scanned: true });
   },
 
-  onEdit: (id, html) => {
+  onEdit: (id, html, pristine = false) => {
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
-    set({ patches: nextPatches(get().patches, block, html) });
+    set({ patches: nextPatches(get().patches, block, html, pristine) });
   },
 
   onBlocked: (id) => set({ blockedId: id, selectedId: null }),
   select: (id) => set({ selectedId: id, blockedId: null }),
 
+  // 패치만 지우면 프리뷰에는 고친 내용이 그대로 남는다. 그 블록을 다시 눌렀다
+  // 빠져나오면 패치가 되살아나 프리뷰와 저장본이 영영 어긋난다.
   revert: (id) => {
-    const next = new Map(get().patches);
+    const { patches, blocks, revertQueue } = get();
+    const next = new Map(patches);
     next.delete(id);
-    set({ patches: next });
+    const block = blocks.find((b) => b.id === id);
+    set({
+      patches: next,
+      revertQueue: [...revertQueue, { id, html: block?.sourceInner ?? '' }],
+    });
   },
 
-  revertAll: () => set({ patches: new Map() }),
+  revertAll: () => {
+    const { patches, blocks, revertQueue } = get();
+    const restored = [...patches.keys()].map((id) => ({
+      id,
+      html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
+    }));
+    set({ patches: new Map(), revertQueue: [...revertQueue, ...restored] });
+  },
+
+  drainReverts: () => set({ revertQueue: [] }),
 
   save: async () => {
     const { file, source, blocks, patches } = get();

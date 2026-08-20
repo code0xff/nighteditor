@@ -17,13 +17,15 @@ export function PreviewFrame() {
   const onEdit = useEditor((s) => s.onEdit);
   const onBlocked = useEditor((s) => s.onBlocked);
   const select = useEditor((s) => s.select);
+  const revertQueue = useEditor((s) => s.revertQueue);
+  const drainReverts = useEditor((s) => s.drainReverts);
 
   useEffect(() => {
     const handle = (e: MessageEvent) => {
       if (e.source !== frame.current?.contentWindow) return;
       const msg = e.data as FromPreview;
       if (msg.type === 'ready') onReady(msg.blocks);
-      else if (msg.type === 'edit') onEdit(msg.id, msg.html);
+      else if (msg.type === 'edit') onEdit(msg.id, msg.html, msg.pristine);
       else if (msg.type === 'blocked') onBlocked(msg.id);
       else if (msg.type === 'select') select(msg.id);
     };
@@ -38,6 +40,16 @@ export function PreviewFrame() {
     const msg: ToPreview = { type: 'locked', ids };
     frame.current?.contentWindow?.postMessage(msg, '*');
   }, [scanned, blocks]);
+
+  // 되돌리기는 프리뷰에도 반영해야 한다. 패치만 지우면 화면에는 고친 내용이 남는다.
+  useEffect(() => {
+    if (revertQueue.length === 0) return;
+    for (const item of revertQueue) {
+      const msg: ToPreview = { type: 'revert', id: item.id, html: item.html };
+      frame.current?.contentWindow?.postMessage(msg, '*');
+    }
+    drainReverts();
+  }, [revertQueue, drainReverts]);
 
   if (!previewDoc) return null;
 
