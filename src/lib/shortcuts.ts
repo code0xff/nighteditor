@@ -1,23 +1,30 @@
 /**
  * 호스트 창의 키 단축키. 프리뷰(iframe) 안의 키는 여기 닿지 않으므로
  * 에이전트가 따로 가로채 메시지로 넘긴다 (ADR-007, spec §4).
+ *
+ * 조합 판정은 이 파일과 에이전트 두 곳에 있다. 에이전트는 문자열화돼 주입되므로
+ * 코드를 공유할 수 없다 — 그래서 조합을 바꿀 땐 두 곳을 같이 고친다.
  */
 
-/** 눌린 키가 저장 단축키인가 — Ctrl+S / ⌘S. Shift·Alt 조합은 다른 명령 자리다 */
-function isSaveCombo(e: KeyboardEvent): boolean {
-  return (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 's' || e.key === 'S');
+export interface EditorShortcuts {
+  /** Ctrl+S · ⌘S */
+  save: () => void;
+  /** Ctrl+Shift+S · ⌘⇧S */
+  downloadCopy: () => void;
 }
 
 /**
- * Ctrl+S 를 잡는다. 브라우저의 "페이지 저장" 대화상자를 막고 핸들러를 부른다.
+ * 저장·사본 내려받기 단축키를 잡는다. 브라우저의 "페이지 저장" 대화상자는 막는다.
  *
  * @returns 리스너를 떼는 함수
  */
-export function onSaveShortcut(handler: () => void): () => void {
+export function onEditorShortcuts({ save, downloadCopy }: EditorShortcuts): () => void {
   const onKey = (e: KeyboardEvent) => {
-    if (!isSaveCombo(e)) return;
+    const sKey = e.key === 's' || e.key === 'S';
+    if (!sKey || !(e.ctrlKey || e.metaKey) || e.altKey) return;
     e.preventDefault();
-    handler();
+    if (e.shiftKey) downloadCopy();
+    else save();
   };
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);

@@ -8,6 +8,7 @@
 import {
   Boxes,
   FilePen,
+  Download,
   FileUp,
   FolderOpen,
   Info,
@@ -36,6 +37,7 @@ export const IconBrand = FilePen;
 export const IconOpen = FolderOpen;
 export const IconDrop = FileUp;
 export const IconSave = Save;
+export const IconDownloadCopy = Download;
 
 /** 되돌리기 */
 export const IconRevert = Undo2;

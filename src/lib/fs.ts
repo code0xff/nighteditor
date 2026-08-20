@@ -104,11 +104,12 @@ export async function saveFile(file: OpenedFile, text: string): Promise<SaveResu
     await writable.close();
     return 'overwritten';
   }
-  download(file.name, text);
+  downloadFile(file.name, text);
   return 'downloaded';
 }
 
-function download(name: string, text: string): void {
+/** 브라우저 다운로드로 내려보낸다. 다운로드 폴더에만 쓸 수 있어 원본은 건드리지 않는다. */
+export function downloadFile(name: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/html' }));
   const a = document.createElement('a');
   a.href = url;

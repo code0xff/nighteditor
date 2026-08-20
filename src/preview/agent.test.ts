@@ -300,13 +300,18 @@ describe('previewAgent · Ctrl+S', () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('Ctrl+Shift+S 는 잡지 않는다 — 사본 내려받기 자리다', () => {
+  it('Ctrl+Shift+S 는 사본 내려받기로 넘긴다 — 저장과 갈라져야 한다', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    el(0)!.innerHTML = '고친 본문';
 
     const e = ctrlS({ shiftKey: true });
 
+    expect(sent).toContainEqual({ type: 'downloadCopy' });
     expect(sent.some((m) => m.type === 'save')).toBe(false);
-    expect(e.defaultPrevented).toBe(false);
+    // 사본도 열려 있는 편집을 확정한 뒤에 나가야 한다.
+    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '고친 본문', pristine: false });
+    expect(e.defaultPrevented).toBe(true);
   });
 });
 

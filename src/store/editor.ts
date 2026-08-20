@@ -3,7 +3,7 @@ import { applyPatches, PatchError } from '@/core/patch';
 import { applyLiveLocks } from '@/core/verify';
 import type { Block, LockReason } from '@/core/types';
 import { patchNotice, type Notice } from '@/lib/messages';
-import { openHtmlFile, readDroppedFile, saveFile, type OpenedFile } from '@/lib/fs';
+import { downloadFile, openHtmlFile, readDroppedFile, saveFile, type OpenedFile } from '@/lib/fs';
 
 export interface EditorState {
   file: OpenedFile | null;
@@ -34,6 +34,7 @@ export interface EditorState {
   revertAll: () => void;
   drainReverts: () => void;
   save: () => Promise<void>;
+  downloadCopy: () => void;
 }
 
 /** 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다 */
@@ -183,6 +184,27 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   drainReverts: () => set({ revertQueue: [] }),
+
+  // 원본은 건드리지 않고 결과물만 파일로 받는다 (spec §4 · 사본 내려받기).
+  // 패치가 없어도 동작한다 — 고치기 전 백업을 받는 용도로도 쓴다.
+  downloadCopy: () => {
+    const { file, source, blocks, patches } = get();
+    if (!file) return;
+    try {
+      const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
+      downloadFile(file.name, applyPatches(source, blocks, list));
+      set({
+        notice: { key: 'notice.copyDownloaded', params: { name: file.name, count: list.length } },
+      });
+    } catch (e) {
+      set({
+        notice:
+          e instanceof PatchError
+            ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
+            : { key: 'notice.saveFailed' },
+      });
+    }
+  },
 
   save: async () => {
     const { file, source, blocks, patches } = get();

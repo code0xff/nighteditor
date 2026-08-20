@@ -14,7 +14,9 @@ export type FromPreview =
   | { type: 'edit'; id: number; html: string; pristine: boolean }
   | { type: 'blocked'; id: number }
   /** 프리뷰 안에서 Ctrl+S 를 눌렀다. iframe 의 키 이벤트는 호스트 창에 닿지 않는다 */
-  | { type: 'save' };
+  | { type: 'save' }
+  /** Ctrl+Shift+S — 원본은 그대로 두고 결과물만 내려받는다 */
+  | { type: 'downloadCopy' };
 
 /** 호스트 → 프리뷰 */
 export type ToPreview =

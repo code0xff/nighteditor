@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
-import { IconOpen, IconSave } from '@/lib/icons';
+import { IconDownloadCopy, IconOpen, IconSave } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
 import { titleBlock, useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
@@ -18,6 +18,7 @@ export function Toolbar() {
   const openFile = useEditor((s) => s.openFile);
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
+  const downloadCopy = useEditor((s) => s.downloadCopy);
   const { t } = useI18n();
 
   const title = titleBlock(blocks);
@@ -63,6 +64,17 @@ export function Toolbar() {
           <span className="truncate text-xs text-muted-foreground">
             {t(canOverwrite() ? 'toolbar.droppedNoOverwrite' : 'toolbar.noOverwriteSupport')}
           </span>
+        )}
+        {file && (
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={downloadCopy}
+            aria-label={t('toolbar.downloadCopy')}
+            title={t('toolbar.downloadCopy')}
+          >
+            <IconDownloadCopy />
+          </Button>
         )}
         {file && (
           <Button size="sm" onClick={() => void save()} disabled={busy || patches.size === 0}>

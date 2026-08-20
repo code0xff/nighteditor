@@ -32,6 +32,7 @@ const ko = {
   'toolbar.open': '열기',
   'toolbar.title': '제목',
   'toolbar.save': '저장',
+  'toolbar.downloadCopy': '사본 내려받기',
   'toolbar.notEditable': '편집할 수 없다 — {reason}',
   'toolbar.droppedNoOverwrite': '드롭한 파일은 덮어쓸 수 없다',
   'toolbar.noOverwriteSupport': '이 브라우저는 덮어쓰기 미지원',
@@ -59,6 +60,7 @@ const ko = {
   'notice.openFailedDetail': '열지 못했다: {detail}',
   'notice.saved': '{name} 에 저장했다 ({count}개 블록)',
   'notice.downloaded': '{name} 을 내려받았다 — 이 브라우저는 덮어쓰기를 지원하지 않는다',
+  'notice.copyDownloaded': '{name} 사본을 내려받았다 ({count}개 블록 반영)',
   'notice.saveRejected': '저장 거부: {detail}',
   'notice.saveFailed': '저장하지 못했다',
 
@@ -85,6 +87,7 @@ const en: Record<MessageKey, string> = {
   'toolbar.open': 'Open',
   'toolbar.title': 'Title',
   'toolbar.save': 'Save',
+  'toolbar.downloadCopy': 'Download a copy',
   'toolbar.notEditable': "Can't be edited — {reason}",
   'toolbar.droppedNoOverwrite': "Dropped files can't be overwritten",
   'toolbar.noOverwriteSupport': "This browser can't overwrite files",
@@ -112,6 +115,7 @@ const en: Record<MessageKey, string> = {
   'notice.openFailedDetail': "Couldn't open it: {detail}",
   'notice.saved': 'Saved to {name} ({count} blocks)',
   'notice.downloaded': "Downloaded {name} — this browser can't overwrite files",
+  'notice.copyDownloaded': 'Downloaded a copy of {name} ({count} blocks applied)',
   'notice.saveRejected': 'Save rejected: {detail}',
   'notice.saveFailed': "Couldn't save",
 
