@@ -86,14 +86,26 @@ describe('previewAgent · 이벤트 가로채기', () => {
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
-  it('마커 밖을 클릭해도 아티팩트 핸들러는 막힌다', () => {
+  it('편집 중이 아니면 블록 밖 클릭을 통과시킨다 — 아티팩트 네비게이션이 살아 있어야 한다', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><div id="bg">여백</div>`);
     const artifact = vi.fn();
     document.addEventListener('click', artifact);
 
     click(document.getElementById('bg')!);
 
+    expect(artifact).toHaveBeenCalled();
+  });
+
+  it('편집 중 블록 밖 클릭은 편집 종료로 소비하고 네비게이션으로 새지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p><div id="bg">여백</div>`);
+    click(el(0)!);
+    const artifact = vi.fn();
+    document.addEventListener('click', artifact);
+
+    click(document.getElementById('bg')!);
+
     expect(artifact).not.toHaveBeenCalled();
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
   it('편집 중 방향키가 아티팩트로 새지 않는다', () => {

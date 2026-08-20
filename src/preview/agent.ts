@@ -73,11 +73,16 @@ export function previewAgent(): () => void {
     const el = blockOf(e.target);
     if (el) {
       startEdit(el);
-    } else {
-      commit();
+      // 아티팩트의 전역 클릭 핸들러(슬라이드 넘김 등)에 닿지 않게 한다.
+      e.stopImmediatePropagation();
+      return;
     }
-    // 아티팩트의 전역 클릭 핸들러(슬라이드 넘김 등)에 닿지 않게 한다.
-    e.stopImmediatePropagation();
+    // 블록 밖 클릭. 편집 중이었다면 그 클릭은 "편집 종료"로 소비하고 끝낸다.
+    // 편집 중이 아니었다면 통과시킨다 — 막으면 아티팩트의 네비게이션이
+    // 통째로 죽어서 다른 슬라이드로 갈 수가 없다.
+    const wasEditing = editingId !== null;
+    commit();
+    if (wasEditing) e.stopImmediatePropagation();
   }) as EventListener);
 
   on(document, 'keydown', ((e: KeyboardEvent) => {
