@@ -70,12 +70,12 @@ export function parseBlocks(source: string): Block[] {
     if (isElement(node)) {
       const loc = node.sourceCodeLocation;
       const startTag = loc?.startTag;
+      const endTag = loc?.endTag;
       const hasBlockChild = elementChildren.some((c) => !isInline(c.tagName));
 
       // INV-7 · parse5 는 소스에 없는 노드를 삽입한다 (테이블의 <tbody> 등).
       // 위치 정보가 없으면 블록이 될 수 없다. 통과시켜 자식으로 내려간다.
       if (startTag && !hasBlockChild && textOf(node).trim().length > 0) {
-        const endTag = loc?.endTag;
         const innerStart = startTag.endOffset;
         // 닫는 태그가 생략되면(`<li>a<li>b`) inner 범위를 확정할 수 없다.
         // 조용히 버리지 않고 AMBIGUOUS 로 잠가 이유를 남긴다 (대원칙 3).
@@ -91,6 +91,32 @@ export function parseBlocks(source: string): Block[] {
           locked: endTag ? lock : 'AMBIGUOUS',
         });
         return;
+      }
+
+      // 소스에서 비어 있는 잎 요소. 스크립트가 채우면 화면에는 글자가 보이지만
+      // 그 글자는 소스 어디에도 없어 되짚을 수 없다. 텍스트가 없다고 빼 버리면
+      // 눌러도 아무 일이 없어 왜 안 되는지 알 길이 없다 — 잡아 두고 잠근다 (대원칙 3).
+      //
+      // 닫는 태그를 요구해 void 요소(`<br>`·`<img>`)를 걸러낸다. 그 안에는 내용이 올 수 없다.
+      // 자식 요소가 있으면 컨테이너이므로 여기서 멈추지 않고 그 안으로 내려간다.
+      if (startTag && endTag && elementChildren.length === 0) {
+        const innerStart = startTag.endOffset;
+        const innerEnd = endTag.startOffset;
+        const sourceInner = source.slice(innerStart, innerEnd);
+        // 주석만 든 요소는 비어 있지 않다 — 지우면 사용자가 쓴 것이 사라진다.
+        if (sourceInner.trim().length === 0) {
+          blocks.push({
+            id: nextId++,
+            tag: node.tagName,
+            innerStart,
+            innerEnd,
+            sourceInner,
+            sourceText: '',
+            rcdata: RCDATA_TAGS.has(node.tagName),
+            locked: lock ?? 'EMPTY_IN_SOURCE',
+          });
+          return;
+        }
       }
     }
 

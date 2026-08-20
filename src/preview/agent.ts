@@ -225,8 +225,13 @@ export function previewAgent(): () => void {
       for (const id of msg.ids) locked.add(id);
       // 잠금 표식을 DOM 에도 붙인다. 주입된 스타일이 이걸 보고 커서와 테두리를 바꾼다.
       // 매번 전체를 다시 칠한다 — 이전 목록이 남으면 풀린 블록이 잠긴 척한다.
+      //
+      // 화면에 글자가 보이는 자리에만 칠한다. 소스에도 화면에도 아무것도 없는 요소
+      // (CSS 로 그린 막대 등)까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
+      // 칠하지 않아도 잠금은 그대로라 눌러 보면 이유는 뜬다.
       for (const el of document.querySelectorAll('[' + MARKER + ']')) {
-        if (locked.has(Number(el.getAttribute(MARKER)))) el.setAttribute(LOCKED, '');
+        const show = locked.has(Number(el.getAttribute(MARKER))) && (el.textContent ?? '').trim();
+        if (show) el.setAttribute(LOCKED, '');
         else el.removeAttribute(LOCKED);
       }
     } else if (msg.type === 'revert' && typeof msg.id === 'number') {

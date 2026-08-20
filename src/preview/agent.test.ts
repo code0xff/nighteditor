@@ -462,6 +462,33 @@ describe('previewAgent · IME (한글 조합)', () => {
   });
 });
 
+describe('previewAgent · 잠금 표시', () => {
+  it('잠긴 블록에 표식을 붙인다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    fromHost({ type: 'locked', ids: [0] });
+
+    expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(true);
+  });
+
+  it('화면에 아무것도 없는 요소에는 칠하지 않는다', () => {
+    // CSS 로 그린 막대까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
+    mount(`<div ${MARKER_ATTR}="0" class="bar"></div>`);
+    fromHost({ type: 'locked', ids: [0] });
+
+    expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
+  });
+
+  it('칠하지 않아도 잠금은 그대로다 — 누르면 이유가 뜬다', () => {
+    mount(`<div ${MARKER_ATTR}="0" class="bar"></div>`);
+    fromHost({ type: 'locked', ids: [0] });
+
+    click(el(0)!);
+
+    expect(sent).toContainEqual({ type: 'blocked', id: 0 });
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
+  });
+});
+
 describe('previewAgent · 표시 색 맞추기', () => {
   const scan = async (): Promise<void> => {
     window.dispatchEvent(new Event('load'));

@@ -74,9 +74,9 @@ describe('전체 파이프라인 · 합성 아티팩트', () => {
         expect(ready, 'ready 를 보고해야 한다').toBeDefined();
 
         const locked = applyLiveLocks(blocks, new Map(ready!.blocks.map((b) => [b.id, b.text])));
-        // 스크립트를 걷어냈으므로 라이브 = 소스다. 사전 잠금(.code)만 남아야 한다.
+        // 스크립트를 걷어냈으므로 라이브 = 소스다. 파싱 때 정한 잠금만 남아야 한다.
         const reasons = new Set(locked.map((b) => b.locked).filter(Boolean));
-        expect(reasons).toEqual(new Set(['CODE_BLOCK']));
+        expect(reasons).toEqual(new Set(['CODE_BLOCK', 'EMPTY_IN_SOURCE']));
         resolve();
       }, 0);
     });

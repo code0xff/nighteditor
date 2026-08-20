@@ -7,15 +7,15 @@ const source = fixtureSource();
 const blocks = parseBlocks(source);
 
 describe('parseBlocks · 픽스처 회귀', () => {
-  it('블록 26개를 인식한다 (docs/spec.md §6)', () => {
-    expect(blocks).toHaveLength(26);
+  it('블록 27개를 인식한다 (docs/spec.md §6)', () => {
+    expect(blocks).toHaveLength(27);
   });
 
   it('태그별 분포가 사양과 일치한다', () => {
     const counts: Record<string, number> = {};
     for (const b of blocks) counts[b.tag] = (counts[b.tag] ?? 0) + 1;
     expect(counts).toEqual({
-      div: 7,
+      div: 8,
       td: 4,
       p: 3,
       h2: 3,
@@ -60,10 +60,49 @@ describe('parseBlocks · 잠금과 특례', () => {
     expect(locked.some((b) => b.sourceInner.includes('중첩된 요소'))).toBe(true);
   });
 
-  it('소스에서 비어 있는 .pg 와 #cnt 는 블록이 되지 않는다', () => {
-    expect(source.match(/class="pg"/g)).toHaveLength(4);
+  it('소스에서 비어 있는 #cnt 를 잠긴 블록으로 잡는다 (spec §3)', () => {
+    // 스크립트가 채우면 화면에는 글자가 보인다. 블록으로 잡지 않으면 눌러도 아무 일이 없어
+    // 왜 못 고치는지 알 길이 없다.
     expect(source).toContain('<div id="cnt"></div>');
-    for (const b of blocks) expect(b.sourceText).not.toBe('');
+    const cnt = blocks.filter((b) => b.locked === 'EMPTY_IN_SOURCE');
+
+    expect(cnt).toHaveLength(1);
+    expect(cnt[0]?.tag).toBe('div');
+    expect(cnt[0]?.sourceText).toBe('');
+  });
+
+  it('.pg 는 부모가 직접 텍스트를 가져 블록이 되지 않는다', () => {
+    // 인라인은 부모 문장의 일부라 내려가지 않는다 (spec §2). 여기서 마커를 붙이면
+    // 부모 블록의 innerHTML 에 섞여 저장본까지 따라간다.
+    // 대신 부모 .foot 이 대조에서 잠겨 이유를 대신 말한다.
+    expect(source.match(/class="pg"/g)).toHaveLength(4);
+    expect(blocks.some((b) => b.sourceInner === '' && b.tag === 'span')).toBe(false);
+  });
+
+  it('void 요소는 블록이 되지 않는다 — 안에 내용이 올 수 없다', () => {
+    const empty = parseBlocks('<p>글</p><br><img src="a.png"><hr>');
+
+    expect(empty.map((b) => b.tag)).toEqual(['p']);
+  });
+
+  it('주석만 든 요소는 비어 있지 않다', () => {
+    // 지우면 사용자가 쓴 것이 사라진다.
+    expect(parseBlocks('<div><!-- 여기 --></div>')).toHaveLength(0);
+  });
+
+  it('자식 요소가 있는 빈 컨테이너는 블록이 아니라 안으로 내려간다', () => {
+    const nested = parseBlocks('<div class="wrap"><div class="pg"></div></div>');
+
+    // 컨테이너까지 블록으로 잡으면 안쪽이 통째로 가려진다.
+    expect(nested).toHaveLength(1);
+    expect(nested[0]?.locked).toBe('EMPTY_IN_SOURCE');
+    expect(nested[0]?.innerStart).toBe('<div class="wrap"><div class="pg">'.length);
+  });
+
+  it('빈 요소도 .code 안에서는 코드 영역으로 잠긴다', () => {
+    const inCode = parseBlocks('<div class="code"><span></span></div>');
+
+    expect(inCode[0]?.locked).toBe('CODE_BLOCK');
   });
 
   it('script / style 내부는 블록이 되지 않는다', () => {
