@@ -1,11 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath, URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
 import { injectAgentScript, injectMarkers, MARKER_ATTR, MarkerError } from './markers.js';
+import { fixtureSource } from '../__fixtures__/load.js';
 
-const REFERENCE = fileURLToPath(new URL('../../agent_payments.html', import.meta.url));
-const source = readFileSync(REFERENCE, 'utf8');
+const source = fixtureSource();
 const blocks = parseBlocks(source);
 
 describe('injectMarkers', () => {
@@ -17,7 +15,7 @@ describe('injectMarkers', () => {
   });
 
   it('원본을 변형하지 않는다 (INV-1)', () => {
-    expect(source).toBe(readFileSync(REFERENCE, 'utf8'));
+    expect(source).toBe(fixtureSource());
   });
 
   it('마커를 넣어도 블록 구조와 텍스트가 그대로다', () => {

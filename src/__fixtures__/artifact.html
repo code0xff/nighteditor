@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>합성 아티팩트</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+      .slide {
+        display: none;
+      }
+      .slide.on {
+        display: block;
+      }
+      .code {
+        font-family: monospace;
+        background: #eee;
+      }
+      .codelabel {
+        display: block;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="deck">
+      <!-- 01 표지 -->
+      <section class="slide on">
+        <div class="eyebrow">Synthetic · Fixture</div>
+        <h1>합성 표지</h1>
+        <p class="sub">이 문단은 <b>굵은 조각</b>을 품고 있어 텍스트 노드가 셋으로 쪼개진다.</p>
+        <div class="foot"><span>바닥 라벨</span><span class="pg"></span></div>
+      </section>
+
+      <!-- 02 표 -->
+      <section class="slide">
+        <h2>표가 있는 장</h2>
+        <table>
+          <tr>
+            <th>이름</th>
+            <th>설명</th>
+          </tr>
+          <tr>
+            <td>첫 행</td>
+            <td>암시적 tbody 아래에 놓인다</td>
+          </tr>
+          <tr>
+            <td>둘째 행</td>
+            <td>Protocols &amp; Standards 처럼 엔티티가 들어간다</td>
+          </tr>
+        </table>
+        <div class="foot"><span>표</span><span class="pg"></span></div>
+      </section>
+
+      <!-- 03 인라인 승격 -->
+      <section class="slide">
+        <h2>인라인 판정</h2>
+        <div>
+          <span class="codelabel">독립 라벨 · 부모에 직접 텍스트가 없다</span>
+          <ul class="list">
+            <li>항목 하나</li>
+            <li>항목 <b>둘</b></li>
+          </ul>
+        </div>
+        <div>
+          직접 텍스트가 있으면 <a href="#">이 링크</a>는 블록이 되지 않는다
+          <p>단락은 블록이 된다</p>
+        </div>
+        <div class="foot"><span>인라인</span><span class="pg"></span></div>
+      </section>
+
+      <!-- 04 코드 -->
+      <section class="slide">
+        <h2>코드 블록</h2>
+        <span class="codelabel">JSON 예시</span>
+        <div class="code">{ <span class="h">"name"</span>: <span class="v">"fixture"</span> }</div>
+        <div class="code"><div>중첩된 요소도 잠금을 물려받는다</div></div>
+        <h3>이중 엔티티</h3>
+        <p>&amp;amp; 는 브라우저에서 &amp; 로 보인다</p>
+        <div class="foot"><span>코드</span><span class="pg"></span></div>
+      </section>
+    </div>
+    <div id="cnt"></div>
+
+    <script>
+      var S = [].slice.call(document.querySelectorAll('.slide'));
+      var i = 0;
+      S.forEach(function (s, k) {
+        var p = s.querySelector('.pg');
+        if (p) p.textContent = k + 1 + ' / ' + S.length;
+      });
+      function show(n) {
+        i = Math.max(0, Math.min(S.length - 1, n));
+        S.forEach(function (s, k) {
+          s.classList.toggle('on', k === i);
+        });
+        document.getElementById('cnt').textContent = i + 1 + ' / ' + S.length;
+      }
+      // 실제 아티팩트처럼 전역 클릭으로 장을 넘긴다
+      document.addEventListener('click', function () {
+        show(i + 1);
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowRight') show(i + 1);
+      });
+      // 실제 아티팩트처럼 DOM 을 재구성한다 (마커가 살아남아야 한다)
+      S.forEach(function (s) {
+        var sheet = document.createElement('div');
+        sheet.className = 'sheet';
+        while (s.firstChild) sheet.appendChild(s.firstChild);
+        s.appendChild(sheet);
+      });
+      show(0);
+    </script>
+  </body>
+</html>

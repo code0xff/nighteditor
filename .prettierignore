@@ -1,5 +1,5 @@
 pnpm-lock.yaml
 dist/
 coverage/
-agent_payments.html
+src/__fixtures__/artifact.html
 *.md

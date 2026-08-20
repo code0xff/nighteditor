@@ -1,11 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath, URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
 import { applyPatches, PatchError } from './patch.js';
+import { fixtureSource } from '../__fixtures__/load.js';
 
-const REFERENCE = fileURLToPath(new URL('../../agent_payments.html', import.meta.url));
-const source = readFileSync(REFERENCE, 'utf8');
+const source = fixtureSource();
 const blocks = parseBlocks(source);
 const editable = blocks.filter((b) => b.locked === null);
 
@@ -40,10 +38,10 @@ describe('applyPatches · 최소 diff', () => {
     const target = blocks.find((b) => b.tag === 'h1');
     if (!target) throw new Error('h1 없음');
     const out = applyPatches(source, blocks, [
-      { id: target.id, newInnerHtml: '에이전트 결제 <b>2026</b>' },
+      { id: target.id, newInnerHtml: '고친 표지 <b>2026</b>' },
     ]);
     expect(changedLines(source, out)).toBe(1);
-    expect(out).toContain('<h1>에이전트 결제 <b>2026</b></h1>');
+    expect(out).toContain('<h1>고친 표지 <b>2026</b></h1>');
   });
 
   it('인라인 마크업이 보존된다', () => {
@@ -59,16 +57,16 @@ describe('applyPatches · 최소 diff', () => {
     const title = blocks.find((b) => b.tag === 'title');
     if (!title) throw new Error('title 없음');
     const out = applyPatches(source, blocks, [
-      { id: title.id, newInnerHtml: 'Agent Payments 세미나 2026' },
+      { id: title.id, newInnerHtml: '합성 아티팩트 2026' },
     ]);
     expect(changedLines(source, out)).toBe(1);
-    expect(out).toContain('<title>Agent Payments 세미나 2026</title>');
+    expect(out).toContain('<title>합성 아티팩트 2026</title>');
   });
 });
 
 describe('applyPatches · 다중 패치 순서 (INV-4 회귀)', () => {
   it('입력 순서와 무관하게 같은 결과를 낸다', () => {
-    const picked = editable.slice(0, 40).map((b) => ({
+    const picked = editable.slice(0, 12).map((b) => ({
       id: b.id,
       newInnerHtml: `블록${b.id}`,
     }));
@@ -78,7 +76,7 @@ describe('applyPatches · 다중 패치 순서 (INV-4 회귀)', () => {
   });
 
   it('여러 블록을 고쳐도 각 내용이 제자리에 들어간다', () => {
-    const picked = editable.slice(0, 40);
+    const picked = editable.slice(0, 12);
     const out = applyPatches(
       source,
       blocks,

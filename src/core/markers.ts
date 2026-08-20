@@ -9,7 +9,7 @@ export class MarkerError extends Error {}
  * 프리뷰용 HTML 을 만든다. 각 블록의 여는 태그에 `data-ne-id` 를 넣는다.
  *
  * 라이브 DOM 에서 뽑은 구조 경로는 쓸 수 없다. 아티팩트 스크립트가 DOM 을
- * 재구성하기 때문이다(레퍼런스 파일의 `wrapSheets()` 는 슬라이드의 자식 전체를
+ * 재구성하기 때문이다(실측 아티팩트의 `wrapSheets()` 는 슬라이드의 자식 전체를
  * 새 wrapper 로 옮긴다). `appendChild` 는 노드를 **이동**시키므로 속성은 그대로
  * 따라간다 — 마커는 DOM 을 어떻게 휘저어도 살아남는다.
  *

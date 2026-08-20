@@ -1,6 +1,4 @@
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseBlocks } from './core/parse.js';
 import { applyPatches } from './core/patch.js';
@@ -9,10 +7,9 @@ import { MARKER_ATTR } from './core/markers.js';
 import { buildPreviewDocument } from './lib/preview.js';
 import { previewAgent } from './preview/agent.js';
 import type { FromPreview } from './preview/protocol.js';
+import { fixtureSource } from './__fixtures__/load.js';
 
-// happy-dom 환경에서는 import.meta.url 이 file: 스킴이 아니라 fileURLToPath 를 쓸 수 없다.
-const REFERENCE = join(process.cwd(), 'agent_payments.html');
-const source = readFileSync(REFERENCE, 'utf8');
+const source = fixtureSource();
 
 function changedLines(a: string, b: string): number {
   const la = a.split('\n');
@@ -41,7 +38,7 @@ function mountPreview(html: string): FromPreview[] {
   return sent;
 }
 
-describe('전체 파이프라인 · 레퍼런스 아티팩트', () => {
+describe('전체 파이프라인 · 합성 아티팩트', () => {
   it('파싱 → 프리뷰 → 편집 → 저장이 한 줄 diff 로 끝난다', () => {
     const blocks = parseBlocks(source);
     const sent = mountPreview(buildPreviewDocument(source, blocks));
@@ -53,7 +50,7 @@ describe('전체 파이프라인 · 레퍼런스 아티팩트', () => {
     expect(el, '마커가 프리뷰에 살아 있어야 한다').not.toBeNull();
 
     el?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    el!.innerHTML = '에이전트 결제 <b>2026</b>';
+    el!.innerHTML = '고친 표지 <b>2026</b>';
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
 
     const edit = sent.find((m): m is Extract<FromPreview, { type: 'edit' }> => m.type === 'edit');
@@ -61,7 +58,7 @@ describe('전체 파이프라인 · 레퍼런스 아티팩트', () => {
 
     const output = applyPatches(source, blocks, [{ id: edit!.id, newInnerHtml: edit!.html }]);
     expect(changedLines(source, output)).toBe(1);
-    expect(output).toContain('<h1>에이전트 결제 <b>2026</b></h1>');
+    expect(output).toContain('<h1>고친 표지 <b>2026</b></h1>');
   });
 
   it('프리뷰가 보고한 라이브 텍스트로 대조하면 잠금이 확정된다', () => {

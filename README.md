@@ -49,6 +49,9 @@ pnpm dev
 pnpm verify   # typecheck + lint + format + test + build
 ```
 
+회귀 테스트는 `src/__fixtures__/artifact.html` 을 대상으로 돈다.
+새 규칙을 만들 땐 근거가 된 구조를 픽스처에 먼저 넣고 테스트를 쓴다.
+
 `dev` 가 유일한 브랜치다. 작업 규칙은 [AGENTS.md](AGENTS.md) 에서 시작한다.
 
 ```bash

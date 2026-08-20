@@ -1,33 +1,30 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath, URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
 import { decode, encode, normalizeText } from './entities.js';
+import { fixtureSource } from '../__fixtures__/load.js';
 
-const REFERENCE = fileURLToPath(new URL('../../agent_payments.html', import.meta.url));
-const source = readFileSync(REFERENCE, 'utf8');
+const source = fixtureSource();
 const blocks = parseBlocks(source);
 
-describe('parseBlocks · 레퍼런스 아티팩트 회귀', () => {
-  it('블록 867개를 인식한다 (docs/spec.md §6)', () => {
-    expect(blocks).toHaveLength(867);
+describe('parseBlocks · 픽스처 회귀', () => {
+  it('블록 26개를 인식한다 (docs/spec.md §6)', () => {
+    expect(blocks).toHaveLength(26);
   });
 
   it('태그별 분포가 사양과 일치한다', () => {
     const counts: Record<string, number> = {};
     for (const b of blocks) counts[b.tag] = (counts[b.tag] ?? 0) + 1;
     expect(counts).toEqual({
-      div: 256,
-      td: 241,
-      p: 103,
-      li: 72,
-      span: 70,
-      h2: 43,
-      th: 42,
-      h3: 36,
-      button: 2,
-      title: 1,
+      div: 7,
+      td: 4,
+      p: 3,
+      h2: 3,
+      li: 2,
+      span: 2,
+      th: 2,
       h1: 1,
+      h3: 1,
+      title: 1,
     });
   });
 
@@ -51,33 +48,37 @@ describe('parseBlocks · 레퍼런스 아티팩트 회귀', () => {
 describe('parseBlocks · 잠금과 특례', () => {
   it('<title> 을 블록으로 인식하고 rcdata 로 표시한다 (spec §2.1)', () => {
     const title = blocks.find((b) => b.tag === 'title');
-    expect(title?.sourceText).toBe('Agent Payments 세미나');
+    expect(title?.sourceText).toBe('합성 아티팩트');
     expect(title?.rcdata).toBe(true);
     expect(title?.locked).toBeNull();
   });
 
-  it('.code 블록 9개를 CODE_BLOCK 으로 잠근다 (spec §3)', () => {
+  it('.code 블록을 CODE_BLOCK 으로 잠그고 자손까지 상속한다 (spec §3)', () => {
     const locked = blocks.filter((b) => b.locked === 'CODE_BLOCK');
-    expect(locked).toHaveLength(9);
+    expect(locked).toHaveLength(2);
+    // 하나는 .code 자신, 하나는 그 안에 중첩된 div 다.
+    expect(locked.some((b) => b.sourceInner.includes('중첩된 요소'))).toBe(true);
   });
 
-  it('소스에서 비어 있는 .pg span 40개는 블록이 되지 않는다', () => {
-    expect(source.match(/class="pg"/g)).toHaveLength(40);
+  it('소스에서 비어 있는 .pg 와 #cnt 는 블록이 되지 않는다', () => {
+    expect(source.match(/class="pg"/g)).toHaveLength(4);
+    expect(source).toContain('<div id="cnt"></div>');
     for (const b of blocks) expect(b.sourceText).not.toBe('');
   });
 
   it('script / style 내부는 블록이 되지 않는다', () => {
     for (const b of blocks) {
       expect(b.sourceInner).not.toContain('addEventListener');
-      expect(b.sourceInner).not.toContain('box-sizing');
+      expect(b.sourceInner).not.toContain('font-family');
     }
   });
 
-  it('합성 <tbody> 13개에서 순회가 죽지 않는다 (INV-7)', () => {
-    // 테이블 13개가 있고, 그 안의 td/th 가 전부 블록으로 잡혔다면
-    // 위치 정보 없는 tbody 를 통과해 내려갔다는 뜻이다.
-    expect(source.match(/<table/g)).toHaveLength(13);
-    expect(blocks.filter((b) => b.tag === 'td' || b.tag === 'th').length).toBe(283);
+  it('합성 <tbody> 를 통과해 td/th 를 찾는다 (INV-7)', () => {
+    // parse5 는 소스에 없는 tbody 를 끼워 넣는다. 그 노드에는 위치 정보가 없다.
+    // td/th 가 전부 잡혔다면 통과해 내려갔다는 뜻이다.
+    expect(source.match(/<table/g)).toHaveLength(1);
+    expect(source).not.toContain('<tbody');
+    expect(blocks.filter((b) => b.tag === 'td' || b.tag === 'th')).toHaveLength(6);
   });
 });
 
@@ -133,7 +134,7 @@ describe('parseBlocks · 리뷰 회귀 (합성 입력)', () => {
   });
 
   it('부모에 직접 텍스트가 없으면 인라인 라벨을 승격한다', () => {
-    // 레퍼런스 파일의 .codelabel 구조. 승격하지 않으면 편집 불가가 된다.
+    // 실측 아티팩트의 .codelabel 구조. 승격하지 않으면 편집 불가가 된다.
     const blocks = only('<div><span class="codelabel">제목</span><ul><li>항목</li></ul></div>');
     expect(blocks.map((b) => b.tag)).toEqual(['span', 'li']);
   });
