@@ -9,15 +9,9 @@ import {
   IconRevertAll,
   IconScanning,
 } from '@/lib/icons';
+import { lockNotice } from '@/lib/messages';
 import { lockSummary, useEditor } from '@/store/editor';
-
-const LOCK_LABEL: Record<string, string> = {
-  RAW_TEXT: '코드 영역',
-  SCRIPT_GENERATED: '스크립트가 생성',
-  EMPTY_IN_SOURCE: '소스에서 비어 있음',
-  CODE_BLOCK: '코드 블록',
-  AMBIGUOUS: '범위 불확정',
-};
+import { useI18n } from '@/store/locale';
 
 /** 잠금 사유를 사람 말로 — 못 고치는 이유는 반드시 보인다 (대원칙 3) */
 export function ChangeList() {
@@ -26,6 +20,7 @@ export function ChangeList() {
   const revert = useEditor((s) => s.revert);
   const revertAll = useEditor((s) => s.revertAll);
   const scanned = useEditor((s) => s.scanned);
+  const { t, tn } = useI18n();
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
   const changed = [...patches.keys()].sort((a, b) => a - b);
@@ -34,20 +29,20 @@ export function ChangeList() {
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
       <section>
-        <h2 className="mb-2 text-xs font-semibold">블록</h2>
+        <h2 className="mb-2 text-xs font-semibold">{t('changes.blocks')}</h2>
         <div className="flex flex-wrap gap-1.5">
           <Badge variant="secondary">
             <IconBlocks />
-            전체 {blocks.length}
+            {t('changes.total', { count: blocks.length })}
           </Badge>
           <Badge variant="success">
             <IconEditable />
-            편집 가능 {editable}
+            {t('changes.editable', { count: editable })}
           </Badge>
           {!scanned && blocks.length > 0 && (
             <Badge variant="info">
               <IconScanning className="animate-spin" />
-              대조 중…
+              {t('changes.scanning')}
             </Badge>
           )}
         </div>
@@ -57,17 +52,17 @@ export function ChangeList() {
         <section>
           <h2 className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
             <IconLocked className="h-3 w-3 text-muted-foreground" />
-            잠긴 이유
+            {t('changes.lockedReasons')}
           </h2>
           <ul className="space-y-1">
             {lockSummary(blocks).map(({ reason, count }) => (
               <li key={reason} className="flex justify-between text-xs text-muted-foreground">
-                <span>{LOCK_LABEL[reason] ?? reason}</span>
+                <span>{tn(lockNotice(reason))}</span>
                 <span className="tabular-nums">{count}</span>
               </li>
             ))}
             {lockSummary(blocks).length === 0 && (
-              <li className="text-xs text-muted-foreground">없음</li>
+              <li className="text-xs text-muted-foreground">{t('changes.none')}</li>
             )}
           </ul>
         </section>
@@ -77,19 +72,19 @@ export function ChangeList() {
 
       <section className="min-h-0 flex-1">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-xs font-semibold">변경 {changed.length}</h2>
+          <h2 className="text-xs font-semibold">
+            {t('changes.changed', { count: changed.length })}
+          </h2>
           {changed.length > 0 && (
             <Button variant="ghost" size="sm" onClick={revertAll}>
               <IconRevertAll />
-              전체 되돌리기
+              {t('changes.revertAll')}
             </Button>
           )}
         </div>
 
         {changed.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            아직 없다. 프리뷰에서 글자를 눌러 고칠 수 있다.
-          </p>
+          <p className="text-xs text-muted-foreground">{t('changes.empty')}</p>
         ) : (
           <ul className="space-y-1.5">
             {changed.map((id) => {
@@ -102,7 +97,7 @@ export function ChangeList() {
                     </code>
                     <Button variant="ghost" size="sm" onClick={() => revert(id)}>
                       <IconRevert />
-                      되돌리기
+                      {t('changes.revert')}
                     </Button>
                   </div>
                   <p className="line-clamp-2 text-xs">{patches.get(id)?.replace(/<[^>]*>/g, '')}</p>

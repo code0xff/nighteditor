@@ -33,9 +33,12 @@ src/
   lib/                  ← 브라우저 API 래퍼와 호스트 쪽 헬퍼
     fs.ts               파일 열기·저장 (File System Access API + 폴백)
     icons.ts            아이콘 단일 출처 — 의미 이름 → lucide 그림, 앱 아이콘 경로
+    messages.ts         언어팩 — ko/en 사전, 키 타입, 보간. 화면 문구의 유일한 출처
     preview.ts          프리뷰 문서 조립 (마커 + 에이전트 주입)
   ui/                   ← React 컴포넌트
   store/                ← Zustand
+    editor.ts           원본·블록·패치. 알림은 문장이 아니라 메시지 키로 보관한다
+    locale.ts           UI 언어 (localStorage + <html lang>), useI18n
 ```
 
 `core/`는 DOM도 React도 모른다. 문자열을 받아 문자열을 돌려준다.

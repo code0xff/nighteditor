@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
+import { useI18n } from '@/store/locale';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
 
 /**
@@ -10,6 +11,7 @@ import type { FromPreview, ToPreview } from '@/preview/protocol';
  */
 export function PreviewFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
+  const { t } = useI18n();
   const previewDoc = useEditor((s) => s.previewDoc);
   const blocks = useEditor((s) => s.blocks);
   const scanned = useEditor((s) => s.scanned);
@@ -56,7 +58,7 @@ export function PreviewFrame() {
   return (
     <iframe
       ref={frame}
-      title="preview"
+      title={t('preview.title')}
       className="h-full w-full border-0 bg-white"
       sandbox="allow-scripts allow-same-origin"
       srcDoc={previewDoc}

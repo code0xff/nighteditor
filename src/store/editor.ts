@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { applyPatches, PatchError } from '@/core/patch';
 import { parseBlocks } from '@/core/parse';
 import { applyLiveLocks } from '@/core/verify';
-import type { Block } from '@/core/types';
+import type { Block, LockReason } from '@/core/types';
+import { patchNotice, type Notice } from '@/lib/messages';
 import { buildPreviewDocument } from '@/lib/preview';
 import { openHtmlFile, readDroppedFile, saveFile, type OpenedFile } from '@/lib/fs';
 
@@ -21,7 +22,8 @@ export interface EditorState {
   revertQueue: { id: number; html: string }[];
   scanned: boolean;
   busy: boolean;
-  message: string | null;
+  /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
+  notice: Notice | null;
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
@@ -58,6 +60,13 @@ export function titleBlock(blocks: readonly Block[]): Block | undefined {
   return blocks.find((b) => b.rcdata);
 }
 
+/** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
+function openFailedNotice(e: unknown): Notice {
+  return e instanceof Error && e.message
+    ? { key: 'notice.openFailedDetail', params: { detail: e.message } }
+    : { key: 'notice.openFailed' };
+}
+
 function load(file: OpenedFile): Partial<EditorState> {
   const blocks = parseBlocks(file.text);
   return {
@@ -70,7 +79,7 @@ function load(file: OpenedFile): Partial<EditorState> {
     blockedId: null,
     revertQueue: [],
     scanned: false,
-    message: null,
+    notice: null,
   };
 }
 
@@ -85,15 +94,16 @@ export const useEditor = create<EditorState>((set, get) => ({
   revertQueue: [],
   scanned: false,
   busy: false,
-  message: null,
+  notice: null,
 
   openFile: async () => {
-    set({ busy: true, message: null });
+    set({ busy: true, notice: null });
     try {
       const file = await openHtmlFile();
       if (file) set(load(file));
     } catch (e) {
-      set({ message: e instanceof Error ? e.message : '파일을 열지 못했다' });
+      // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
+      set({ notice: openFailedNotice(e) });
     } finally {
       set({ busy: false });
     }
@@ -103,12 +113,12 @@ export const useEditor = create<EditorState>((set, get) => ({
   adopt: (file) => set(load(file)),
 
   loadDropped: async (file) => {
-    set({ busy: true, message: null });
+    set({ busy: true, notice: null });
     try {
       set(load(await readDroppedFile(file)));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
-      set({ message: e instanceof Error ? `열지 못했다: ${e.message}` : '열지 못했다' });
+      set({ notice: openFailedNotice(e) });
     } finally {
       set({ busy: false });
     }
@@ -161,20 +171,23 @@ export const useEditor = create<EditorState>((set, get) => ({
   save: async () => {
     const { file, source, blocks, patches } = get();
     if (!file) return;
-    set({ busy: true, message: null });
+    set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
       const how = await saveFile(file, output);
       set({
-        message:
-          how === 'overwritten'
-            ? `${file.name} 에 저장했다 (${list.length}개 블록)`
-            : `${file.name} 을 내려받았다 — 이 브라우저는 덮어쓰기를 지원하지 않는다`,
+        notice: {
+          key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
+          params: { name: file.name, count: list.length },
+        },
       });
     } catch (e) {
       set({
-        message: e instanceof PatchError ? `저장 거부: ${e.message}` : '저장하지 못했다',
+        notice:
+          e instanceof PatchError
+            ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
+            : { key: 'notice.saveFailed' },
       });
     } finally {
       set({ busy: false });
@@ -183,8 +196,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 }));
 
 /** 잠금 사유별 개수 — UI 가 "왜 못 고치는지"를 보여주기 위한 집계 */
-export function lockSummary(blocks: readonly Block[]): { reason: string; count: number }[] {
-  const counts = new Map<string, number>();
+export function lockSummary(blocks: readonly Block[]): { reason: LockReason; count: number }[] {
+  const counts = new Map<LockReason, number>();
   for (const b of blocks) {
     if (b.locked === null) continue;
     counts.set(b.locked, (counts.get(b.locked) ?? 0) + 1);

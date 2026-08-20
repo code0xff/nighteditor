@@ -1,11 +1,14 @@
 import { Brand } from '@/components/Brand';
+import { LangSelect } from '@/components/LangSelect';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
 import { IconOpen, IconSave } from '@/lib/icons';
+import { lockNotice } from '@/lib/messages';
 import { titleBlock, useEditor } from '@/store/editor';
+import { useI18n } from '@/store/locale';
 
 export function Toolbar() {
   const file = useEditor((s) => s.file);
@@ -15,6 +18,7 @@ export function Toolbar() {
   const openFile = useEditor((s) => s.openFile);
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
+  const { t } = useI18n();
 
   const title = titleBlock(blocks);
   const titleValue = (title && patches.get(title.id)) ?? title?.sourceText ?? '';
@@ -25,7 +29,7 @@ export function Toolbar() {
 
       <Button variant="outline" size="sm" onClick={() => void openFile()} disabled={busy}>
         <IconOpen />
-        열기
+        {t('toolbar.open')}
       </Button>
 
       {file && (
@@ -35,14 +39,18 @@ export function Toolbar() {
           {title && (
             <div className="flex items-center gap-1.5">
               <Label htmlFor="doc-title" className="text-muted-foreground">
-                제목
+                {t('toolbar.title')}
               </Label>
               <Input
                 id="doc-title"
                 className="h-8 w-56"
                 value={titleValue}
                 disabled={title.locked !== null}
-                title={title.locked ? `편집할 수 없다 — ${title.locked}` : undefined}
+                title={
+                  title.locked
+                    ? t('toolbar.notEditable', { reason: lockNotice(title.locked) })
+                    : undefined
+                }
                 onChange={(e) => onEdit(title.id, e.target.value)}
               />
             </div>
@@ -52,16 +60,17 @@ export function Toolbar() {
 
       <div className="ml-auto flex items-center gap-2">
         {file && !file.handle && (
-          <span className="text-xs text-muted-foreground">
-            {canOverwrite() ? '드롭한 파일은 덮어쓸 수 없다' : '이 브라우저는 덮어쓰기 미지원'}
+          <span className="truncate text-xs text-muted-foreground">
+            {t(canOverwrite() ? 'toolbar.droppedNoOverwrite' : 'toolbar.noOverwriteSupport')}
           </span>
         )}
         {file && (
           <Button size="sm" onClick={() => void save()} disabled={busy || patches.size === 0}>
             <IconSave />
-            저장 {patches.size > 0 && `(${patches.size})`}
+            {t('toolbar.save')} {patches.size > 0 && `(${patches.size})`}
           </Button>
         )}
+        <LangSelect />
         <ThemeToggle />
       </div>
     </header>

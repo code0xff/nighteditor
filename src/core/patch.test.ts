@@ -134,6 +134,31 @@ describe('applyPatches · 거부 규칙', () => {
   });
 });
 
+describe('PatchError · 언어 무관 코드', () => {
+  it('거부 사유를 코드와 파라미터로 알린다 — 문장은 언어팩이 만든다 (INV-6)', () => {
+    const locked = blocks.find((b) => b.locked !== null);
+    if (!locked) throw new Error('잠긴 블록 없음');
+    try {
+      applyPatches(source, blocks, [{ id: locked.id, newInnerHtml: 'x' }]);
+      throw new Error('거부되지 않았다');
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchError);
+      const err = e as PatchError;
+      expect(err.code).toBe('locked');
+      expect(err.params).toEqual({ id: locked.id, reason: locked.locked });
+    }
+  });
+
+  it('알 수 없는 id 는 unknownId 코드로 알린다', () => {
+    try {
+      applyPatches(source, blocks, [{ id: 99999, newInnerHtml: 'x' }]);
+      throw new Error('거부되지 않았다');
+    } catch (e) {
+      expect((e as PatchError).code).toBe('unknownId');
+    }
+  });
+});
+
 describe('applyPatches · 리뷰 회귀', () => {
   it('RCDATA 는 평문으로 보고 엔티티화해 기록한다 (INV-8)', () => {
     const title = blocks.find((b) => b.rcdata);
