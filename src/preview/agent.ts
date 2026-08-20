@@ -11,6 +11,7 @@
 export function previewAgent(): () => void {
   const MARKER = 'data-ne-id';
   const LOCKED = 'data-ne-locked';
+  const DARK = 'data-ne-dark';
 
   // 떼어낼 수 있어야 한다. 파일을 바꿔 열 때 이전 에이전트가 남아 있으면
   // 옛 상태로 이벤트를 가로채 새 문서의 편집을 방해한다.
@@ -234,12 +235,46 @@ export function previewAgent(): () => void {
     }
   }) as EventListener);
 
+  /**
+   * `rgb()`/`rgba()` 의 밝기(0–255). 완전히 투명하면 null — 뒤에 깔린 색을 더 찾아야 한다.
+   */
+  const lumOf = (value: string): number | null => {
+    const m = /^rgba?\(([^)]+)\)/.exec(value);
+    if (!m?.[1]) return null;
+    const [r, g, b, a] = m[1].split(',').map(Number);
+    if (r === undefined || g === undefined || b === undefined || a === 0) return null;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+
+  /**
+   * 블록 뒤에 실제로 깔린 배경의 밝기를 재서 어두우면 표식을 붙인다.
+   * 주입된 스타일이 이걸 보고 테두리를 흰색/검은색 중에 고른다.
+   *
+   * 문서 단위가 아니라 블록 단위다. 어두운 바탕에 밝은 카드를 얹는 구성이 흔한데,
+   * 문서 하나로 정하면 카드 안 블록의 표시가 통째로 안 보인다.
+   */
+  const paintContrast = (): void => {
+    for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
+      let node: HTMLElement | null = el;
+      let lum: number | null = null;
+      while (node && lum === null) {
+        lum = lumOf(getComputedStyle(node).backgroundColor);
+        node = node.parentElement;
+      }
+      // 끝까지 투명하면 브라우저 기본값인 흰 바탕이다 — 밝은 쪽으로 둔다.
+      if (lum !== null && lum < 128) el.setAttribute(DARK, '');
+      else el.removeAttribute(DARK);
+    }
+  };
+
   /** 렌더 결과의 실제 텍스트를 모아 호스트로 보낸다 (ADR-005 대조용) */
   const scan = (): void => {
     const blocks: { id: number; text: string }[] = [];
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
       blocks.push({ id: idOf(el), text: el.textContent ?? '' });
     }
+    // 아티팩트 CSS 와 스크립트가 색을 다 칠한 뒤라야 제대로 잰다.
+    paintContrast();
     post({ type: 'ready', blocks });
   };
 

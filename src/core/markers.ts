@@ -6,6 +6,9 @@ export const MARKER_ATTR = 'data-ne-id';
 /** 잠긴 블록에 붙는 표식. 에이전트가 대조 결과를 받은 뒤 붙인다 */
 export const LOCKED_ATTR = 'data-ne-locked';
 
+/** 배경이 어두운 블록에 붙는 표식. 에이전트가 렌더된 색을 재서 붙인다 */
+export const DARK_ATTR = 'data-ne-dark';
+
 export class MarkerError extends Error {}
 
 /**
@@ -64,17 +67,24 @@ export function injectAgentScript(html: string, agentSource: string): string {
  * - `outline` 만 쓴다. `border` 는 박스 크기를 바꿔 문서가 밀린다
  * - 색·글꼴·간격은 건드리지 않는다
  * - 아티팩트 CSS 가 이겨 표시가 사라지면 안 되므로 이 몇 줄만 `!important` 다
+ *
+ * 표시는 흑백이다. 아티팩트마다 배색이 제각각이라 고정된 색은 어떤 문서에서는
+ * 배경에 묻히고 어떤 문서에서는 아티팩트의 색을 침범한다.
+ * 어느 쪽을 쓸지는 블록마다 다르므로(어두운 바탕 위의 밝은 카드) 에이전트가
+ * 렌더된 배경을 재서 `data-ne-dark` 를 붙이고, 여기서는 그 표식만 본다.
  */
 export function injectEditorStyle(html: string): string {
   const editable = `[${MARKER_ATTR}]:not([${LOCKED_ATTR}])`;
   const style =
     '<style>' +
+    `[${MARKER_ATTR}]{--ne-mark:#101012;--ne-soft:rgba(16,16,18,.45);--ne-tint:rgba(16,16,18,.05)}` +
+    `[${DARK_ATTR}]{--ne-mark:#fff;--ne-soft:rgba(255,255,255,.5);--ne-tint:rgba(255,255,255,.09)}` +
     `${editable}{cursor:text}` +
-    `${editable}:hover{outline:2px solid rgba(34,197,94,.9)!important;outline-offset:2px!important}` +
-    `[${MARKER_ATTR}][contenteditable="true"]{outline:2px solid rgb(34,197,94)!important;` +
-    'outline-offset:2px!important;background:rgba(34,197,94,.08)!important}' +
+    `${editable}:hover{outline:2px solid var(--ne-soft)!important;outline-offset:2px!important}` +
+    `[${MARKER_ATTR}][contenteditable="true"]{outline:2px solid var(--ne-mark)!important;` +
+    'outline-offset:2px!important;background:var(--ne-tint)!important}' +
     `[${LOCKED_ATTR}]{cursor:not-allowed}` +
-    `[${LOCKED_ATTR}]:hover{outline:2px dashed rgba(148,163,184,.9)!important;outline-offset:2px!important}` +
+    `[${LOCKED_ATTR}]:hover{outline:2px dashed var(--ne-soft)!important;outline-offset:2px!important}` +
     '</style>';
 
   const anchor = /<head[^>]*>/i.exec(html) ?? /<html[^>]*>/i.exec(html);

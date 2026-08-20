@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewAgent } from './agent.js';
-import { LOCKED_ATTR, MARKER_ATTR } from '../core/markers.js';
+import { DARK_ATTR, LOCKED_ATTR, MARKER_ATTR } from '../core/markers.js';
 
 /** 에이전트가 parent 로 보낸 메시지를 모은다 */
 let sent: Record<string, unknown>[] = [];
@@ -459,6 +459,42 @@ describe('previewAgent · IME (한글 조합)', () => {
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
 
     expect(sent).toContainEqual({ type: 'edit', id: 0, html: '한글', pristine: false });
+  });
+});
+
+describe('previewAgent · 표시 색 맞추기', () => {
+  const scan = async (): Promise<void> => {
+    window.dispatchEvent(new Event('load'));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('어두운 배경 위의 블록에 표식을 붙인다', async () => {
+    mount(`<div style="background-color:rgb(16,16,20)"><p ${MARKER_ATTR}="0">본문</p></div>`);
+    await scan();
+
+    // 블록 자신은 투명하다 — 위로 올라가 실제로 깔린 색을 찾아야 한다.
+    expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(true);
+  });
+
+  it('밝은 배경 위의 블록에는 붙이지 않는다', async () => {
+    mount(`<div style="background-color:rgb(255,255,255)"><p ${MARKER_ATTR}="0">본문</p></div>`);
+    await scan();
+
+    expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(false);
+  });
+
+  it('한 문서 안에서 블록마다 따로 판정한다', async () => {
+    // 어두운 바탕에 밝은 카드. 문서 단위로 정하면 카드 안 블록이 안 보인다.
+    mount(
+      `<div style="background-color:rgb(16,16,20)">` +
+        `<p ${MARKER_ATTR}="0">바탕 위</p>` +
+        `<div style="background-color:rgb(255,255,255)"><p ${MARKER_ATTR}="1">카드 안</p></div>` +
+        `</div>`
+    );
+    await scan();
+
+    expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(true);
+    expect(el(1)?.hasAttribute(DARK_ATTR)).toBe(false);
   });
 });
 
