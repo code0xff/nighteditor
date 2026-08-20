@@ -172,13 +172,22 @@ test(core): assert byte-identical output on zero patches
 ```jsonc
 // package.json
 "scripts": {
+  "guard":     "node scripts/check-lockfiles.mjs",
   "typecheck": "tsc --noEmit",
   "lint":      "eslint .",
   "format":    "prettier --check .",
   "test":      "vitest run",
-  "verify":    "pnpm typecheck && pnpm lint && pnpm format && pnpm test"
+  "verify":    "pnpm guard && pnpm typecheck && pnpm lint && pnpm format && pnpm test && pnpm build"
 }
 ```
+
+`guard` 는 **pnpm 이 아닌 패키지 매니저의 락파일**을 잡는다.
+`packageManager` 로 pnpm 을 못박아도 `npm install` 은 그냥 돌아가고, 그러면
+CI(`pnpm install --frozen-lockfile`)와 **다른 의존성 트리**가 로컬에만 생긴다.
+그 차이는 로컬에서만 재현되는 버그로 돌아오므로, 조용히 두지 않고 verify 에서 끊는다.
+
+락파일을 `.gitignore` 로 숨기지 않는다. 커밋만 막고 파일은 안 보이게 되므로
+`git status` 에서 알아챌 기회가 사라진다 (대원칙 3).
 
 ### 5.2 CI는 `verify` 만 호출한다
 

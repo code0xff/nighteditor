@@ -7,6 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "guard": "node scripts/check-lockfiles.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -15,7 +16,7 @@
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "test": "vitest run",
-    "verify": "pnpm typecheck && pnpm lint && pnpm format && pnpm test && pnpm build"
+    "verify": "pnpm guard && pnpm typecheck && pnpm lint && pnpm format && pnpm test && pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
