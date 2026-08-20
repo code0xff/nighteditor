@@ -39,6 +39,8 @@ const ko = {
 
   'preview.title': '프리뷰',
 
+  'confirm.discard': '저장하지 않은 변경이 {count}개 있다. 버리고 새 파일을 열까?',
+
   'changes.blocks': '블록',
   'changes.total': '전체 {count}',
   'changes.editable': '편집 가능 {count}',
@@ -93,6 +95,8 @@ const en: Record<MessageKey, string> = {
   'toolbar.noOverwriteSupport': "This browser can't overwrite files",
 
   'preview.title': 'Preview',
+
+  'confirm.discard': '{count} unsaved changes will be lost. Open another file anyway?',
 
   'changes.blocks': 'Blocks',
   'changes.total': '{count} total',

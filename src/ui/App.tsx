@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { onFileLaunch } from '@/lib/fs';
 import { IconDrop, IconLocked, IconNotice } from '@/lib/icons';
 import { onEditorShortcuts } from '@/lib/shortcuts';
+import { onBeforeUnload } from '@/lib/unsaved';
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { useEditor } from '@/store/editor';
@@ -21,7 +22,10 @@ export function App() {
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
+  const patches = useEditor((s) => s.patches);
   const { t, tn } = useI18n();
+  // 저장 전 편집은 메모리에만 있다. 탭을 닫기 전에 브라우저가 되묻게 한다.
+  useEffect(() => onBeforeUnload(() => patches.size > 0), [patches]);
   const [dragging, setDragging] = useState(false);
 
   // 설치된 PWA 를 OS 에서 "이 앱으로 열기" 했을 때 파일이 여기로 들어온다.
@@ -53,7 +57,10 @@ export function App() {
         e.preventDefault();
         setDragging(false);
         const dropped = e.dataTransfer.files[0];
-        if (dropped) void loadDropped(dropped);
+        if (!dropped) return;
+        // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
+        if (patches.size > 0 && !confirm(t('confirm.discard', { count: patches.size }))) return;
+        void loadDropped(dropped);
       }}
     >
       <Toolbar />
