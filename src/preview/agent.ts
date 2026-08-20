@@ -106,12 +106,20 @@ export function previewAgent(): () => void {
   // 캐럿이 배치되지 않는다. 이 스크립트는 문서 맨 앞에서 실행되므로
   // 아티팩트보다 먼저 등록되고, 따라서 먼저 실행된다.
 
+  // 편집을 여닫는 데 쓰인 이벤트는 그것만 하고 끝나야 한다. 전파만 끊으면
+  // <a href> 나 라벨의 기본 동작이 남아 문서가 그대로 이동해 버린다 (spec §4).
+  const consume = (e: Event): void => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+
   on(document, 'click', ((e: MouseEvent) => {
     const el = blockOf(e.target);
     if (el) {
       startEdit(el);
       // 아티팩트의 전역 클릭 핸들러(슬라이드 넘김 등)에 닿지 않게 한다.
-      e.stopImmediatePropagation();
+      // 캐럿은 mousedown 에서 이미 놓였으므로 여기서 기본 동작을 막아도 안전하다.
+      consume(e);
       return;
     }
     // 블록 밖 클릭. 편집 중이었다면 그 클릭은 "편집 종료"로 소비하고 끝낸다.
@@ -119,11 +127,19 @@ export function previewAgent(): () => void {
     // 통째로 죽어서 다른 슬라이드로 갈 수가 없다.
     const wasEditing = editingId !== null;
     commit();
-    if (wasEditing) e.stopImmediatePropagation();
+    if (wasEditing) consume(e);
   }) as EventListener);
 
   on(document, 'keydown', ((e: KeyboardEvent) => {
     if (editingId === null) return;
+    // Enter 는 편집을 확정하고 닫는다. 블록은 한 덩어리라(대원칙 4) 줄바꿈을
+    // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다.
+    // 조합 중이라면 IME 확정 키이므로 건드리지 않는다 — 막으면 글자를 완성할 수 없다.
+    if (e.key === 'Enter' && !composing && !e.isComposing) {
+      commit();
+      consume(e);
+      return;
+    }
     if (e.key === 'Escape') cancel();
     // 편집 중에는 방향키·스페이스가 아티팩트 네비게이션으로 새지 않게 한다.
     e.stopImmediatePropagation();

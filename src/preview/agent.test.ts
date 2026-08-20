@@ -17,7 +17,19 @@ function mount(html: string): void {
 }
 
 const el = (id: number) => document.querySelector<HTMLElement>(`[${MARKER_ATTR}="${id}"]`);
-const click = (node: Element) => node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+/** 실제 브라우저 클릭처럼 cancelable 로 보낸다 — preventDefault 여부를 볼 수 있어야 한다 */
+const clickEvent = (node: Element): MouseEvent => {
+  const e = new MouseEvent('click', { bubbles: true, cancelable: true });
+  node.dispatchEvent(e);
+  return e;
+};
+const click = (node: Element) => clickEvent(node);
+
+const keydown = (key: string): KeyboardEvent => {
+  const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  document.dispatchEvent(e);
+  return e;
+};
 
 /** 에이전트는 호스트가 보낸 메시지만 받는다 */
 const fromHost = (data: unknown) =>
@@ -178,6 +190,84 @@ describe('previewAgent · 편집 흐름', () => {
     mount(`<p ${MARKER_ATTR}="0">고쳐진 값</p>`);
     fromHost({ type: 'revert', id: 0, html: '원래 값' });
     expect(el(0)?.innerHTML).toBe('원래 값');
+  });
+});
+
+describe('previewAgent · Enter 로 편집 닫기', () => {
+  it('확정하고 편집을 닫는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    el(0)!.innerHTML = '고친 본문';
+
+    keydown('Enter');
+
+    expect(sent).toContainEqual({ type: 'edit', id: 0, html: '고친 본문', pristine: false });
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
+  });
+
+  it('아티팩트로 새지 않고 줄바꿈도 넣지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    const artifact = vi.fn();
+    document.addEventListener('keydown', artifact);
+
+    const e = keydown('Enter');
+
+    expect(artifact).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('조합 중 Enter 는 편집을 닫지 않는다 — 한글 확정 키다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+
+    const e = keydown('Enter');
+
+    // 확정을 막으면 글자를 완성할 수 없으므로 기본 동작을 살려 둔다.
+    expect(e.defaultPrevented).toBe(false);
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+    expect(sent.some((m) => m.type === 'edit')).toBe(false);
+  });
+
+  it('편집 중이 아니면 Enter 를 아티팩트로 넘긴다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    const artifact = vi.fn();
+    document.addEventListener('keydown', artifact);
+
+    const e = keydown('Enter');
+
+    expect(artifact).toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+  });
+});
+
+describe('previewAgent · 클릭의 기본 동작', () => {
+  it('블록 안의 링크를 눌러도 문서가 이동하지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문 <a href="#next">링크</a></p>`);
+
+    const e = clickEvent(document.querySelector('a')!);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+  });
+
+  it('편집을 닫는 블록 밖 클릭도 기본 동작을 막는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p><a id="nav" href="#next">이동</a>`);
+    click(el(0)!);
+
+    const e = clickEvent(document.getElementById('nav')!);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
+  });
+
+  it('편집 중이 아니면 기본 동작을 막지 않는다 — 아티팩트 링크는 살아 있어야 한다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p><a id="nav" href="#next">이동</a>`);
+
+    const e = clickEvent(document.getElementById('nav')!);
+
+    expect(e.defaultPrevented).toBe(false);
   });
 });
 
