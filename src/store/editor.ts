@@ -16,6 +16,7 @@ import {
 } from '@/lib/fs';
 import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/assets';
 import type { AssetRef } from '@/core/assets';
+import { documentCandidates } from '@/core/bundle';
 
 export interface EditorState {
   file: OpenedFile | null;
@@ -46,6 +47,15 @@ export interface EditorState {
   assets: AssetBundle;
   /** 묶음 안에서 문서가 놓인 디렉터리. 폴더·zip 으로 열었을 때만 루트가 아니다 */
   docDir: string;
+  /** 지금 연 문서의 묶음 안 경로. 묶음이 아니면 빈 문자열 */
+  docPath: string;
+  /**
+   * 묶음으로 받은 파일 전체. 다른 문서로 갈아탈 때 다시 풀지 않으려고 들고 있는다.
+   * blob URL 이 어차피 이 파일들을 붙잡고 있으므로 추가로 드는 것은 없다.
+   */
+  bundle: ReadonlyMap<string, Blob> | null;
+  /** 묶음 안의 HTML 후보들. 하나뿐이면 고를 것이 없다 */
+  candidates: string[];
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
@@ -65,6 +75,8 @@ export interface EditorState {
   downloadCopy: () => void;
   /** 폴더를 열어 외부 자원을 붙인다 (spec §5.1) */
   linkFolder: () => Promise<void>;
+  /** 같은 묶음 안의 다른 문서로 갈아탄다 */
+  openFromBundle: (path: string) => Promise<void>;
 }
 
 /**
@@ -121,6 +133,10 @@ async function replace(
   return next;
 }
 
+function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
+  return documentCandidates(files.keys());
+}
+
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
@@ -144,6 +160,7 @@ async function load(
       import('@/core/assets'),
       import('@/lib/assets'),
     ]);
+  const docPath = file.path ?? '';
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
   const refs = parseAssetRefs(file.text, docDir);
@@ -155,6 +172,9 @@ async function load(
     assetRefs: refs,
     assets,
     docDir,
+    docPath,
+    bundle: files ?? null,
+    candidates: files ? candidatesOf(files) : [],
     previewDoc: buildPreviewDocument(file.text, blocks, { refs, dir: docDir, urls: assets.urls }),
     patches: new Map(),
     selectedId: null,
@@ -191,10 +211,12 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
  *
  * 묶음으로 온 문서에는 핸들이 없다 — 되쓸 자리가 없어 저장은 사본 내려받기로 간다.
  */
-async function openBundle(files: ReadonlyMap<string, Blob>): Promise<Partial<EditorState>> {
-  const { documentCandidates } = await import('@/core/bundle');
-  const candidates = documentCandidates(files.keys());
-  const path = candidates[0];
+async function openBundle(
+  files: ReadonlyMap<string, Blob>,
+  want?: string
+): Promise<Partial<EditorState>> {
+  const candidates = candidatesOf(files);
+  const path = want && candidates.includes(want) ? want : candidates[0];
   const entry = path ? files.get(path) : undefined;
   if (!path || !entry) throw new BundleEmptyError();
 
@@ -203,7 +225,7 @@ async function openBundle(files: ReadonlyMap<string, Blob>): Promise<Partial<Edi
     files
   );
   // 후보가 여럿이면 어느 것을 열었는지 말한다. 조용히 하나 고르면 나머지는 없는 셈이 된다.
-  return candidates.length > 1
+  return candidates.length > 1 && !want
     ? {
         ...next,
         notice: { key: 'notice.bundlePicked', params: { path, count: candidates.length } },
@@ -230,6 +252,9 @@ export const useEditor = create<EditorState>((set, get) => ({
   assetRefs: [],
   assets: EMPTY_BUNDLE,
   docDir: '',
+  docPath: '',
+  bundle: null,
+  candidates: [],
 
   openFile: async () => {
     set({ busy: true, notice: null });
@@ -396,6 +421,26 @@ export const useEditor = create<EditorState>((set, get) => ({
             ? { key: 'notice.assetsLinked', params: { count: attached } }
             : { key: 'notice.assetsNotFound' },
       });
+    } catch (e) {
+      set({ notice: openFailedNotice(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /**
+   * 같은 묶음 안의 다른 문서로 갈아탄다 (spec §5.1).
+   *
+   * 이미 풀어 둔 파일을 그대로 쓴다 — zip 을 다시 푸는 것은 헛일이다.
+   * 프리뷰를 다시 그리므로 편집은 사라진다. 버려도 되는지는 부르는 쪽이 먼저 묻는다.
+   */
+  openFromBundle: async (path) => {
+    const { bundle, docPath } = get();
+    if (!bundle || path === docPath) return;
+
+    set({ busy: true, notice: null });
+    try {
+      set(await replace(get, openBundle(bundle, path)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {

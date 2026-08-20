@@ -31,6 +31,7 @@ const ko = {
 
   'toolbar.open': '열기',
   'toolbar.title': '제목',
+  'toolbar.document': '문서 {count}개 — 열 것을 고른다',
   'toolbar.save': '저장',
   'toolbar.downloadCopy': '사본 내려받기',
   'toolbar.notEditable': '편집할 수 없다 — {reason}',
@@ -101,6 +102,7 @@ const en: Record<MessageKey, string> = {
 
   'toolbar.open': 'Open',
   'toolbar.title': 'Title',
+  'toolbar.document': '{count} documents — pick one to open',
   'toolbar.save': 'Save',
   'toolbar.downloadCopy': 'Download a copy',
   'toolbar.notEditable': "Can't be edited — {reason}",

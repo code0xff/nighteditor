@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { unzip } from './zip.js';
-import { pickDocument } from '@/core/bundle';
+import { documentCandidates, pickDocument } from '@/core/bundle';
 import { dirOf, parseAssetRefs } from '@/core/assets';
 import { fixtureBundle } from '../__fixtures__/load.js';
 
@@ -47,5 +47,17 @@ describe('unzip', () => {
 
     expect(source).toContain('href="https://example.com/"');
     expect(parseAssetRefs(source, 'deck').some((r) => r.url.startsWith('http'))).toBe(false);
+  });
+
+  it('문서가 여럿이면 후보를 모두 알 수 있다', async () => {
+    // 하나를 골라 열되, 나머지가 있다는 사실을 잃지 않아야 한다 (대원칙 3).
+    const files = await unzip(zip());
+    const withMore = new Map(files);
+    withMore.set('deck/appendix.html', new Blob(['<p>부록</p>'], { type: 'text/html' }));
+
+    const candidates = documentCandidates(withMore.keys());
+
+    expect(candidates).toEqual(['deck/index.html', 'deck/appendix.html']);
+    expect(pickDocument(withMore.keys())).toBe('deck/index.html');
   });
 });

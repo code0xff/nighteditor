@@ -12,6 +12,7 @@ import {
   FileUp,
   FolderOpen,
   FolderSearch,
+  FileCode2,
   Unplug,
   Info,
   Languages,
@@ -51,6 +52,8 @@ export const IconNotice = Info;
 /** 자원을 못 붙였다 — 참조는 있는데 파일이 없다 */
 export const IconUnlinked = Unplug;
 export const IconLinkFolder = FolderSearch;
+/** 묶음 안의 문서 하나 */
+export const IconDocument = FileCode2;
 export const IconScanning = LoaderCircle;
 
 /** 블록 집계 */

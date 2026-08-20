@@ -1,4 +1,5 @@
 import { Brand } from '@/components/Brand';
+import { DocSelect } from '@/components/DocSelect';
 import { LangSelect } from '@/components/LangSelect';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ export function Toolbar() {
       {file && (
         <>
           <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>
+          <DocSelect />
 
           {title && (
             <div className="flex items-center gap-1.5">
