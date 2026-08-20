@@ -43,6 +43,7 @@ Claude 아티팩트로 생성된 단일 HTML 문서를, 브라우저에서 클�
 
 | 문서 | 내용 |
 |---|---|
+| [README.md](README.md) | 이 도구가 무엇이고 어떻게 쓰는지 (사용자용) |
 | [docs/architecture.md](docs/architecture.md) | 기술 스택, 모듈 구조, 데이터 흐름, 설계 결정(ADR)과 근거 |
 | [docs/spec.md](docs/spec.md) | 제품 사양, 블록 판정·잠금 규칙, 사용자 플로우, 범위 밖, 합격 기준 |
 | [docs/rules.md](docs/rules.md) | 개발 프로세스(플랜→구현→리뷰), 불변식, 커밋·분리 규칙, 검증/CI, 금지 사항 |
