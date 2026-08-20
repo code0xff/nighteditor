@@ -21,6 +21,7 @@ export function PreviewFrame() {
   const select = useEditor((s) => s.select);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
+  const undoLast = useEditor((s) => s.undoLast);
   const revertQueue = useEditor((s) => s.revertQueue);
   const drainReverts = useEditor((s) => s.drainReverts);
 
@@ -35,10 +36,11 @@ export function PreviewFrame() {
       // 프리뷰 안에서 누른 Ctrl+S. 호스트 창은 그 키를 보지 못한다 (spec §4).
       else if (msg.type === 'save') void save();
       else if (msg.type === 'downloadCopy') downloadCopy();
+      else if (msg.type === 'undo') undoLast();
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
-  }, [onReady, onEdit, onBlocked, select, save, downloadCopy]);
+  }, [onReady, onEdit, onBlocked, select, save, downloadCopy, undoLast]);
 
   // 대조가 끝나 잠금이 확정되면 프리뷰에 알린다. UI 차단만으로는 부족하다 (INV-5).
   useEffect(() => {

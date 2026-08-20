@@ -11,6 +11,18 @@ export interface EditorShortcuts {
   save: () => void;
   /** Ctrl+Shift+S · ⌘⇧S */
   downloadCopy: () => void;
+  /** Ctrl+Z · ⌘Z — 마지막으로 확정한 변경 되돌리기 */
+  undo: () => void;
+}
+
+/**
+ * 입력 칸 안에서는 단축키를 가로채지 않는다.
+ * 제목을 고치다 누른 Ctrl+Z 는 그 칸의 undo 여야 한다 — 남의 블록을 되돌리면 안 된다.
+ */
+function inTextField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
 }
 
 /**
@@ -18,13 +30,22 @@ export interface EditorShortcuts {
  *
  * @returns 리스너를 떼는 함수
  */
-export function onEditorShortcuts({ save, downloadCopy }: EditorShortcuts): () => void {
+export function onEditorShortcuts({ save, downloadCopy, undo }: EditorShortcuts): () => void {
   const onKey = (e: KeyboardEvent) => {
-    const sKey = e.key === 's' || e.key === 'S';
-    if (!sKey || !(e.ctrlKey || e.metaKey) || e.altKey) return;
-    e.preventDefault();
-    if (e.shiftKey) downloadCopy();
-    else save();
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+
+    if (e.key === 's' || e.key === 'S') {
+      e.preventDefault();
+      if (e.shiftKey) downloadCopy();
+      else save();
+      return;
+    }
+
+    // 되돌리기는 입력 칸을 비껴간다. 저장은 어디서 눌러도 저장이라 비껴가지 않는다.
+    if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey && !inTextField(e.target)) {
+      e.preventDefault();
+      undo();
+    }
   };
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);

@@ -144,6 +144,19 @@ export function previewAgent(): () => void {
       post({ type: e.shiftKey ? 'downloadCopy' : 'save' });
       return;
     }
+    // Ctrl/⌘+Z — 편집 중이면 손대지 않는다. 블록 안 타이핑은 브라우저의 네이티브 undo 가
+    // 이미 정확히 되돌린다. 편집 중이 아닐 때만 "마지막 변경 되돌리기"로 넘긴다 (spec §4).
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.key === 'z' || e.key === 'Z') &&
+      editingId === null
+    ) {
+      consume(e);
+      post({ type: 'undo' });
+      return;
+    }
     if (editingId === null) return;
     // Enter 는 편집을 확정하고 닫는다. 블록은 한 덩어리라(대원칙 4) 줄바꿈을
     // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다.

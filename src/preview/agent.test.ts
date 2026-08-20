@@ -341,6 +341,39 @@ describe('previewAgent · Ctrl+S', () => {
   });
 });
 
+describe('previewAgent · Ctrl+Z', () => {
+  const ctrlZ = () => {
+    const e = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(e);
+    return e;
+  };
+
+  it('편집 중이 아니면 되돌리기를 부탁한다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    const e = ctrlZ();
+
+    expect(sent).toContainEqual({ type: 'undo' });
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('편집 중에는 손대지 않는다 — 네이티브 undo 가 블록 안 타이핑을 되돌린다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+
+    const e = ctrlZ();
+
+    expect(sent.some((m) => m.type === 'undo')).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+  });
+});
+
 describe('previewAgent · 클릭의 기본 동작', () => {
   it('블록 안의 링크를 눌러도 문서가 이동하지 않는다', () => {
     mount(`<p ${MARKER_ATTR}="0">본문 <a href="#next">링크</a></p>`);

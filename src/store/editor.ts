@@ -18,6 +18,11 @@ export interface EditorState {
   blockedId: number | null;
   /** 프리뷰에 되돌리라고 보낼 목록. PreviewFrame 이 보내고 비운다 */
   revertQueue: { id: number; html: string }[];
+  /**
+   * 확정한 순서대로의 블록 id (마지막이 가장 최근). `patches` 는 Map 이라
+   * 같은 블록을 다시 고치면 처음 넣은 자리에 머물러 "마지막 변경"을 알 수 없다.
+   */
+  editOrder: number[];
   scanned: boolean;
   busy: boolean;
   /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
@@ -32,6 +37,8 @@ export interface EditorState {
   select: (id: number | null) => void;
   revert: (id: number) => void;
   revertAll: () => void;
+  /** 마지막으로 확정한 변경을 되돌린다 (Ctrl+Z) */
+  undoLast: () => void;
   drainReverts: () => void;
   save: () => Promise<void>;
   downloadCopy: () => void;
@@ -85,6 +92,7 @@ async function load(file: OpenedFile): Promise<Partial<EditorState>> {
     selectedId: null,
     blockedId: null,
     revertQueue: [],
+    editOrder: [],
     scanned: false,
     notice: null,
   };
@@ -99,6 +107,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   selectedId: null,
   blockedId: null,
   revertQueue: [],
+  editOrder: [],
   scanned: false,
   busy: false,
   notice: null,
@@ -149,13 +158,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     // applyPatches 가 목록 전체를 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
     const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));
     const patches = new Map([...get().patches].filter(([id]) => !lockedIds.has(id)));
-    set({ blocks, patches, scanned: true });
+    const editOrder = get().editOrder.filter((id) => patches.has(id));
+    set({ blocks, patches, editOrder, scanned: true });
   },
 
   onEdit: (id, html, pristine = false) => {
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
-    set({ patches: nextPatches(get().patches, block, html, pristine) });
+    const patches = nextPatches(get().patches, block, html, pristine);
+    // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
+    const editOrder = get().editOrder.filter((x) => x !== id);
+    if (patches.has(id)) editOrder.push(id);
+    set({ patches, editOrder });
   },
 
   onBlocked: (id) => set({ blockedId: id, selectedId: null }),
@@ -170,6 +184,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const block = blocks.find((b) => b.id === id);
     set({
       patches: next,
+      editOrder: get().editOrder.filter((x) => x !== id),
       revertQueue: [...revertQueue, { id, html: block?.sourceInner ?? '' }],
     });
   },
@@ -180,7 +195,14 @@ export const useEditor = create<EditorState>((set, get) => ({
       id,
       html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
     }));
-    set({ patches: new Map(), revertQueue: [...revertQueue, ...restored] });
+    set({ patches: new Map(), editOrder: [], revertQueue: [...revertQueue, ...restored] });
+  },
+
+  // 편집 중이 아닐 때의 Ctrl+Z. 편집 중에는 브라우저의 네이티브 undo 가 담당한다 (spec §4).
+  undoLast: () => {
+    const { editOrder, revert } = get();
+    const last = editOrder[editOrder.length - 1];
+    if (last !== undefined) revert(last);
   },
 
   drainReverts: () => set({ revertQueue: [] }),

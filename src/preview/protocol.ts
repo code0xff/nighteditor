@@ -16,7 +16,9 @@ export type FromPreview =
   /** 프리뷰 안에서 Ctrl+S 를 눌렀다. iframe 의 키 이벤트는 호스트 창에 닿지 않는다 */
   | { type: 'save' }
   /** Ctrl+Shift+S — 원본은 그대로 두고 결과물만 내려받는다 */
-  | { type: 'downloadCopy' };
+  | { type: 'downloadCopy' }
+  /** 편집 중이 아닐 때의 Ctrl+Z — 마지막으로 확정한 변경을 되돌린다 */
+  | { type: 'undo' };
 
 /** 호스트 → 프리뷰 */
 export type ToPreview =

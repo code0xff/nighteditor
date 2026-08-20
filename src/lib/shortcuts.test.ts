@@ -19,8 +19,16 @@ function press(init: KeyboardEventInit): KeyboardEvent {
 function mount() {
   const save = vi.fn();
   const downloadCopy = vi.fn();
-  dispose = onEditorShortcuts({ save, downloadCopy });
-  return { save, downloadCopy };
+  const undo = vi.fn();
+  dispose = onEditorShortcuts({ save, downloadCopy, undo });
+  return { save, downloadCopy, undo };
+}
+
+/** 입력 칸에 포커스가 있는 상황을 만든다 */
+function field(tag: 'input' | 'textarea'): HTMLElement {
+  const el = document.createElement(tag);
+  document.body.append(el);
+  return el;
 }
 
 describe('onEditorShortcuts · 저장', () => {
@@ -69,10 +77,49 @@ describe('onEditorShortcuts · 건드리지 않는 것', () => {
   it('떼면 더 이상 잡지 않는다', () => {
     const save = vi.fn();
     const downloadCopy = vi.fn();
-    onEditorShortcuts({ save, downloadCopy })();
+    const undo = vi.fn();
+    onEditorShortcuts({ save, downloadCopy, undo })();
 
     press({ key: 's', ctrlKey: true });
 
     expect(save).not.toHaveBeenCalled();
+  });
+});
+
+describe('onEditorShortcuts · 되돌리기', () => {
+  it('Ctrl+Z 는 마지막 변경을 되돌린다', () => {
+    const { undo, save } = mount();
+
+    const e = press({ key: 'z', ctrlKey: true });
+
+    expect(undo).toHaveBeenCalledOnce();
+    expect(save).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('입력 칸 안에서는 비껴간다 — 제목을 고치다 누른 Ctrl+Z 는 그 칸의 undo 다', () => {
+    const { undo } = mount();
+    const input = field('input');
+
+    const e = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(e);
+
+    expect(undo).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+    input.remove();
+  });
+
+  it('Ctrl+Shift+Z(redo)는 잡지 않는다 — 다시 실행은 없다', () => {
+    const { undo } = mount();
+
+    const e = press({ key: 'z', ctrlKey: true, shiftKey: true });
+
+    expect(undo).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
   });
 });

@@ -13,6 +13,8 @@ beforeEach(() => {
     blocks: [],
     previewDoc: '',
     patches: new Map(),
+    editOrder: [],
+    revertQueue: [],
     notice: null,
   });
 });
@@ -32,6 +34,59 @@ describe('editor · 파일 열기 (동적 import 경로)', () => {
   it('로드가 끝나면 busy 가 풀린다 — 청크를 기다리다 굳지 않는다', async () => {
     await useEditor.getState().loadDropped(dropped());
     expect(useEditor.getState().busy).toBe(false);
+  });
+});
+
+describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
+  /** 편집 가능한 블록 두 개를 골라 각각 고친다 */
+  async function twoEdits() {
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    if (!a || !b) throw new Error('편집 가능한 블록이 둘 필요하다');
+    useEditor.getState().onEdit(a.id, 'A 수정');
+    useEditor.getState().onEdit(b.id, 'B 수정');
+    return { a, b };
+  }
+
+  it('가장 최근에 고친 블록만 되돌린다', async () => {
+    const { a, b } = await twoEdits();
+
+    useEditor.getState().undoLast();
+
+    const { patches } = useEditor.getState();
+    expect(patches.has(b.id)).toBe(false);
+    expect(patches.get(a.id)).toBe('A 수정');
+  });
+
+  it('다시 고친 블록이 가장 최근이 된다 — Map 순서로는 알 수 없다', async () => {
+    const { a, b } = await twoEdits();
+    useEditor.getState().onEdit(a.id, 'A 다시 수정');
+
+    useEditor.getState().undoLast();
+
+    const { patches } = useEditor.getState();
+    expect(patches.has(a.id)).toBe(false);
+    expect(patches.get(b.id)).toBe('B 수정');
+  });
+
+  it('되돌린 블록은 순서에서 빠진다 — 두 번 눌러도 되살아나지 않는다', async () => {
+    const { a, b } = await twoEdits();
+
+    useEditor.getState().undoLast();
+    useEditor.getState().undoLast();
+    useEditor.getState().undoLast();
+
+    expect(useEditor.getState().patches.size).toBe(0);
+    expect(useEditor.getState().editOrder).toEqual([]);
+    expect(useEditor.getState().revertQueue.map((r) => r.id)).toEqual([b.id, a.id]);
+  });
+
+  it('고친 것이 없으면 아무 일도 하지 않는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+
+    useEditor.getState().undoLast();
+
+    expect(useEditor.getState().revertQueue).toEqual([]);
   });
 });
 

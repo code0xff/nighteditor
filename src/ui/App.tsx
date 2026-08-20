@@ -20,6 +20,7 @@ export function App() {
   const adopt = useEditor((s) => s.adopt);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
+  const undoLast = useEditor((s) => s.undoLast);
   const { t, tn } = useI18n();
   const [dragging, setDragging] = useState(false);
 
@@ -28,8 +29,8 @@ export function App() {
 
   // 프리뷰 밖(툴바·사이드바)에 포커스가 있을 때의 단축키. 프리뷰 안쪽은 에이전트가 넘긴다.
   useEffect(
-    () => onEditorShortcuts({ save: () => void save(), downloadCopy }),
-    [save, downloadCopy]
+    () => onEditorShortcuts({ save: () => void save(), downloadCopy, undo: undoLast }),
+    [save, downloadCopy, undoLast]
   );
 
   const blocked = blocks.find((b) => b.id === blockedId);
