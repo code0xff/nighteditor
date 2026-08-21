@@ -12,6 +12,7 @@ import {
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { lockSummary, useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
 /** 편집 결과는 innerHTML 이다. 목록에는 태그를 걷어낸 글자만 보여준다 */
@@ -28,6 +29,9 @@ export function ChangeList() {
   const revertAll = useEditor((s) => s.revertAll);
   const scanned = useEditor((s) => s.scanned);
   const selectedId = useEditor((s) => s.selectedId);
+  // 갈아 끼우는 동안은 되돌리기도 잠근다 — 목록이 보여주는 것은 아직 이전 문서라,
+  // 여기서 고친 것은 새 문서가 서는 순간 갈 곳이 없다 (spec §4 · ADR-010).
+  const replacing = useReplacement((s) => s.replacing);
   const { t, tn } = useI18n();
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
@@ -84,7 +88,7 @@ export function ChangeList() {
             {t('changes.changed', { count: changed.length })}
           </h2>
           {changed.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={revertAll}>
+            <Button variant="ghost" size="sm" disabled={replacing} onClick={revertAll}>
               <IconRevertAll />
               {t('changes.revertAll')}
             </Button>
@@ -128,6 +132,7 @@ export function ChangeList() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        disabled={replacing}
                         // 되돌리기는 카드를 누른 것이 아니다. 위로 새면 되돌리고 나서
                         // 없는 블록으로 데려가려 든다.
                         onClick={(e) => {

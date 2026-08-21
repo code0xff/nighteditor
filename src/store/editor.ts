@@ -662,6 +662,13 @@ export const useEditor = create<EditorState>((set, get) => ({
   // 패치만 지우면 프리뷰에는 고친 내용이 그대로 남는다. 그 블록을 다시 눌렀다
   // 빠져나오면 패치가 되살아나 프리뷰와 저장본이 영영 어긋난다.
   revert: (id) => {
+    // 갈아 끼우는 동안의 되돌리기는 이전 문서를 고치는 일이다 — 바뀐 패치도, 프리뷰로
+    // 보낼 되돌림도 설치 순간 갈 곳이 없다. 버튼은 잠겨 있지만 단축키(Ctrl+Z)는
+    // 언제든 눌리므로, 편집 확정과 같은 자리에서 거절하고 알린다 (spec §4 · 대원칙 3).
+    if (useReplacement.getState().replacing) {
+      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
+      return;
+    }
     const { patches, blocks, revertQueue } = get();
     const next = new Map(patches);
     next.delete(id);
@@ -677,6 +684,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   revertAll: () => {
+    // revert 와 같은 이유 — 갈아 끼우는 동안 이전 문서를 고치지 않는다 (spec §4).
+    if (useReplacement.getState().replacing) {
+      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
+      return;
+    }
     const { patches, blocks, revertQueue } = get();
     const restored = [...patches.keys()].map((id) => ({
       id,

@@ -452,6 +452,25 @@ describe('editor · 리뷰가 짚은 자리', () => {
     );
   });
 
+  it('갈아 끼우는 동안의 되돌리기는 거절하고 알린다', async () => {
+    // 목록이 보여주는 것은 아직 이전 문서다 — 되돌린 패치도, 프리뷰로 보낼 되돌림도
+    // 설치 순간 갈 곳이 없다. 버튼은 잠기지만 Ctrl+Z 는 언제든 눌린다 (spec §4).
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    useReplacement.setState({ replacing: true });
+
+    useEditor.getState().revert(target?.id ?? -1);
+    useEditor.getState().undoLast();
+    useEditor.getState().revertAll();
+
+    expect(useEditor.getState().patches.get(target?.id ?? -1)).toBe('고친 값');
+    expect(useEditor.getState().revertQueue).toEqual([]);
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editWhileReplacing')).toBe(
+      true
+    );
+  });
+
   it('여는 동안 replacing 이 서고, 끝나면 풀린다', async () => {
     // 화면(제목 칸·프리뷰)이 이 값을 보고 잠근다. 서지 않으면 잠글 근거가 없고,
     // 안 풀리면 새 문서를 영영 못 고친다.
