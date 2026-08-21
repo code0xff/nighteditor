@@ -11,6 +11,7 @@ import {
   FilePen,
   Download,
   FileUp,
+  FileX,
   FolderOpen,
   FolderSearch,
   FolderTree,
@@ -56,6 +57,8 @@ export const IconLocked = Lock;
 export const IconNotice = Info;
 /** 알림 닫기 */
 export const IconClose = X;
+/** 열어 둔 문서를 닫는다 — 알림 닫기(IconClose)와 뜻이 달라 그림도 다르다 */
+export const IconCloseDoc = FileX;
 /** 자원을 못 붙였다 — 참조는 있는데 파일이 없다 */
 export const IconUnlinked = Unplug;
 export const IconLinkFolder = FolderSearch;

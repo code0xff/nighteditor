@@ -1776,3 +1776,56 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     expect(useEditor.getState().patches.size).toBe(1);
   });
 });
+
+describe('editor · 문서 닫기', () => {
+  it('처음 화면으로 돌아간다 — 이전 문서의 것이 남지 않는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    expect(useEditor.getState().blocks.length).toBeGreaterThan(0);
+
+    await useEditor.getState().closeFile();
+
+    const s = useEditor.getState();
+    expect(s.file).toBeNull();
+    expect(s.source).toBe('');
+    expect(s.blocks).toEqual([]);
+    expect(s.previewDoc).toBe('');
+    expect(s.patches.size).toBe(0);
+    expect(s.bundle).toBeNull();
+    expect(s.assetPaths).toEqual([]);
+    expect(s.unsaved).toBe(false);
+  });
+
+  it('붙여 둔 자원을 놓아준다 — 안 놓으면 탭을 닫을 때까지 남는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const dispose = vi.fn();
+    useEditor.setState({ assets: { urls: new Map(), missing: [], dispose } });
+
+    await useEditor.getState().closeFile();
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('저장하지 않은 편집이 있으면 묻는다 — 닫기만 예외일 수 없다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const closing = useEditor.getState().closeFile();
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('묻지 않았다');
+      await Promise.resolve();
+    }
+    useUnsaved.getState().reply('cancel');
+    await closing;
+
+    // 취소했으므로 문서는 그대로다.
+    expect(useEditor.getState().file).not.toBeNull();
+    expect(useEditor.getState().patches.size).toBe(1);
+  });
+
+  it('열어 둔 문서가 없으면 아무 일도 하지 않는다', async () => {
+    await useEditor.getState().closeFile();
+
+    expect(useEditor.getState().file).toBeNull();
+  });
+});

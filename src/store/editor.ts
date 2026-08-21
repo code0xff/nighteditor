@@ -122,6 +122,8 @@ export interface EditorState {
   loadDropped: (file: File, within?: Replacement) => Promise<void>;
   /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
   loadFolder: (read: FolderRead | null, within?: Replacement) => Promise<boolean>;
+  /** 열어 둔 문서를 닫고 처음 화면으로 돌아간다 */
+  closeFile: () => Promise<void>;
   /** 폴더를 골라 그 안의 문서를 연다 (spec §5.1) */
   openFolder: () => Promise<void>;
   /** 여는 도중의 실패를 알림으로 돌린다 — 화면 쪽에서 잡은 오류가 들어온다 */
@@ -517,32 +519,44 @@ function folderFailedNotice(e: unknown, read: FolderRead | null): Notice {
   return openFailedNotice(e);
 }
 
+/**
+ * 문서가 없는 상태.
+ *
+ * 처음 화면과 **닫은 뒤**가 같아야 하므로 한 곳에서 만든다. 두 벌로 두면 새 상태가
+ * 늘 때마다 한쪽만 고쳐져, 닫았는데 이전 문서의 무언가가 남는다.
+ */
+function emptyDocument(): Partial<EditorState> {
+  return {
+    file: null,
+    source: '',
+    blocks: [],
+    previewDoc: '',
+    patches: new Map(),
+    selectedId: null,
+    blockedId: null,
+    revertQueue: [],
+    revealId: null,
+    editOrder: [],
+    scanned: false,
+    unsaved: false,
+    savedText: '',
+    savedPatches: new Map(),
+    assetRefs: [],
+    assetPaths: [],
+    assets: EMPTY_BUNDLE,
+    boundary: null,
+    docDir: '',
+    docPath: '',
+    bundle: null,
+    candidates: [],
+    bundleHandles: new Map(),
+  };
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
-  file: null,
-  source: '',
-  blocks: [],
-  previewDoc: '',
-  patches: new Map(),
-  selectedId: null,
-  blockedId: null,
-  revertQueue: [],
-  revealId: null,
-  editOrder: [],
-  scanned: false,
+  ...(emptyDocument() as EditorState),
   saving: false,
-  unsaved: false,
-  savedText: '',
-  savedPatches: new Map(),
   notice: null,
-  assetRefs: [],
-  assetPaths: [],
-  assets: EMPTY_BUNDLE,
-  boundary: null,
-  docDir: '',
-  docPath: '',
-  bundle: null,
-  candidates: [],
-  bundleHandles: new Map(),
 
   openFile: async () => {
     set({ notice: null });
@@ -968,6 +982,30 @@ export const useEditor = create<EditorState>((set, get) => ({
    * 이미 풀어 둔 파일을 그대로 쓴다 — zip 을 다시 푸는 것은 헛일이다.
    * 프리뷰를 다시 그리므로 편집은 사라진다. 버려도 되는지는 부르는 쪽이 먼저 묻는다.
    */
+  /**
+   * 열어 둔 문서를 닫고 처음 화면으로 돌아간다.
+   *
+   * 문서를 **바꾸는** 일이므로 여는 것과 같은 길을 지난다 — 사용자 행동의 순간에
+   * 예약하고, 저장하지 않은 편집이 있으면 묻고, 자원을 놓아준다 (spec §5).
+   * 닫기만 예외로 두면 그 자리에서 편집이 조용히 사라지고 blob 이 남는다.
+   */
+  closeFile: async () => {
+    if (!get().file) return;
+
+    set({ notice: null });
+    const mine = reserveReplacement();
+    try {
+      if (!(await keepEdits({ key: 'confirm.whyClose' }, mine))) return;
+      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
+      if (!mine.current()) return;
+      await replace(get, set, mine, Promise.resolve(emptyDocument()));
+    } catch (e) {
+      if (mine.current()) set({ notice: openFailedNotice(e) });
+    } finally {
+      mine.release();
+    }
+  },
+
   openFromBundle: async (path) => {
     const { bundle, docPath } = get();
     if (!bundle || path === docPath) return;

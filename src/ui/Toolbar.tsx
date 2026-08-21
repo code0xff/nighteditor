@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
-import { IconDownloadCopy, IconSave } from '@/lib/icons';
+import { IconCloseDoc, IconDownloadCopy, IconSave } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
 import { titleBlock, useEditor, useEditorBusy } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
@@ -26,6 +26,7 @@ export function Toolbar() {
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
+  const closeFile = useEditor((s) => s.closeFile);
   const { t } = useI18n();
 
   const title = titleBlock(blocks);
@@ -41,6 +42,18 @@ export function Toolbar() {
         <>
           <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>
           <DocSelect />
+
+          {/* 문서를 바꾸는 일이라 여는 것과 같이 잠근다 — 저장 중·갈아 끼우는 중에는 못 누른다 */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => void closeFile()}
+            disabled={busy}
+            aria-label={t('toolbar.close')}
+            title={t('toolbar.close')}
+          >
+            <IconCloseDoc />
+          </Button>
 
           {title && (
             <div className="flex items-center gap-1.5">

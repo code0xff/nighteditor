@@ -34,6 +34,7 @@ const ko = {
   'app.editBeforeScan': '아직 문서를 살펴보는 중이에요. 잠시 뒤에 다시 눌러 주세요',
   'app.editsReverted': '살펴보니 고칠 수 없는 곳이라, 고친 {count}곳을 원래대로 되돌렸어요',
 
+  'toolbar.close': '닫기',
   'toolbar.openFile': '파일 열기',
   'toolbar.openFileHint': 'HTML 파일 하나, 또는 zip 을 엽니다',
   'toolbar.openFolder': '폴더 열기',
@@ -61,6 +62,7 @@ const ko = {
   'confirm.title': '저장하지 않은 변경이 있어요',
   'confirm.body': '{count}곳을 고쳤어요. {why}',
   'confirm.whyOpen': '새 파일을 열면 고친 내용이 사라져요.',
+  'confirm.whyClose': '문서를 닫으면 고친 내용이 사라져요.',
   'confirm.whySwitch': '{path} 문서로 옮기면 고친 내용이 사라져요.',
   'confirm.whyAssets': '외부 파일을 붙이려면 프리뷰를 다시 그려야 해서, 고친 내용이 사라져요.',
   'confirm.save': '저장하고 계속하기',
@@ -142,6 +144,7 @@ const en: Record<MessageKey, string> = {
   'app.editsReverted':
     "Checking found {count} edited spot(s) that can't be edited, so they were put back",
 
+  'toolbar.close': 'Close',
   'toolbar.openFile': 'Open a file',
   'toolbar.openFileHint': 'Opens one HTML file, or a zip',
   'toolbar.openFolder': 'Open a folder',
@@ -169,6 +172,7 @@ const en: Record<MessageKey, string> = {
   'confirm.title': 'You have unsaved changes',
   'confirm.body': 'Unsaved edits: {count}. {why}',
   'confirm.whyOpen': 'Opening another file will lose them.',
+  'confirm.whyClose': 'Closing the document will lose them.',
   'confirm.whySwitch': 'Switching to {path} will lose them.',
   'confirm.whyAssets': 'Attaching files redraws the preview, which will lose them.',
   'confirm.save': 'Save and continue',
