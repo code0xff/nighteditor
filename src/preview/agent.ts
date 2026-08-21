@@ -12,6 +12,7 @@ export function previewAgent(): () => void {
   const MARKER = 'data-ne-id';
   const LOCKED = 'data-ne-locked';
   const DARK = 'data-ne-dark';
+  const REVEALED = 'data-ne-revealed';
 
   // 떼어낼 수 있어야 한다. 파일을 바꿔 열 때 이전 에이전트가 남아 있으면
   // 옛 상태로 이벤트를 가로채 새 문서의 편집을 방해한다.
@@ -28,6 +29,8 @@ export function previewAgent(): () => void {
   /** 편집을 열 때의 innerHTML. Escape 복원과 pristine 판정에 쓴다. */
   let snapshot: string | null = null;
   let composing = false;
+  /** 짚어둔 표시를 지울 시각. 연달아 고르면 앞의 것을 취소한다 */
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
   /** 조합 중이라 미뤄둔 확정이 있는지 */
   let pendingCommit = false;
   const locked = new Set<number>();
@@ -234,6 +237,20 @@ export function previewAgent(): () => void {
         if (show) el.setAttribute(LOCKED, '');
         else el.removeAttribute(LOCKED);
       }
+    } else if (msg.type === 'reveal' && typeof msg.id === 'number') {
+      const el = elementFor(msg.id);
+      if (el) {
+        // 아티팩트가 슬라이드를 감추고 있으면 스크롤만으로는 보이지 않는다.
+        // 그 자리로 데려가는 것까지가 우리 몫이고, 무엇을 보여줄지는 아티팩트가 정한다.
+        el.scrollIntoView({ block: 'center', inline: 'nearest' });
+        // 스크롤만 하면 어디가 그 블록인지 알 수 없다. 잠깐 짚었다가 지운다.
+        el.setAttribute(REVEALED, '');
+        if (revealTimer !== null) clearTimeout(revealTimer);
+        revealTimer = setTimeout(() => {
+          el.removeAttribute(REVEALED);
+          revealTimer = null;
+        }, 1200);
+      }
     } else if (msg.type === 'revert' && typeof msg.id === 'number') {
       const el = elementFor(msg.id);
       if (el) el.innerHTML = msg.html ?? '';
@@ -289,6 +306,7 @@ export function previewAgent(): () => void {
   if (document.readyState === 'complete') setTimeout(scan, 0);
 
   return () => {
+    if (revealTimer !== null) clearTimeout(revealTimer);
     for (const { target, type, fn } of bound) target.removeEventListener(type, fn);
   };
 }

@@ -24,6 +24,8 @@ export function PreviewFrame() {
   const undoLast = useEditor((s) => s.undoLast);
   const revertQueue = useEditor((s) => s.revertQueue);
   const drainReverts = useEditor((s) => s.drainReverts);
+  const revealId = useEditor((s) => s.revealId);
+  const drainReveal = useEditor((s) => s.drainReveal);
 
   useEffect(() => {
     const handle = (e: MessageEvent) => {
@@ -59,6 +61,14 @@ export function PreviewFrame() {
     }
     drainReverts();
   }, [revertQueue, drainReverts]);
+
+  // 변경 목록에서 고른 블록을 화면에 보여준다. 어디를 고쳤는지 목록만으로는 알기 어렵다.
+  useEffect(() => {
+    if (revealId === null) return;
+    const msg: ToPreview = { type: 'reveal', id: revealId };
+    frame.current?.contentWindow?.postMessage(msg, '*');
+    drainReveal();
+  }, [revealId, drainReveal]);
 
   if (!previewDoc) return null;
 

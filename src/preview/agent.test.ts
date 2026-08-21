@@ -609,3 +609,35 @@ describe('previewAgent · 리뷰 회귀', () => {
     expect(() => fromHost(null)).not.toThrow();
   });
 });
+
+describe('previewAgent · 고른 블록 보여주기', () => {
+  it('그 자리로 데려가고 잠깐 짚어준다', async () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    const into = vi.fn();
+    el(0)!.scrollIntoView = into;
+
+    fromHost({ type: 'reveal', id: 0 });
+
+    expect(into).toHaveBeenCalledOnce();
+    // 스크롤만 하면 어디가 그 블록인지 알 수 없다.
+    expect(el(0)?.hasAttribute('data-ne-revealed')).toBe(true);
+  });
+
+  it('짚어둔 표시는 스스로 사라진다', async () => {
+    vi.useFakeTimers();
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    el(0)!.scrollIntoView = vi.fn();
+
+    fromHost({ type: 'reveal', id: 0 });
+    vi.advanceTimersByTime(2000);
+
+    expect(el(0)?.hasAttribute('data-ne-revealed')).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('없는 블록을 짚어 달라 해도 죽지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    expect(() => fromHost({ type: 'reveal', id: 99 })).not.toThrow();
+  });
+});

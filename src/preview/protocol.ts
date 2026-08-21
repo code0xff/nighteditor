@@ -22,4 +22,7 @@ export type FromPreview =
 
 /** 호스트 → 프리뷰 */
 export type ToPreview =
-  { type: 'locked'; ids: number[] } | { type: 'revert'; id: number; html: string };
+  | { type: 'locked'; ids: number[] }
+  | { type: 'revert'; id: number; html: string }
+  /** 변경 목록에서 고른 블록을 화면에 보여준다 (스크롤 + 잠깐 짚어주기) */
+  | { type: 'reveal'; id: number };

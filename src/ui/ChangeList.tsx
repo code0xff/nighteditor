@@ -24,6 +24,7 @@ export function ChangeList() {
   const blocks = useEditor((s) => s.blocks);
   const patches = useEditor((s) => s.patches);
   const revert = useEditor((s) => s.revert);
+  const reveal = useEditor((s) => s.reveal);
   const revertAll = useEditor((s) => s.revertAll);
   const scanned = useEditor((s) => s.scanned);
   const selectedId = useEditor((s) => s.selectedId);
@@ -97,28 +98,50 @@ export function ChangeList() {
             {changed.map((id) => {
               const block = byId.get(id);
               return (
-                <li
-                  key={id}
-                  className={cn(
-                    'rounded-md border border-border bg-card p-2',
-                    // 프리뷰에서 고르고 있는 블록을 목록에서도 짚어준다.
-                    id === selectedId && 'border-primary'
-                  )}
-                >
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <code className="font-mono text-[10px] text-muted-foreground">
-                      #{id} &lt;{block?.tag}&gt;
-                    </code>
-                    <Button variant="ghost" size="sm" onClick={() => revert(id)}>
-                      <IconRevert />
-                      {t('changes.revert')}
-                    </Button>
+                <li key={id}>
+                  {/* 카드를 누르면 프리뷰의 그 자리로 데려간다. 문서가 길면 목록만 보고
+                      어디를 고쳤는지 찾기 어렵다. 되돌리기는 안쪽 버튼이 따로 받는다. */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => reveal(id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        reveal(id);
+                      }
+                    }}
+                    className={cn(
+                      'w-full cursor-pointer rounded-md border border-border bg-card p-2 text-left',
+                      'hover:border-muted-foreground focus:outline-none focus-visible:border-primary',
+                      // 프리뷰에서 고르고 있는 블록을 목록에서도 짚어준다.
+                      id === selectedId && 'border-primary'
+                    )}
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <code className="font-mono text-[10px] text-muted-foreground">
+                        #{id} &lt;{block?.tag}&gt;
+                      </code>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        // 되돌리기는 카드를 누른 것이 아니다. 위로 새면 되돌리고 나서
+                        // 없는 블록으로 데려가려 든다.
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          revert(id);
+                        }}
+                      >
+                        <IconRevert />
+                        {t('changes.revert')}
+                      </Button>
+                    </div>
+                    {/* 무엇이 무엇으로 바뀌었는지 보여준다 — 새 값만 보면 확인이 안 된다 (spec §4) */}
+                    <p className="line-clamp-2 text-xs text-muted-foreground line-through">
+                      {block?.sourceText}
+                    </p>
+                    <p className="line-clamp-2 text-xs">{plainText(patches.get(id))}</p>
                   </div>
-                  {/* 무엇이 무엇으로 바뀌었는지 보여준다 — 새 값만 보면 확인이 안 된다 (spec §4) */}
-                  <p className="line-clamp-2 text-xs text-muted-foreground line-through">
-                    {block?.sourceText}
-                  </p>
-                  <p className="line-clamp-2 text-xs">{plainText(patches.get(id))}</p>
                 </li>
               );
             })}

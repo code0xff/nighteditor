@@ -10,6 +10,9 @@ export const LOCKED_ATTR = 'data-ne-locked';
 /** 배경이 어두운 블록에 붙는 표식. 에이전트가 렌더된 색을 재서 붙인다 */
 export const DARK_ATTR = 'data-ne-dark';
 
+/** 변경 목록에서 고른 블록을 잠깐 짚어줄 때 붙는 표식 */
+export const REVEALED_ATTR = 'data-ne-revealed';
+
 export class MarkerError extends Error {}
 
 /**
@@ -85,6 +88,9 @@ export function injectEditorStyle(html: string): string {
     'outline-offset:2px!important;background:var(--ne-tint)!important}' +
     `[${LOCKED_ATTR}]{cursor:not-allowed}` +
     `[${LOCKED_ATTR}]:hover{outline:2px dashed var(--ne-soft)!important;outline-offset:2px!important}` +
+    // 목록에서 고른 자리를 짚어준다. 스크롤만 하면 어디가 그 블록인지 알 수 없다.
+    `[${REVEALED_ATTR}]{outline:2px solid var(--ne-mark)!important;outline-offset:2px!important;` +
+    'background:var(--ne-tint)!important}' +
     '</style>';
 
   const anchor = /<head[^>]*>/i.exec(html) ?? /<html[^>]*>/i.exec(html);

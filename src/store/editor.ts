@@ -32,6 +32,8 @@ export interface EditorState {
   blockedId: number | null;
   /** 프리뷰에 되돌리라고 보낼 목록. PreviewFrame 이 보내고 비운다 */
   revertQueue: { id: number; html: string }[];
+  /** 프리뷰에 보여 달라고 부탁할 블록. 보내고 나면 비운다 */
+  revealId: number | null;
   /**
    * 확정한 순서대로의 블록 id (마지막이 가장 최근). `patches` 는 Map 이라
    * 같은 블록을 다시 고치면 처음 넣은 자리에 머물러 "마지막 변경"을 알 수 없다.
@@ -92,6 +94,9 @@ export interface EditorState {
   /** 마지막으로 확정한 변경을 되돌린다 (Ctrl+Z) */
   undoLast: () => void;
   drainReverts: () => void;
+  /** 변경 목록에서 고른 블록을 프리뷰에서 보여준다 */
+  reveal: (id: number) => void;
+  drainReveal: () => void;
   /** 저장했으면 true. 실패했거나 저장할 것이 없으면 false */
   save: () => Promise<boolean>;
   downloadCopy: () => void;
@@ -231,6 +236,7 @@ async function load(
     selectedId: null,
     blockedId: null,
     revertQueue: [],
+    revealId: null,
     editOrder: [],
     scanned: false,
     unsaved: false,
@@ -305,6 +311,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   selectedId: null,
   blockedId: null,
   revertQueue: [],
+  revealId: null,
   editOrder: [],
   scanned: false,
   busy: false,
@@ -445,6 +452,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   drainReverts: () => set({ revertQueue: [] }),
+
+  // 고른 블록을 화면에서도 짚어준다. 목록만 보고는 문서 어디였는지 알기 어렵다.
+  reveal: (id) => set({ revealId: id, selectedId: id, blockedId: null }),
+  drainReveal: () => set({ revealId: null }),
 
   // 원본은 건드리지 않고 결과물만 파일로 받는다 (spec §4 · 사본 내려받기).
   // 패치가 없어도 동작한다 — 고치기 전 백업을 받는 용도로도 쓴다.
