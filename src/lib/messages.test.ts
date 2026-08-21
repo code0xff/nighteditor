@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PatchError } from '@/core/patch';
+import { ZipError } from '@/core/zip';
 import {
   LOCALES,
   LOCALE_LABEL,
@@ -8,6 +9,7 @@ import {
   lockNotice,
   patchNotice,
   translate,
+  zipNotice,
   type Locale,
 } from './messages.js';
 
@@ -97,5 +99,16 @@ describe('언어팩 · core 코드 번역', () => {
     expect(rendered[0]).toContain('id=4');
     expect(rendered[1]).toContain('id=4');
     expect(rendered[0]).not.toBe(rendered[1]);
+  });
+
+  it('ZipError 의 코드와 파라미터만으로 문장을 만든다 — 영어 UI 에 한국어가 새면 안 된다', () => {
+    const e = new ZipError('encrypted', { name: 'deck.html' }, 'encrypted entry: deck.html');
+    const notice = zipNotice(e.code, e.params);
+    const rendered = LOCALES.map((l: Locale) => translate(l, notice.key, notice.params));
+    expect(rendered[0]).toContain('deck.html');
+    expect(rendered[1]).toContain('deck.html');
+    expect(rendered[0]).not.toBe(rendered[1]);
+    // 영어 문장에 한글이 남아 있으면 언어팩으로 옮긴 의미가 없다.
+    expect(rendered[1]).not.toMatch(/[가-힣]/);
   });
 });

@@ -96,14 +96,16 @@ describe('unzip · 조작된 크기 (spec §6)', () => {
     // 목차의 크기만 믿으면 zip 폭탄이 한도 검사를 통과한다. 실제로 나온 바이트로 잡는다.
     const forged = forgeSize(fixtureBundle(), 'deck/index.html', 3);
 
-    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toThrow(
-      '목차의 크기와 실제 크기가 다르다'
-    );
+    // 문장이 아니라 코드다 — 사람이 읽을 문장은 언어팩이 만든다 (spec §1).
+    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toMatchObject({
+      code: 'sizeMismatch',
+      params: { name: 'deck/index.html' },
+    });
   });
 
   it('목차에 크게 적힌 항목은 풀기 전에 거른다', async () => {
     const forged = forgeSize(fixtureBundle(), 'deck/index.html', 65 * 1024 * 1024);
 
-    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toThrow('풀면 너무 커진다');
+    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toMatchObject({ code: 'tooBig' });
   });
 });

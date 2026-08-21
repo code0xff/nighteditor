@@ -29,7 +29,7 @@ async function inflate(data: Uint8Array, budget: number): Promise<Blob> {
     bytes += value.byteLength;
     if (bytes > budget) {
       await reader.cancel();
-      throw new ZipError('풀면 너무 커진다');
+      throw new ZipError('tooBig', {}, 'inflates past the budget');
     }
     chunks.push(value as BlobPart);
   }
@@ -52,10 +52,14 @@ export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
 
   for (const entry of readZip(new Uint8Array(await zip.arrayBuffer()))) {
     if (files.size >= FOLDER_LIMITS.files) {
-      throw new ZipError(`파일이 너무 많다 (${FOLDER_LIMITS.files}개까지)`);
+      throw new ZipError(
+        'tooManyFiles',
+        { limit: FOLDER_LIMITS.files },
+        `too many files (limit ${FOLDER_LIMITS.files})`
+      );
     }
     if (bytes + entry.size > FOLDER_LIMITS.bytes) {
-      throw new ZipError('풀면 너무 커진다');
+      throw new ZipError('tooBig', {}, 'inflates past the budget');
     }
     const type = mimeOf(entry.name);
     let blob: Blob;
@@ -64,11 +68,15 @@ export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
     } else if (entry.method === DEFLATE) {
       blob = new Blob([await inflate(entry.data, FOLDER_LIMITS.bytes - bytes)], { type });
     } else {
-      throw new ZipError(`처음 보는 압축 방식이다 (${entry.method}): ${entry.name}`);
+      throw new ZipError(
+        'unknownMethod',
+        { method: entry.method, name: entry.name },
+        `unknown compression method (${entry.method}): ${entry.name}`
+      );
     }
     // 반쯤 맞는 파일을 조용히 붙이느니 여기서 멈춘다.
     if (blob.size !== entry.size) {
-      throw new ZipError(`목차의 크기와 실제 크기가 다르다: ${entry.name}`);
+      throw new ZipError('sizeMismatch', { name: entry.name }, `size mismatch: ${entry.name}`);
     }
     bytes += blob.size;
     files.set(entry.name, blob);

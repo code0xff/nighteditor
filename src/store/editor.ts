@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { applyPatches, PatchError } from '@/core/patch';
 import { applyLiveLocks } from '@/core/verify';
 import type { Block, LockReason } from '@/core/types';
-import { lockNotice, patchNotice, type Notice } from '@/lib/messages';
+import { lockNotice, patchNotice, zipNotice, type Notice } from '@/lib/messages';
+import { ZipError } from '@/core/zip';
 import { useToasts } from './toasts';
 import {
   canPickFolder,
@@ -230,6 +231,11 @@ function rebasePath(
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
+  // zip 오류는 우리 것이라 코드로 온다 — 문장은 언어팩이 만든다 (spec §1 · INV-6).
+  // 원문을 그대로 붙이는 것은 번역할 수 없는 브라우저 오류의 몫이다.
+  if (e instanceof ZipError) {
+    return { key: 'notice.openFailedDetail', params: { detail: zipNotice(e.code, e.params) } };
+  }
   return e instanceof Error && e.message
     ? { key: 'notice.openFailedDetail', params: { detail: e.message } }
     : { key: 'notice.openFailed' };

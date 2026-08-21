@@ -9,7 +9,32 @@
  * 중앙 디렉터리는 언제나 채워져 있다.
  */
 
-export class ZipError extends Error {}
+/** 거부 사유. `core/` 는 화면 언어를 모르므로 문장이 아니라 코드를 넘긴다 (INV-6) */
+export type ZipErrorCode =
+  | 'notZip'
+  | 'zip64'
+  | 'badCentral'
+  | 'encrypted'
+  | 'badLocal'
+  | 'dataTruncated'
+  | 'tooManyFiles'
+  | 'tooBig'
+  | 'unknownMethod'
+  | 'sizeMismatch';
+
+/**
+ * zip 거부. `message` 는 개발자용 진단이고, 사용자에게 보이는 문장은
+ * `code` + `params` 를 언어팩(`lib/messages.ts`)이 옮긴 결과다 — `PatchError` 와 같다.
+ */
+export class ZipError extends Error {
+  constructor(
+    readonly code: ZipErrorCode,
+    readonly params: Record<string, string | number>,
+    message: string
+  ) {
+    super(message);
+  }
+}
 
 export interface ZipEntry {
   name: string;
@@ -38,7 +63,7 @@ function findEocd(bytes: Uint8Array): number {
   for (let at = bytes.length - 22; at >= from; at--) {
     if (dv.getUint32(at, true) === EOCD_SIGNATURE) return at;
   }
-  throw new ZipError('zip 이 아니거나 끝이 잘렸다');
+  throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }
 
 /**
@@ -54,14 +79,14 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
   const centralAt = dv.getUint32(eocd + 16, true);
   // zip64 는 이 칸들을 전부 0xFF.. 로 채우고 실제 값을 따로 둔다. 지원하지 않는다.
   if (count === 0xffff || centralAt === 0xffffffff) {
-    throw new ZipError('zip64 는 읽지 못한다');
+    throw new ZipError('zip64', {}, 'zip64 is not supported');
   }
 
   const entries: ZipEntry[] = [];
   let at = centralAt;
   for (let i = 0; i < count; i++) {
     if (at + 46 > bytes.length || dv.getUint32(at, true) !== CENTRAL_SIGNATURE) {
-      throw new ZipError('중앙 디렉터리가 깨졌다');
+      throw new ZipError('badCentral', {}, 'broken central directory');
     }
     const flags = dv.getUint16(at + 8, true);
     const method = dv.getUint16(at + 10, true);
@@ -75,16 +100,18 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
     at += 46 + nameLength + extraLength + commentLength;
 
     // 암호화된 항목은 풀 수 없다. 반쯤 읽어 깨진 파일을 붙이느니 말하고 멈춘다.
-    if (flags & 0x1) throw new ZipError(`암호가 걸린 항목이 있다: ${name}`);
+    if (flags & 0x1) throw new ZipError('encrypted', { name }, `encrypted entry: ${name}`);
     if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
 
     if (dv.getUint32(localAt, true) !== LOCAL_SIGNATURE) {
-      throw new ZipError(`로컬 헤더를 찾지 못했다: ${name}`);
+      throw new ZipError('badLocal', { name }, `local header not found: ${name}`);
     }
     // 로컬 헤더의 이름·부가 필드 길이는 중앙 디렉터리와 다를 수 있다. 여기 값을 쓴다.
     const dataAt =
       localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
-    if (dataAt + compressed > bytes.length) throw new ZipError(`데이터가 잘렸다: ${name}`);
+    if (dataAt + compressed > bytes.length) {
+      throw new ZipError('dataTruncated', { name }, `data is cut off: ${name}`);
+    }
 
     entries.push({ name, method, size, data: bytes.subarray(dataAt, dataAt + compressed) });
   }

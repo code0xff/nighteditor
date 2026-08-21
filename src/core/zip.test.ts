@@ -105,6 +105,9 @@ describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () =
   it('암호가 걸린 항목은 반쯤 읽지 않고 멈춘다', () => {
     const zip = realZip({ 'deck.html': '비밀' }, ['-P', 'pw']);
 
-    expect(() => readZip(zip)).toThrow(ZipError);
+    // 어느 항목인지는 파라미터로 넘긴다 — 문장은 언어팩이 만든다 (spec §1).
+    expect(() => readZip(zip)).toThrow(
+      expect.objectContaining({ code: 'encrypted', params: { name: 'deck.html' } })
+    );
   });
 });

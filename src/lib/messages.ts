@@ -9,6 +9,7 @@
  */
 import type { LockReason } from '@/core/types';
 import type { PatchErrorCode } from '@/core/patch';
+import type { ZipErrorCode } from '@/core/zip';
 
 export type Locale = 'ko' | 'en';
 
@@ -104,6 +105,17 @@ const ko = {
   'patch.stale': '블록이 원본과 맞지 않아요 (id={id})',
   'patch.duplicate': '같은 블록에 변경이 두 번 들어 있어요 (id={id})',
 
+  'zip.notZip': 'zip 이 아니거나 끝이 잘렸어요',
+  'zip.zip64': 'zip64 형식은 읽지 못해요',
+  'zip.badCentral': 'zip 목차가 깨져 있어요',
+  'zip.encrypted': '암호가 걸린 항목이 있어요 ({name})',
+  'zip.badLocal': '항목의 자리를 찾지 못했어요 ({name})',
+  'zip.dataTruncated': '데이터가 잘렸어요 ({name})',
+  'zip.tooManyFiles': '파일이 너무 많아요 ({limit}개까지)',
+  'zip.tooBig': '풀면 너무 커져요',
+  'zip.unknownMethod': '처음 보는 압축 방식이에요 ({method} · {name})',
+  'zip.sizeMismatch': '목차에 적힌 크기와 실제 크기가 달라요 ({name})',
+
   'theme.toLight': '밝은 테마로 바꾸기',
   'theme.toDark': '어두운 테마로 바꾸기',
   'locale.select': '언어',
@@ -194,6 +206,17 @@ const en: Record<MessageKey, string> = {
   'patch.stale': "That block doesn't match the original (id={id})",
   'patch.duplicate': 'Two changes for the same block (id={id})',
 
+  'zip.notZip': "Not a zip, or its end is cut off",
+  'zip.zip64': "Can't read the zip64 format",
+  'zip.badCentral': 'The zip index is broken',
+  'zip.encrypted': 'An entry is password-protected ({name})',
+  'zip.badLocal': "Couldn't locate an entry ({name})",
+  'zip.dataTruncated': 'The data is cut off ({name})',
+  'zip.tooManyFiles': 'Too many files (up to {limit})',
+  'zip.tooBig': 'Inflates too large',
+  'zip.unknownMethod': 'Unknown compression method ({method} · {name})',
+  'zip.sizeMismatch': "The index size doesn't match the actual size ({name})",
+
   'theme.toLight': 'Switch to the light theme',
   'theme.toDark': 'Switch to the dark theme',
   'locale.select': 'Language',
@@ -227,8 +250,26 @@ const PATCH_KEY: Record<PatchErrorCode, MessageKey> = {
   duplicate: 'patch.duplicate',
 };
 
+/** zip 거부 코드 → 메시지 키. `patchNotice` 와 같은 길이다 — `core/` 는 언어를 모른다 (INV-6) */
+const ZIP_KEY: Record<ZipErrorCode, MessageKey> = {
+  notZip: 'zip.notZip',
+  zip64: 'zip.zip64',
+  badCentral: 'zip.badCentral',
+  encrypted: 'zip.encrypted',
+  badLocal: 'zip.badLocal',
+  dataTruncated: 'zip.dataTruncated',
+  tooManyFiles: 'zip.tooManyFiles',
+  tooBig: 'zip.tooBig',
+  unknownMethod: 'zip.unknownMethod',
+  sizeMismatch: 'zip.sizeMismatch',
+};
+
 export function lockNotice(reason: LockReason): Notice {
   return { key: LOCK_KEY[reason] };
+}
+
+export function zipNotice(code: ZipErrorCode, params?: Params): Notice {
+  return { key: ZIP_KEY[code], params };
 }
 
 function isLockReason(value: unknown): value is LockReason {

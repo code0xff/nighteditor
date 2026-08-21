@@ -283,6 +283,18 @@ describe('editor · 저장했는지 아는가', () => {
   });
 });
 
+describe('editor · zip 오류는 언어팩을 거쳐 알린다', () => {
+  it('zip 이 아닌 파일을 zip 으로 열면 사유가 문장이 아니라 메시지 키로 온다 (spec §1)', async () => {
+    // ZipError 의 원문을 그대로 붙이면 영어 UI 에 한국어 내부 문장이 샌다.
+    await useEditor.getState().loadDropped(new File(['이건 zip 이 아니다'], 'bad.zip'));
+
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.openFailedDetail',
+      params: { detail: { key: 'zip.notZip', params: {} } },
+    });
+  });
+});
+
 describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
   it('저장한 뒤 폴더를 연결해도 저장한 내용이 살아 있다', async () => {
     // source 는 열었을 때 그대로다(INV-1). 그 상태로 다시 그리면 저장한 편집이 화면에서
