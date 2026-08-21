@@ -30,6 +30,17 @@ export function encodeAttribute(text: string): string {
   return escapeAttribute(text).replace(/['<>=`\t\n\f\r ]/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
+/**
+ * 브라우저가 innerHTML 을 직렬화할 때 속성 값에 쓰는 **최소** 인코딩 — `&`·`"`·NBSP.
+ *
+ * `encodeAttribute` 로 내보낸 보수적 표기는 브라우저를 한 바퀴 돌면 이 표기로
+ * 갈아 끼워져 돌아온다. 돌아온 값을 되돌리려면(ADR-011) 내보낸 표기만이 아니라
+ * 이 표기의 짝도 함께 들고 있어야 한다.
+ */
+export function encodeAttributeSerialized(text: string): string {
+  return escapeAttribute(text);
+}
+
 /** 공백 차이를 무시한 텍스트 비교용 정규화 */
 export function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();

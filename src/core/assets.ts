@@ -8,8 +8,8 @@
  * blob URL 이 한 글자도 들어가지 않는다 (대원칙 1 · ADR-009).
  */
 import { parse, type DefaultTreeAdapterTypes } from 'parse5';
-import type { Edit } from './edits.js';
-import { encodeAttribute } from './entities.js';
+import { applyEdits, type Edit } from './edits.js';
+import { encodeAttribute, encodeAttributeSerialized } from './entities.js';
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
@@ -258,24 +258,145 @@ function blobSuffix(suffix: string): string {
   return hash < 0 ? '' : suffix.slice(hash);
 }
 
+/**
+ * 참조 하나가 프리뷰에서 갖는 표기. 붙일 자원이 없으면 null — 그 자리는 그대로 둔다.
+ *
+ * 조각만 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
+ * 조각은 디코딩된 값이라 되적기 전에 인코딩한다 (INV-8) — 엔티티로 적힌 따옴표가
+ * 풀린 채 들어가면 속성이 조기 종료되어, 조각의 나머지가 프리뷰에서 새 속성
+ * (onerror= 등)으로 승격된다.
+ *
+ * 나가는 치환(assetEdits)과 되돌림 짝(assetSwaps)이 **여기 하나**를 쓴다 (ADR-011) —
+ * 두 자리에서 따로 계산하면 반드시 어긋나는 짝이 생긴다.
+ */
+function previewValue(ref: AssetRef, resolve: Resolve): { url: string; text: string } | null {
+  const url = resolve(ref.path);
+  return url ? { url, text: url + encodeAttribute(blobSuffix(ref.suffix)) } : null;
+}
+
 /** 붙일 자원이 있는 참조만 치환 목록으로 만든다 */
 export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] {
   const edits: Edit[] = [];
   for (const ref of refs) {
-    const url = resolve(ref.path);
-    // 조각만 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
-    // 조각은 디코딩된 값이라 되적기 전에 인코딩한다 (INV-8) — 엔티티로 적힌 따옴표가
-    // 풀린 채 들어가면 속성이 조기 종료되어, 조각의 나머지가 프리뷰에서 새 속성
-    // (onerror= 등)으로 승격된다.
-    if (url) {
-      edits.push({
-        start: ref.valueStart,
-        end: ref.valueEnd,
-        text: url + encodeAttribute(blobSuffix(ref.suffix)),
-      });
-    }
+    const value = previewValue(ref, resolve);
+    if (value) edits.push({ start: ref.valueStart, end: ref.valueEnd, text: value.text });
   }
   return edits;
+}
+
+/**
+ * 프리뷰 치환 하나의 짝 — 나갈 때 `from`→`to`, 돌아올 때 `to`→`from` (ADR-011).
+ * offset 은 전부 원본 문자열 기준이다 (INV-3).
+ */
+export interface AssetSwap {
+  start: number;
+  end: number;
+  /** 원본에 적힌 그대로의 표기 (엔티티 포함) — 되돌릴 때 이 바이트로 돌아간다 */
+  from: string;
+  /** 프리뷰 문서에 들어가는 표기 */
+  to: string;
+  /**
+   * 브라우저가 innerHTML 로 직렬화했을 때의 표기 짝. `to` 와 같으면 생략한다.
+   *
+   * 내보낸 보수적 인코딩(`&#32;` 등)은 브라우저를 한 바퀴 돌면 최소 인코딩으로
+   * 갈아 끼워져 돌아온다 — 내보낸 표기만 들고 있으면 그 편집에서 blob 이 샌다.
+   */
+  serializedTo?: string;
+  serializedFrom?: string;
+}
+
+/**
+ * 문서 전체의 치환 짝 목록 — 속성 값과 `<style>` 본문 (spec §5.1 · ADR-011).
+ *
+ * 프리뷰 문서 조립도, 블록 단위의 양방향 경계(assetBoundary)도 이 목록 하나에서
+ * 나온다. 붙일 자원이 없는 참조는 목록에 들지 않아 어느 방향으로도 건드리지 않는다.
+ */
+export function assetSwaps(
+  source: string,
+  refs: readonly AssetRef[],
+  baseDir: string,
+  resolve: Resolve
+): AssetSwap[] {
+  const swaps: AssetSwap[] = [];
+  for (const ref of refs) {
+    const value = previewValue(ref, resolve);
+    if (value === null) continue;
+    // 되돌릴 값은 디코딩·재인코딩한 값이 아니라 **원본의 그 자리 슬라이스**다 —
+    // 치환했다 되돌린 결과가 바이트 단위로 같아야 한다 (대원칙 1·2).
+    const from = source.slice(ref.valueStart, ref.valueEnd);
+    const serializedTo = value.url + encodeAttributeSerialized(blobSuffix(ref.suffix));
+    const swap: AssetSwap = { start: ref.valueStart, end: ref.valueEnd, from, to: value.text };
+    if (serializedTo !== value.text) {
+      swap.serializedTo = serializedTo;
+      // 직렬화된 문맥에는 원본의 날 것(따옴표·공백이 그대로일 수 있다)을 되적을 수
+      // 없다 — 같은 값을 직렬화 규칙으로 다시 적은 표기로 되돌린다. 파서를 지나면
+      // 같은 참조다.
+      swap.serializedFrom = encodeAttributeSerialized(ref.url);
+    }
+    swaps.push(swap);
+  }
+  // <style> 본문은 rawtext 라 직렬화가 표기를 바꾸지 않는다 — 짝이 하나로 충분하다.
+  for (const edit of styleEdits(source, baseDir, resolve)) {
+    swaps.push({
+      start: edit.start,
+      end: edit.end,
+      from: source.slice(edit.start, edit.end),
+      to: edit.text,
+    });
+  }
+  return swaps;
+}
+
+/**
+ * 프리뷰와 저장 사이의 양방향 경계 (ADR-011).
+ *
+ * 마커는 블록이 겹치지 않아 블록 안으로 들어올 일이 없지만, 자원 치환은 블록
+ * **안**에서도 일어난다. 나가는 조각은 치환하고, 돌아온 편집은 원문 표기로 되돌린다.
+ */
+export interface AssetBoundary {
+  /**
+   * 원본 조각(블록 `sourceInner` 등)을 프리뷰용으로 — 조각 범위 안의 참조를
+   * 프리뷰 표기로 치환한다. @param textStart 조각이 원본에서 시작하는 offset (INV-3)
+   */
+  toPreview(text: string, textStart: number): string;
+  /** 프리뷰에서 돌아온 HTML 을 저장용으로 — 프리뷰 표기를 원문 표기로 되돌린다 */
+  fromPreview(html: string): string;
+}
+
+export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
+  // 되돌림 표. 같은 프리뷰 표기에 원문 표기가 여럿이면(`logo.png` 와 `./logo.png`)
+  // 먼저 나온 표기로 되돌린다 — 어느 쪽이든 같은 파일을 가리킨다.
+  const back = new Map<string, string>();
+  for (const swap of swaps) {
+    if (!back.has(swap.to)) back.set(swap.to, swap.from);
+    if (swap.serializedTo !== undefined && swap.serializedFrom !== undefined) {
+      if (!back.has(swap.serializedTo)) back.set(swap.serializedTo, swap.serializedFrom);
+    }
+  }
+  // 긴 표기부터 되돌린다 — 조각 없는 표기(`blob:u`)는 조각 있는 표기(`blob:u#icon`)의
+  // 접두사라, 짧은 쪽을 먼저 바꾸면 긴 쪽이 영영 안 잡혀 조각이 blob 이름에 남는다.
+  const pairs = [...back].sort((a, b) => b[0].length - a[0].length);
+
+  return {
+    toPreview(text, textStart) {
+      const inside: Edit[] = [];
+      for (const swap of swaps) {
+        if (swap.start < textStart || swap.end > textStart + text.length) continue;
+        // 자리의 내용까지 원문 표기와 맞아야 한다 — 다르면 이 조각은 원본의 그
+        // 자리가 아니므로 추측으로 바꾸지 않는다 (대원칙 3).
+        if (text.slice(swap.start - textStart, swap.end - textStart) !== swap.from) continue;
+        inside.push({ start: swap.start - textStart, end: swap.end - textStart, text: swap.to });
+      }
+      return applyEdits(text, inside);
+    },
+    fromPreview(html) {
+      let out = html;
+      // blob URL 은 탭마다 새로 만든 무작위 이름이라 문서에 원래 있던 텍스트와
+      // 충돌하지 않는다 — 통째 문자열 치환으로 충분하다.
+      for (const [to, from] of pairs) if (to !== from) out = out.split(to).join(from);
+      return out;
+    },
+  };
 }
 
 /** 따옴표 문자열의 끝 (닫는 따옴표 다음). 이스케이프를 건너뛴다 */

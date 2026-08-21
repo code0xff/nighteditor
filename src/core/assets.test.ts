@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assetBoundary,
   assetEdits,
+  assetSwaps,
   cssAssetPaths,
   dirOf,
   documentBaseDir,
@@ -403,5 +405,100 @@ describe('cssAssetPaths', () => {
   it('남의 함수 이름에 붙은 url( 은 세지 않는다', () => {
     // 세면 이 문서와 상관없는 파일을 찾으라고 조른다.
     expect(cssAssetPaths(':root{--icon: myurl(icon.png)}', '')).toEqual([]);
+  });
+});
+
+describe('assetSwaps · assetBoundary (ADR-011)', () => {
+  /** 블록 안에 자원이 든 문서 — 치환이 편집 범위 안쪽에서 일어나는 경우다 */
+  const source = '<p>설명 <span>사진 <img src="img/logo.png"></span></p><img src="없다.png">';
+  const swaps = () => assetSwaps(source, parseAssetRefs(source), '', fake);
+  const innerStart = source.indexOf('설명');
+  const inner = source.slice(innerStart, source.indexOf('</p>'));
+
+  it('나가는 조각의 참조를 프리뷰 표기로 치환한다', () => {
+    const out = assetBoundary(swaps()).toPreview(inner, innerStart);
+
+    expect(out).toContain('src="blob:img/logo.png"');
+    // 조각의 나머지 바이트는 그대로다 — 치환은 값 범위만 바꾼다.
+    expect(out.startsWith('설명 <span>사진 ')).toBe(true);
+  });
+
+  it('치환했다 되돌리면 바이트 단위로 같다 (대원칙 1·2)', () => {
+    const boundary = assetBoundary(swaps());
+
+    expect(boundary.fromPreview(boundary.toPreview(inner, innerStart))).toBe(inner);
+  });
+
+  it('돌아온 편집의 blob URL 을 원문 표기로 되돌린다', () => {
+    const edited = '고친 설명 <span>사진 <img src="blob:img/logo.png"></span>';
+
+    expect(assetBoundary(swaps()).fromPreview(edited)).toBe(
+      '고친 설명 <span>사진 <img src="img/logo.png"></span>'
+    );
+  });
+
+  it('치환하지 않은 참조와 원래부터 blob: 인 표기는 어느 방향으로도 건드리지 않는다', () => {
+    // 없다.png 는 못 붙였고(resolve 가 undefined), 문서에 원래 적힌 blob: 은 외부
+    // 참조라 치환 목록에 들지 않는다.
+    const src = '<p><img src="없다.png"><img src="blob:이미있던것"></p>';
+    const list = assetSwaps(src, parseAssetRefs(src), '', (p) =>
+      p === '없다.png' ? undefined : fake(p)
+    );
+    const boundary = assetBoundary(list);
+    const body = src.slice(3, src.indexOf('</p>'));
+
+    expect(boundary.toPreview(body, 3)).toBe(body);
+    expect(boundary.fromPreview(body)).toBe(body);
+  });
+
+  it('브라우저가 직렬화로 갈아 끼운 표기도 되돌린다', () => {
+    // 조각의 공백은 &#32; 로 나가지만, 브라우저 innerHTML 은 공백을 인코딩하지
+    // 않아 다른 표기로 돌아온다 — 그 표기의 짝도 들고 있어야 blob 이 안 샌다.
+    const src = '<p><use href="sprite.svg#i con"/></p>';
+    const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+    expect(boundary.fromPreview('<use href="blob:sprite.svg#i con"></use>')).toBe(
+      '<use href="sprite.svg#i con"></use>'
+    );
+  });
+
+  it('조각 없는 표기가 조각 있는 표기를 가로채지 않는다', () => {
+    // blob:sprite.svg 는 blob:sprite.svg#icon 의 접두사다. 짧은 쪽을 먼저 되돌리면
+    // 긴 쪽이 영영 안 잡혀 #icon 이 blob 이름 뒤에 남는다.
+    const src = '<img src="sprite.svg"><use href="sprite.svg#icon"/>';
+    const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+    expect(boundary.fromPreview('<use href="blob:sprite.svg#icon"></use>')).toBe(
+      '<use href="sprite.svg#icon"></use>'
+    );
+  });
+
+  it('같은 프리뷰 표기에 원문 표기가 여럿이면 먼저 나온 표기로 되돌린다', () => {
+    // logo.png 와 ./logo.png 는 같은 파일이라 프리뷰 표기가 같다 — 어느 쪽으로
+    // 되돌려도 같은 파일을 가리키므로, 결정적으로 첫 표기를 쓴다.
+    const src = '<img src="logo.png"><img src="./logo.png">';
+    const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+    expect(boundary.fromPreview('<img src="blob:logo.png">')).toBe('<img src="logo.png">');
+  });
+
+  it('<style> 본문의 치환도 짝에 든다', () => {
+    const src = '<style>body{background:url(bg.png)}</style>';
+    const list = assetSwaps(src, parseAssetRefs(src), '', fake);
+    const boundary = assetBoundary(list);
+
+    expect(list.some((s) => s.to.includes('url(blob:bg.png)'))).toBe(true);
+    expect(boundary.fromPreview('body{background:url(blob:bg.png)}')).toBe(
+      'body{background:url(bg.png)}'
+    );
+  });
+
+  it('원문과 자리가 어긋난 조각은 추측으로 바꾸지 않는다 (대원칙 3)', () => {
+    // 다른 블록의 offset 을 들고 부르면 범위가 겹쳐도 내용이 다르다 — 그대로 둔다.
+    const boundary = assetBoundary(swaps());
+
+    expect(
+      boundary.toPreview('전혀 다른 내용의 조각이 같은 길이로 있다고 치자!!', innerStart)
+    ).toBe('전혀 다른 내용의 조각이 같은 길이로 있다고 치자!!');
   });
 });
