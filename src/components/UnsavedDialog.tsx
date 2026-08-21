@@ -20,7 +20,8 @@ export function UnsavedDialog() {
   // 패치 총수가 아니다 — 저장해도 패치는 남고(INV-1), 저장한 편집을 되돌리면 패치
   // 없이도 파일과 다르다. 여기 적는 수는 **파일과 다른 블록 수**다 (spec §4).
   const count = useEditor(unsavedCount);
-  const busy = useEditor((s) => s.busy);
+  // 저장이 도는 동안에는 겹쳐 답하지 않는다 — shortcutSave 와 같은 기준.
+  const saving = useEditor((s) => s.saving);
   const overwrites = useEditor((s) => Boolean(s.file?.handle));
   const { t } = useI18n();
 
@@ -40,7 +41,7 @@ export function UnsavedDialog() {
           <Button variant="outline" onClick={() => reply('discard')}>
             {t('confirm.discard')}
           </Button>
-          <Button disabled={busy} onClick={() => reply('save')}>
+          <Button disabled={saving} onClick={() => reply('save')}>
             {overwrites ? <IconSave /> : <IconDownloadCopy />}
             {t(overwrites ? 'confirm.save' : 'confirm.saveCopy')}
           </Button>

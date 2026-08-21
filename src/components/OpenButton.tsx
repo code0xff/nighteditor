@@ -16,10 +16,14 @@ import { Button } from '@/components/ui/button';
 import { canPickFolder } from '@/lib/fs';
 import { IconOpen, IconOpenFolder } from '@/lib/icons';
 import { useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
 export function OpenButton() {
-  const busy = useEditor((s) => s.busy);
+  // 저장이 도는 동안도, 갈아 끼우는 동안도 새로 열기 시작하지 않는다 (ADR-010).
+  const saving = useEditor((s) => s.saving);
+  const replacing = useReplacement((s) => s.replacing);
+  const busy = saving || replacing;
   const openFile = useEditor((s) => s.openFile);
   const openFolder = useEditor((s) => s.openFolder);
   const { t } = useI18n();

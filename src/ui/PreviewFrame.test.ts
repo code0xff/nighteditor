@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { PreviewFrame } from './PreviewFrame';
 
 // react 의 act 는 이 표식이 있어야 테스트 환경으로 인정하고 경고 없이 돈다.
@@ -64,12 +65,12 @@ describe('PreviewFrame · 갈아 끼우는 동안은 프리뷰를 잠근다 (spe
     });
 
     act(() => {
-      useEditor.setState({ replacing: true });
+      useReplacement.setState({ replacing: true });
     });
     expect(host!.querySelector('iframe')?.classList.contains('pointer-events-none')).toBe(true);
 
     act(() => {
-      useEditor.setState({ replacing: false });
+      useReplacement.setState({ replacing: false });
     });
     expect(host!.querySelector('iframe')?.classList.contains('pointer-events-none')).toBe(false);
   });

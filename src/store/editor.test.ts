@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
 import type { FolderRead } from '@/lib/fs';
 import { countAssets, unsavedCount, useEditor } from './editor.js';
+import { useReplacement } from './replacement.js';
 import { useToasts } from './toasts.js';
 import { useUnsaved } from './unsaved.js';
 
@@ -22,8 +23,10 @@ beforeEach(() => {
     notice: null,
     unsaved: false,
     savedText: '',
-    replacing: false,
+    saving: false,
   });
+  // 잠금은 예약 스토어에 있다 — 앞 테스트가 세워 둔 잠금이 새면 편집이 거절된다.
+  useReplacement.setState({ replacing: false });
   useUnsaved.setState({ why: null, answer: null });
   useToasts.getState().clear();
 });
@@ -40,9 +43,9 @@ describe('editor · 파일 열기 (동적 import 경로)', () => {
     expect(previewDoc).toContain('data-ne-id');
   });
 
-  it('로드가 끝나면 busy 가 풀린다 — 청크를 기다리다 굳지 않는다', async () => {
+  it('로드가 끝나면 잠금이 풀린다 — 청크를 기다리다 굳지 않는다', async () => {
     await useEditor.getState().loadDropped(dropped());
-    expect(useEditor.getState().busy).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
   });
 });
 
@@ -193,7 +196,7 @@ describe('editor · 폴더 열기', () => {
 
     expect(useEditor.getState().file).toBeNull();
     expect(useEditor.getState().notice).toBeNull();
-    expect(useEditor.getState().busy).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
   });
 
   it('HTML 이 없는 폴더는 이유를 말한다', async () => {
@@ -424,11 +427,13 @@ describe('editor · 리뷰가 짚은 자리', () => {
     for (let tries = 0; useUnsaved.getState().why === null && tries < 1000; tries++) {
       await Promise.resolve();
     }
-    const busyWhileAsking = useEditor.getState().busy;
+    const savingWhileAsking = useEditor.getState().saving;
+    const replacingWhileAsking = useReplacement.getState().replacing;
     useUnsaved.getState().reply('cancel');
     await asking;
 
-    expect(busyWhileAsking).toBe(false);
+    expect(savingWhileAsking).toBe(false);
+    expect(replacingWhileAsking).toBe(false);
   });
 
   it('갈아 끼우는 동안의 편집은 거절하고 알린다', async () => {
@@ -436,7 +441,7 @@ describe('editor · 리뷰가 짚은 자리', () => {
     // 받아 두었다가 버리면 조용히 사라지는 것이다 (대원칙 3) — 받지 않고 알린다.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
-    useEditor.setState({ replacing: true });
+    useReplacement.setState({ replacing: true });
 
     useEditor.getState().onEdit(target?.id ?? -1, '사라질 편집');
 
@@ -451,12 +456,12 @@ describe('editor · 리뷰가 짚은 자리', () => {
     // 화면(제목 칸·프리뷰)이 이 값을 보고 잠근다. 서지 않으면 잠글 근거가 없고,
     // 안 풀리면 새 문서를 영영 못 고친다.
     const seen: boolean[] = [];
-    const unsub = useEditor.subscribe((s) => seen.push(s.replacing));
+    const unsub = useReplacement.subscribe((s) => seen.push(s.replacing));
     await useEditor.getState().loadDropped(dropped());
     unsub();
 
     expect(seen).toContain(true);
-    expect(useEditor.getState().replacing).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
   });
 
   it('여는 데 실패해도 replacing 이 풀린다 — 보던 문서를 계속 고칠 수 있어야 한다', async () => {
@@ -465,7 +470,7 @@ describe('editor · 리뷰가 짚은 자리', () => {
 
     await useEditor.getState().loadDropped(new File(['x'], 'bad.zip', { type: 'application/zip' }));
 
-    expect(useEditor.getState().replacing).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
     expect(useEditor.getState().patches.size).toBe(1);
   });
@@ -587,7 +592,7 @@ describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
       key: 'notice.openFailedDetail',
       params: { detail: '디스크에서 사라졌다' },
     });
-    expect(useEditor.getState().busy).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
   });
 
   it('폴더 연결에서 다시 읽다 실패하면 옛 바이트로 다시 그리지 않는다', async () => {
@@ -614,7 +619,7 @@ describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
     });
     // 보던 화면은 그대로 살아 있어야 한다.
     expect(useEditor.getState().source).toContain('열었을 때의 내용');
-    expect(useEditor.getState().busy).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(false);
   });
 });
 
@@ -902,7 +907,7 @@ describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5
     expect(s.unsaved).toBe(false);
     // 이전 문서의 "저장했다" 가 새 문서 위에 뜨지 않는다.
     expect(s.notice).toBeNull();
-    expect(s.busy).toBe(false);
+    expect(s.saving).toBe(false);
   });
 
   it('갈아탄 뒤 도착한 저장 실패도 새 문서에 알리지 않는다', async () => {
@@ -931,7 +936,63 @@ describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5
     expect(await saving).toBe(false);
 
     expect(useEditor.getState().notice).toBeNull();
-    expect(useEditor.getState().busy).toBe(false);
+    expect(useEditor.getState().saving).toBe(false);
+  });
+});
+
+describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리지 않는다 (spec §5)', () => {
+  it('갈아 끼우는 사이에 끝난 저장은 제 표시(saving)만 내린다', async () => {
+    // 옛 코드는 저장의 finally 가 공용 busy 를 내려, 새 문서를 읽는 중인데
+    // 열기·문서 고르기가 풀렸다. 잠금은 예약의 것이라 저장이 건드릴 수 없다 (ADR-010).
+    let releaseWrite: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.resolve(new File(['<p>본문</p>'], 'deck.html', { type: 'text/html' })),
+      createWritable: () =>
+        Promise.resolve({ write: () => writeGate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>본문</p></body></html>',
+      handle,
+    });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    const saving = useEditor.getState().save();
+
+    // 저장이 아직 쓰는 사이에 새 갈아 끼우기가 확정된다 — 읽기는 멈춰 있다.
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((r) => (releaseRead = r));
+    const read = {
+      files: new Map<string, unknown>([
+        [
+          'index.html',
+          {
+            text: async () => {
+              await readGate;
+              return '<html><body><p>새 폴더</p></body></html>';
+            },
+          },
+        ],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    } as unknown as FolderRead;
+    const opening = useEditor.getState().loadFolder(read);
+    expect(useReplacement.getState().replacing).toBe(true);
+
+    releaseWrite?.();
+    expect(await saving).toBe(true);
+
+    // 저장은 끝났지만 화면 잠금은 그대로다 — 저장이 내린 것은 제 표시뿐이다.
+    expect(useEditor.getState().saving).toBe(false);
+    expect(useReplacement.getState().replacing).toBe(true);
+
+    releaseRead();
+    await opening;
+    expect(useReplacement.getState().replacing).toBe(false);
+    expect(useEditor.getState().source).toContain('새 폴더');
   });
 });
 
@@ -1117,22 +1178,21 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
 
       second.release();
       await opening2;
-      const doc = useEditor.getState().doc;
+      const installed = useReplacement.getState().installed;
       // 첫 폴더의 읽기는 아직 멈춰 있다 — 지금까지 만든 URL 은 전부 둘째 폴더의 것이다.
       const secondUrls = [...created];
       first.release();
       await opening1;
 
       expect(useEditor.getState().source).toContain('둘째 폴더');
-      // 옛 흐름은 설치하지 않는다 — 표도 그대로다.
-      expect(useEditor.getState().doc).toBe(doc);
+      // 옛 흐름은 설치하지 않는다 — 설치 세대도 그대로다.
+      expect(useReplacement.getState().installed).toBe(installed);
       // 옛 흐름은 제가 만든 것만 놓아준다 — 화면이 쓰는 둘째 폴더의 blob 은 살아 있다.
       const firstUrls = created.filter((url) => !secondUrls.includes(url));
       expect(firstUrls.length).toBeGreaterThan(0);
       expect(firstUrls.every((url) => revoked.includes(url))).toBe(true);
       expect(secondUrls.some((url) => revoked.includes(url))).toBe(false);
-      expect(useEditor.getState().busy).toBe(false);
-      expect(useEditor.getState().replacing).toBe(false);
+      expect(useReplacement.getState().replacing).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1151,15 +1211,13 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
       // 사용자의 마지막 선택은 둘째 폴더다 — 먼저 끝났다고 첫 폴더를 세우면 안 된다.
       expect(useEditor.getState().source).not.toContain('첫 폴더');
       // 물러난 흐름이 화면 잠금을 풀면, 아직 읽는 중인데 편집이 들어온다.
-      expect(useEditor.getState().busy).toBe(true);
-      expect(useEditor.getState().replacing).toBe(true);
+      expect(useReplacement.getState().replacing).toBe(true);
 
       second.release();
       await opening2;
 
       expect(useEditor.getState().source).toContain('둘째 폴더');
-      expect(useEditor.getState().busy).toBe(false);
-      expect(useEditor.getState().replacing).toBe(false);
+      expect(useReplacement.getState().replacing).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }

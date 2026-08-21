@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { Toolbar } from './Toolbar';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,10 +16,10 @@ beforeEach(() => {
     file: { name: 'artifact.html', text: '', handle: null },
     blocks: [],
     patches: new Map(),
-    busy: false,
-    replacing: false,
+    saving: false,
     unsaved: false,
   });
+  useReplacement.setState({ replacing: false });
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -79,15 +80,16 @@ describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §
 
   it('replacing 동안 잠긴다 — 이 사이의 편집은 새 문서가 서면 사라질 자리다', () => {
     act(() => {
-      useEditor.setState({ blocks: [title], replacing: true });
+      useEditor.setState({ blocks: [title] });
+      useReplacement.setState({ replacing: true });
     });
 
     expect(titleInput()?.disabled).toBe(true);
   });
 
-  it('저장하는 동안(busy)은 잠기지 않는다 — 그 편집은 살아남는다 (spec §5)', () => {
+  it('저장하는 동안(saving)은 잠기지 않는다 — 그 편집은 살아남는다 (spec §5)', () => {
     act(() => {
-      useEditor.setState({ blocks: [title], replacing: false, busy: true });
+      useEditor.setState({ blocks: [title], saving: true });
     });
 
     expect(titleInput()?.disabled).toBe(false);

@@ -12,12 +12,16 @@ import {
 } from '@/components/ui/select';
 import { IconDocument } from '@/lib/icons';
 import { useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
 export function DocSelect() {
   const candidates = useEditor((s) => s.candidates);
   const docPath = useEditor((s) => s.docPath);
-  const busy = useEditor((s) => s.busy);
+  // 저장이 도는 동안도, 갈아 끼우는 동안도 새 갈아타기를 시작하지 않는다 (ADR-010).
+  const saving = useEditor((s) => s.saving);
+  const replacing = useReplacement((s) => s.replacing);
+  const busy = saving || replacing;
   const openFromBundle = useEditor((s) => s.openFromBundle);
   const { t } = useI18n();
 

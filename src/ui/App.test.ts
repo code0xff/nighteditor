@@ -73,7 +73,7 @@ describe('App · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
     const save = vi.fn().mockResolvedValue(true);
     const answer = vi.fn();
     act(() => {
-      useEditor.setState({ unsaved: true, busy: false, save });
+      useEditor.setState({ unsaved: true, saving: false, save });
       useUnsaved.setState({ why: { key: 'confirm.whyOpen' }, answer });
     });
 

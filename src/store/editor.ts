@@ -17,6 +17,7 @@ import {
   type Picked,
 } from '@/lib/fs';
 import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/bundle';
+import { claimDocument, reserveReplacement, useReplacement, type Replacement } from './replacement';
 import { keepEdits } from './unsaved';
 import type { AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
@@ -42,20 +43,12 @@ export interface EditorState {
    */
   editOrder: number[];
   scanned: boolean;
-  busy: boolean;
   /**
-   * 문서를 갈아 끼우는 중이다 — 물음에 답한 뒤부터 새 상태가 설치될 때까지.
-   *
-   * 이 사이 화면에는 아직 이전 문서가 떠 있지만, 여기서 받은 편집은 새 상태가
-   * 설치되는 순간 갈 곳이 없다 — 받아 두었다가 버리면 조용히 사라진다 (spec §4).
-   * `busy` 로는 못 가른다 — 저장도 busy 인데, 저장하는 사이의 편집은 살아남아야 한다.
+   * 저장이 파일을 쓰는 중이다 — 저장 버튼·대화상자의 저장이 겹쳐 돌지 않게 하는
+   * **저장만의** 표시다. 갈아 끼우기의 화면 잠금은 예약(replacement.ts)이 따로
+   * 들고 있어, 앞선 저장이 끝나도 그 잠금은 풀리지 않는다 (spec §5 · ADR-010).
    */
-  replacing: boolean;
-  /**
-   * 지금 문서의 표. 문서를 갈아 끼울 때마다(replace) 새 값이 된다 — 값 자체에는
-   * 뜻이 없고, 받아 둔 표와 **다르다**는 사실만 뜻이 있다. `claim` 이 읽는다.
-   */
-  doc: number;
+  saving: boolean;
   /**
    * 아직 파일에 없는 편집이 있다 — 지금 만들 결과물이 `savedText` 와 다르다 (spec §5).
    *
@@ -124,15 +117,6 @@ export interface EditorState {
   /** 변경 목록에서 고른 블록을 프리뷰에서 보여준다 */
   reveal: (id: number) => void;
   drainReveal: () => void;
-  /**
-   * "이 결과가 지금 문서의 것인가" 를 한 자리에서 판정한다 (spec §5).
-   *
-   * 갈아 끼우기와 저장이 서로 다른 시간축에서 돌아, 뒤늦게 끝난 비동기가 **다음
-   * 문서의 상태**에 이전 문서의 결과를 적을 수 있다. 비동기를 시작하기 전에 부르면
-   * 확인 함수를 돌려준다 — 그 사이 문서가 갈아 끼워졌으면 false 고, 그때의 결과는
-   * 이전 문서의 것이라 버린다. 저장만이 아니라 뒤늦게 끝나는 어떤 비동기도 이것을 쓴다.
-   */
-  claim: () => () => boolean;
   /** 저장했으면 true. 실패했거나 저장할 것이 없으면 false */
   save: () => Promise<boolean>;
   downloadCopy: () => void;
@@ -226,56 +210,37 @@ export function titleBlock(blocks: readonly Block[]): Block | undefined {
 }
 
 /**
- * 갈아 끼우기 세대 — **시작할 때** 오른다 (spec §5 · 겹친 갈아 끼우기).
+ * 확정된 갈아 끼우기 — 화면을 잠그고, 새 상태를 만들고, 아직 최신이면 설치한다.
+ * 누가 이기고 무엇이 잠기는지는 예약(replacement.ts)이 정한다 (ADR-010).
  *
- * 문서의 표(doc)로는 겹친 갈아 끼우기를 못 가린다 — 표는 새 상태가 설치될 때
- * 바뀌므로, 폴더를 연달아 놓으면 겹친 둘 다 같은 표를 들고 있다가 **먼저 끝난 쪽**이
- * 이겨 버린다. 이겨야 하는 것은 나중에 시작한 쪽 — 사용자의 마지막 선택이다.
- * 값 자체에는 뜻이 없고 비교만 뜻이 있어, 화면이 볼 일이 없는 상태 밖에 둔다.
- */
-let replaceGen = 0;
-
-/** 갈아 끼우기 한 번의 시작 — 세대를 받아 둔다. 이후 판정은 전부 이 값과의 비교다 */
-function beginReplace(): number {
-  return ++replaceGen;
-}
-
-/**
- * 이 흐름이 아직 최신 갈아 끼우기인가.
+ * 이전 blob URL 은 설치 직전에 놓아준다 — 안 놓으면 파일을 여러 번 열수록 탭이
+ * 무거워지고, 먼저 놓으면 만들다 실패했을 때 살아 있어야 할 화면이 그 blob 을 쓴다.
  *
- * 아니면 설치도, 실패 알림도, busy·replacing 해제도 전부 남(최신 흐름)의 몫이다 —
- * 물러나는 흐름이 알리면 남의 화면에 대한 말이 되고, busy 를 끄면 아직 읽는 중인
- * 화면의 잠금이 풀린다 (저장의 claim 과 같은 이치, spec §5).
- */
-function latestReplace(gen: number): boolean {
-  return gen === replaceGen;
-}
-
-/**
- * 새로 연 문서로 갈아탄다. 이전 blob URL 을 여기서 놓아준다 —
- * 안 놓으면 파일을 여러 번 열수록 탭이 계속 무거워진다.
+ * 만드는 사이 더 새 예약이 들어왔으면 설치하지 않고 `null` 로 물러난다. 그때
+ * 지금 상태의 자원은 보던 문서(또는 그 새 흐름이 세울 문서)의 것이라 놓아줄
+ * 권리가 없다 — **제가 만든 것만** 놓아준다 (spec §5 · 갈아 끼우기 예약).
  *
- * 새 상태를 다 만든 **뒤에** 놓는다. 만들다 실패하면 지금 보고 있는 화면이
- * 그대로 살아 있어야 하고, 그 화면은 이전 blob 을 쓰고 있다.
- *
- * 읽는 사이 더 새 갈아 끼우기가 시작됐으면 설치하지 않고 `null` 로 물러난다.
- * 그때 지금 상태의 자원은 보던 문서(또는 그 새 흐름이 세운 문서)의 것이라 놓아줄
- * 권리가 없다 — **제가 만든 것만** 놓아준다 (spec §5 · 겹친 갈아 끼우기).
+ * 설치는 저장 중 표시도 함께 내린다 — 아직 쓰는 중인 저장은 이 순간부터 이전
+ * 문서의 것이라(claim) 제 표시를 내릴 자격을 잃는다. 새 문서는 저장 중이 아니다.
  */
 async function replace(
   get: () => EditorState,
-  gen: number,
+  set: (next: Partial<EditorState>) => void,
+  mine: Replacement,
   loading: Promise<Partial<EditorState>>
 ): Promise<Partial<EditorState> | null> {
+  mine.engage();
   const next = await loading;
-  if (!latestReplace(gen)) {
+  if (!mine.current()) {
     next.assets?.dispose();
     return null;
   }
   get().assets.dispose();
-  // 새 상태에는 새 표를 박는다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
+  // 설치 세대를 올린다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
   // 저장 등)는 claim 의 판정에 걸려 버려진다 (spec §5).
-  return { ...next, doc: get().doc + 1 };
+  mine.install();
+  set({ ...next, saving: false });
+  return next;
 }
 
 function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
@@ -497,9 +462,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   revealId: null,
   editOrder: [],
   scanned: false,
-  busy: false,
-  replacing: false,
-  doc: 0,
+  saving: false,
   unsaved: false,
   savedText: '',
   savedPatches: new Map(),
@@ -515,26 +478,23 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   openFile: async () => {
     set({ notice: null });
-    // 세대는 잠금(busy·replacing)을 세울 때 받는다 — 그 전의 실패는 잠근 것이 없어
-    // 끌 것도 없고, 알림은 언제나 이 흐름의 몫이다 (아직 아무와도 겹치지 않았다).
-    let gen: number | null = null;
+    let mine: Replacement | null = null;
     try {
       // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
       const picked = await pickFile();
       if (!picked) return;
-      // 묻는 동안에는 busy 를 세우지 않는다. 세우면 대화상자의 "저장하고 계속하기" 가
+      // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      gen = beginReplace();
-      set({ busy: true, replacing: true });
-      const next = await replace(get, gen, openPicked(picked));
-      if (next) set(next);
+      mine = reserveReplacement();
+      await replace(get, set, mine, openPicked(picked));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
-      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
+      // 밀려난 흐름의 실패는 남(최신 흐름)의 화면에 대한 말이 된다 — 알리지 않는다.
+      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
+      mine?.release();
     }
   },
 
@@ -544,15 +504,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
     // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
     if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-    const gen = beginReplace();
-    set({ busy: true, replacing: true, notice: null });
+    const mine = reserveReplacement();
+    set({ notice: null });
     try {
-      const next = await replace(get, gen, load(file));
-      if (next) set(next);
+      await replace(get, set, mine, load(file));
     } catch (e) {
-      if (latestReplace(gen)) set({ notice: openFailedNotice(e) });
+      if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      if (latestReplace(gen)) set({ busy: false, replacing: false });
+      mine.release();
     }
   },
 
@@ -560,37 +519,33 @@ export const useEditor = create<EditorState>((set, get) => ({
   // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
   loadFolder: async (read) => {
     if (!read) return false;
-    const gen = beginReplace();
-    set({ busy: true, replacing: true, notice: null });
+    const mine = reserveReplacement();
+    set({ notice: null });
     try {
-      const next = await replace(get, gen, openBundle(read.files, undefined, read.handles));
+      const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
       // 물러난 흐름의 뒷말(잘림 알림)은 남이 세운 화면에 대한 말이 된다 — 설치한 쪽만 말한다.
-      if (next) {
-        set(next);
-        if (read.truncated) {
-          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
-        }
+      if (next && read.truncated) {
+        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
       return true;
     } catch (e) {
-      if (latestReplace(gen)) set({ notice: folderFailedNotice(e, read) });
+      if (mine.current()) set({ notice: folderFailedNotice(e, read) });
       return true;
     } finally {
-      if (latestReplace(gen)) set({ busy: false, replacing: false });
+      mine.release();
     }
   },
 
   loadDropped: async (file) => {
-    const gen = beginReplace();
-    set({ busy: true, replacing: true, notice: null });
+    const mine = reserveReplacement();
+    set({ notice: null });
     try {
-      const next = await replace(get, gen, openPicked(droppedFile(file)));
-      if (next) set(next);
+      await replace(get, set, mine, openPicked(droppedFile(file)));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
-      if (latestReplace(gen)) set({ notice: openFailedNotice(e) });
+      if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      if (latestReplace(gen)) set({ busy: false, replacing: false });
+      mine.release();
     }
   },
 
@@ -617,8 +572,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다. 받아 두었다가
     // 버리면 조용히 사라지는 것이라, 받지 않고 그 사실을 알린다 (대원칙 3 · spec §4).
     // 제목 칸과 프리뷰는 이 동안 잠겨 있어, 여기 오는 것은 이미 열려 있던 블록의
-    // 확정(blur·IME 마무리)뿐이다. 저장 중(busy)과 다르다 — 그 편집은 살아남는다.
-    if (get().replacing) {
+    // 확정(blur·IME 마무리)뿐이다. 저장 중(saving)과 다르다 — 그 편집은 살아남는다.
+    if (useReplacement.getState().replacing) {
       useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
       return;
     }
@@ -637,7 +592,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
-  // busy·replacing 은 세운 흐름의 finally 가 끈다 — 여기서 끄면 겹쳐 도는 다른
+  // 갈아 끼우기 잠금은 예약의 release 가 내린다 — 여기서 내리면 겹쳐 도는 다른
   // 갈아 끼우기의 잠금을 남이 푸는 셈이다 (spec §5). 여기로 오는 실패(드롭한 폴더
   // 훑기 등)는 잠금을 세우기 전의 것이라 끌 것도 없다.
   failedToOpen: (e) => set({ notice: openFailedNotice(e) }),
@@ -736,25 +691,21 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ notice: null });
     // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
     let read: FolderRead | null = null;
-    let gen: number | null = null;
+    let mine: Replacement | null = null;
     try {
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      gen = beginReplace();
-      set({ busy: true, replacing: true });
-      const next = await replace(get, gen, openBundle(read.files, undefined, read.handles));
-      if (next) {
-        set(next);
-        if (read.truncated) {
-          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
-        }
+      mine = reserveReplacement();
+      const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
+      if (next && read.truncated) {
+        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
     } catch (e) {
-      if (gen === null || latestReplace(gen)) set({ notice: folderFailedNotice(e, read) });
+      if (mine === null || mine.current()) set({ notice: folderFailedNotice(e, read) });
     } finally {
-      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
+      mine?.release();
     }
   },
 
@@ -773,45 +724,46 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
 
     set({ notice: null });
-    let gen: number | null = null;
+    let mine: Replacement | null = null;
     try {
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
-      gen = beginReplace();
-      set({ busy: true, replacing: true });
+      mine = reserveReplacement();
 
-      // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
-      // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
-      // 파일 하나로 연 문서에는 묶음 경로가 아예 없다 — 그때는 이름이 곧 경로다
-      // (OpenedFile.path 의 규칙 그대로). 경로 없이 두면 아래 keep 이 비어, 다른
-      // 문서로 갔다 돌아올 때 핸들을 잃는다.
-      const fresh = await reread(get().file ?? file);
-      const rebased = { ...fresh, path: rebasePath(fresh.path ?? fresh.name, read.files) };
-      // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
-      // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
-      // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
-      // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
-      // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
-      // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
-      // 단, **같은 파일임을 증명한 때에만** 남긴다. 경로가 겹친다고 같은 파일은 아니다 —
-      // 기본명 폴백(rebasePath)이 고른 자리는 이름만 같은 남의 파일일 수 있고, 그 경로에
-      // 이 쓰기 핸들을 걸면 갔다 돌아올 때 그 자리에서 이 파일이 대신 열리고 저장이
-      // 남의 자리 내용을 덮는다. 증명할 수 없으면 남기지 않는 쪽이 낫다 (대원칙 3).
-      const twin = rebased.path ? read.handles.get(rebased.path) : undefined;
-      const proven =
-        rebased.handle && twin ? ((await rebased.handle.isSameEntry?.(twin)) ?? false) : false;
-      const keep =
-        proven && rebased.path && rebased.handle
-          ? new Map([[rebased.path, rebased.handle]])
-          : undefined;
-      // 증명 못 한 문서는 묶음의 일원도 아니다 — 되찾은 자리는 자원을 찾는 기준으로만
-      // 쓴다. 묶음 경로로 삼으면 저장이 그 경로의 묶음 내용을 이 문서의 결과물로
-      // 갈아 끼워, 폴더의 **다른** 문서를 바꿔치기한다 (spec §5.1).
-      const next = await replace(get, gen, load(rebased, read.files, keep, proven));
+      const loading = async (): Promise<Partial<EditorState>> => {
+        // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
+        // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
+        // 파일 하나로 연 문서에는 묶음 경로가 아예 없다 — 그때는 이름이 곧 경로다
+        // (OpenedFile.path 의 규칙 그대로). 경로 없이 두면 아래 keep 이 비어, 다른
+        // 문서로 갔다 돌아올 때 핸들을 잃는다.
+        const fresh = await reread(get().file ?? file);
+        const rebased = { ...fresh, path: rebasePath(fresh.path ?? fresh.name, read.files) };
+        // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
+        // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
+        // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
+        // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
+        // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
+        // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
+        // 단, **같은 파일임을 증명한 때에만** 남긴다. 경로가 겹친다고 같은 파일은 아니다 —
+        // 기본명 폴백(rebasePath)이 고른 자리는 이름만 같은 남의 파일일 수 있고, 그 경로에
+        // 이 쓰기 핸들을 걸면 갔다 돌아올 때 그 자리에서 이 파일이 대신 열리고 저장이
+        // 남의 자리 내용을 덮는다. 증명할 수 없으면 남기지 않는 쪽이 낫다 (대원칙 3).
+        const twin = rebased.path ? read.handles.get(rebased.path) : undefined;
+        const proven =
+          rebased.handle && twin ? ((await rebased.handle.isSameEntry?.(twin)) ?? false) : false;
+        const keep =
+          proven && rebased.path && rebased.handle
+            ? new Map([[rebased.path, rebased.handle]])
+            : undefined;
+        // 증명 못 한 문서는 묶음의 일원도 아니다 — 되찾은 자리는 자원을 찾는 기준으로만
+        // 쓴다. 묶음 경로로 삼으면 저장이 그 경로의 묶음 내용을 이 문서의 결과물로
+        // 갈아 끼워, 폴더의 **다른** 문서를 바꿔치기한다 (spec §5.1).
+        return load(rebased, read.files, keep, proven);
+      };
+      const next = await replace(get, set, mine, loading());
       if (next) {
-        set(next);
         const attached = countAssets(get()).linked;
         set({
           notice: read.truncated
@@ -822,9 +774,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         });
       }
     } catch (e) {
-      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
+      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
+      mine?.release();
     }
   },
 
@@ -839,24 +791,16 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!bundle || path === docPath) return;
 
     set({ notice: null });
-    let gen: number | null = null;
+    let mine: Replacement | null = null;
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
-      gen = beginReplace();
-      set({ busy: true, replacing: true });
-      const next = await replace(get, gen, openBundle(bundle, path, get().bundleHandles));
-      if (next) set(next);
+      mine = reserveReplacement();
+      await replace(get, set, mine, openBundle(bundle, path, get().bundleHandles));
     } catch (e) {
-      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
+      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
+      mine?.release();
     }
-  },
-
-  // 판정을 이 한 자리에 모은다 — 흩어 두면 비동기마다 제각기 다른 기준을 만든다.
-  claim: () => {
-    const doc = get().doc;
-    return () => get().doc === doc;
   },
 
   save: async () => {
@@ -870,9 +814,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 패치 0개의 저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다.
     if (!file || !unsaved) return false;
     // 쓰는 동안 다른 문서로 갈아탈 수 있다. 뒤늦게 도착한 결과가 새 문서의 상태에
-    // 옛 결과물을 적지 않도록, 시작하기 전에 지금 문서의 표를 받아 둔다 (spec §5).
-    const mine = get().claim();
-    set({ busy: true, notice: null });
+    // 옛 결과물을 적지 않도록, 시작하기 전에 지금 문서의 세대를 받아 둔다 (spec §5).
+    const mine = claimDocument();
+    set({ saving: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
@@ -919,9 +863,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
       return false;
     } finally {
-      // busy 도 마찬가지다 — 갈아탄 뒤라면 그 busy 는 새 흐름의 것이라 여기서 끄면
-      // 문서를 여는 중인데 화면이 풀린다. 새 흐름의 finally 가 제 몫을 끈다.
-      if (mine()) set({ busy: false });
+      // 저장이 내리는 것은 **제 표시(saving)뿐**이다. 갈아 끼우기 잠금(replacing)은
+      // 예약이 들고 있어, 새 갈아 끼우기가 도는 사이에 앞선 저장이 끝나도 화면이
+      // 풀리지 않는다 (spec §5 · 갈아 끼우기 예약). 갈아탄 뒤에 도착했으면(mine 이
+      // 아니면) 이 saving 도 이전 문서의 것이다 — 설치가 이미 내렸으니 두고 간다.
+      if (mine()) set({ saving: false });
     }
   },
 }));

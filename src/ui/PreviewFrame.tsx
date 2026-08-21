@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
+import { useReplacement } from '@/store/replacement';
 import { shortcutSave } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
 import { cn } from '@/lib/utils';
@@ -28,7 +29,8 @@ export function PreviewFrame() {
   const drainReverts = useEditor((s) => s.drainReverts);
   const revealId = useEditor((s) => s.revealId);
   const drainReveal = useEditor((s) => s.drainReveal);
-  const replacing = useEditor((s) => s.replacing);
+  // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
+  const replacing = useReplacement((s) => s.replacing);
 
   useEffect(() => {
     const handle = (e: MessageEvent) => {

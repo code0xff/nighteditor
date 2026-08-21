@@ -76,7 +76,7 @@ export function shortcutSave(): void {
     void useEditor.getState().save();
     return;
   }
-  // 대화상자의 저장 버튼과 같은 기준 — 저장이 도는 동안(busy)에는 겹쳐 답하지 않는다.
-  if (useEditor.getState().busy) return;
+  // 대화상자의 저장 버튼과 같은 기준 — 저장이 도는 동안(saving)에는 겹쳐 답하지 않는다.
+  if (useEditor.getState().saving) return;
   reply('save');
 }

@@ -24,7 +24,7 @@ function edited(extra: Record<string, unknown> = {}): void {
 
 beforeEach(() => {
   useUnsaved.setState({ why: null, answer: null });
-  useEditor.setState({ patches: new Map(), file: null, unsaved: false, busy: false });
+  useEditor.setState({ patches: new Map(), file: null, unsaved: false, saving: false });
 });
 
 describe('keepEdits', () => {
@@ -149,9 +149,9 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     expect(await asked).toBe(false);
   });
 
-  it('저장이 도는 동안(busy)에는 답하지 않는다 — 대화상자의 저장 버튼과 같은 기준', async () => {
+  it('저장이 도는 동안(saving)에는 답하지 않는다 — 대화상자의 저장 버튼과 같은 기준', async () => {
     const save = vi.fn().mockResolvedValue(true);
-    edited({ save, busy: true });
+    edited({ save, saving: true });
     const asked = keepEdits({ key: 'confirm.whyOpen' });
     for (let tries = 0; useUnsaved.getState().why === null; tries++) {
       if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
