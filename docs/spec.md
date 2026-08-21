@@ -475,6 +475,11 @@ deck.css → https://code0xff.github.io/nighteditor/deck.css   404
 원본 문자열은 손대지 않는다 (대원칙 1) — 저장본에는 blob URL 이 단 하나도 들어가지 않는다.
 마커 주입과 같은 자리에서, 같은 규칙(내림차순 적용)으로 한다.
 
+경로 뒤에 붙어 있던 것 중 blob URL 에 다시 다는 것은 **조각(`#icon`)뿐**이다.
+잃으면 스프라이트에서 무엇을 꺼낼지가 사라지기 때문이다. 질의(`?v=3`)는 **뗀다** —
+blob URL 은 질의가 붙는 순간 만들어 둔 객체와 다른 이름이 되어 아예 열리지 않고,
+캐시 무력화는 blob 에는 의미도 없다. HTML 속성과 CSS `url()` 양쪽 다 같은 규칙이다.
+
 바꾸는 대상은 자원을 **가리키는 속성**이다: `link[href]`, `script[src]`, `img[src]`,
 `source[src]`, `video[src|poster]`, `audio[src]`, `iframe[src]`, `embed[src]`,
 `object[data]`, `track[src]`, `input[src]`, `use[href]`.
@@ -534,6 +539,7 @@ blob URL 에는 디렉터리가 없어서 스타일시트가 자기 옆의 파�
 
 - [x] `link`·`script`·`img` 의 상대 경로를 프리뷰에서만 blob URL 로 바꾼다
 - [x] `<a href>` 는 바꾸지 않는다
+- [x] 조각(`#icon`)은 blob URL 에 다시 달고, 질의(`?v=3`)는 뗀다 — 붙으면 그 blob 이 열리지 않는다
 - [x] `<style>` 과 CSS 파일 안의 `url()` 도 그 파일 위치를 기준으로 바꾼다
 - [x] 저장본에는 `blob:` 이 들어가지 않고, 바뀐 줄은 고친 블록뿐이다
 - [x] 자원이 없어도 문서는 그대로 열리고 편집된다

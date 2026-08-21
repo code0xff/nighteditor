@@ -41,9 +41,10 @@ export interface AssetRef {
   /**
    * 경로 뒤에 붙어 있던 질의·조각 (`?v=3`, `#icon`).
    *
-   * 파일을 찾을 때는 떼어내야 하지만 **붙일 때는 다시 달아야 한다.**
+   * 파일을 찾을 때는 떼어낸다. 붙일 때 다시 다는 것은 **조각뿐**이다 —
    * `<use href="sprite.svg#icon">` 에서 `#icon` 을 잃으면 스프라이트에서 무엇을
-   * 꺼낼지가 사라져 아무것도 그리지 않는다.
+   * 꺼낼지가 사라져 아무것도 그리지 않는다. 질의까지 달면 반대로 전부 잃는다
+   * (`blobSuffix` 참조).
    */
   suffix: string;
   /** 원본에서 **값만** 가리키는 범위 (따옴표는 포함하지 않는다) */
@@ -180,13 +181,27 @@ export function parseAssetRefs(source: string, baseDir = ''): AssetRef[] {
   return refs;
 }
 
+/**
+ * 붙일 URL 에 다시 달 수 있는 것은 **조각뿐**이다.
+ *
+ * 조각(`#icon`)은 지켜야 한다 — 잃으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
+ * 질의(`?v=3`)는 버려야 한다 — blob URL 은 질의가 붙는 순간 만들어 둔 객체와
+ * 다른 이름이 되어 브라우저가 아예 열지 못한다. 캐시 무력화는 blob 에는 의미도 없다.
+ */
+function blobSuffix(suffix: string): string {
+  const hash = suffix.indexOf('#');
+  return hash < 0 ? '' : suffix.slice(hash);
+}
+
 /** 붙일 자원이 있는 참조만 치환 목록으로 만든다 */
 export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] {
   const edits: Edit[] = [];
   for (const ref of refs) {
     const url = resolve(ref.path);
-    // 질의·조각을 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
-    if (url) edits.push({ start: ref.valueStart, end: ref.valueEnd, text: url + ref.suffix });
+    // 조각만 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
+    if (url) {
+      edits.push({ start: ref.valueStart, end: ref.valueEnd, text: url + blobSuffix(ref.suffix) });
+    }
   }
   return edits;
 }
@@ -265,7 +280,7 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
       const url = path === null ? undefined : resolve(path);
       if (token && url) {
         const { suffix } = splitSuffix(token.raw.trim());
-        out += `url(${token.quote}${url}${suffix}${token.quote})`;
+        out += `url(${token.quote}${url}${blobSuffix(suffix)}${token.quote})`;
         i = token.end;
         continue;
       }

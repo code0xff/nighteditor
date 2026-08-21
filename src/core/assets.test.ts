@@ -226,18 +226,35 @@ describe('자원 참조의 질의와 조각', () => {
     expect(out).toContain('href="blob:sprite.svg#icon"');
   });
 
-  it('질의 문자열도 지키고, 파일은 질의를 뺀 이름으로 찾는다', () => {
+  it('질의는 떼고, 파일도 질의를 뺀 이름으로 찾는다', () => {
+    // blob URL 은 질의가 붙는 순간 만들어 둔 객체와 다른 이름이 되어 아예 열리지 않는다.
     const source = '<link href="deck.css?v=3">';
     const [ref] = parseAssetRefs(source);
     const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
 
     expect(ref?.path).toBe('deck.css');
-    expect(out).toBe('<link href="blob:deck.css?v=3">');
+    expect(out).toBe('<link href="blob:deck.css">');
+  });
+
+  it('질의와 조각이 함께 있으면 조각만 남긴다', () => {
+    const source = '<svg><use href="sprite.svg?v=2#icon"/></svg>';
+    const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
+
+    expect(out).toContain('href="blob:sprite.svg#icon"');
   });
 
   it('CSS 안에서도 조각을 지킨다', () => {
     expect(rewriteCssUrls('a{clip-path:url(shapes.svg#round)}', '', fake)).toBe(
       'a{clip-path:url(blob:shapes.svg#round)}'
+    );
+  });
+
+  it('CSS 안에서도 질의는 뗀다', () => {
+    expect(rewriteCssUrls('a{background:url("bg.png?v=3")}', '', fake)).toBe(
+      'a{background:url("blob:bg.png")}'
+    );
+    expect(rewriteCssUrls('@font-face{src:url(f.woff2?v=1#iefix)}', '', fake)).toBe(
+      '@font-face{src:url(blob:f.woff2#iefix)}'
     );
   });
 });
