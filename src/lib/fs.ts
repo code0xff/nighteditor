@@ -57,8 +57,17 @@ export function canOverwrite(): boolean {
  *
  * 사용자가 실수로 홈 디렉터리를 고를 수 있다. 한도가 없으면 탭이 굳는다.
  * 넘치면 조용히 자르지 않고 거기서 멈춘 사실을 부르는 쪽에 알린다 (대원칙 3).
+ *
+ * `visits` 는 담는 수가 아니라 **훑는 항목 수**의 상한이다. 담긴 수(files)만 보면
+ * 한도보다 큰 파일이 가득한 폴더에서 하나도 못 담은 채 끝까지 걸어 탭이 굳는다 —
+ * 담지 못한 항목도 걷는 값은 치르므로, 순회 자체를 따로 묶는다 (spec §5.1).
  */
-export const FOLDER_LIMITS = { files: 500, bytes: 64 * 1024 * 1024, depth: 8 } as const;
+export const FOLDER_LIMITS = {
+  files: 500,
+  bytes: 64 * 1024 * 1024,
+  depth: 8,
+  visits: 2000,
+} as const;
 
 export interface FolderRead {
   files: Map<string, File>;
@@ -76,10 +85,27 @@ export interface FolderRead {
 /** 걸어가는 동안의 누계. 한도를 재귀 사이에서 이어 세려면 한 곳에 모아야 한다 */
 interface Walk extends FolderRead {
   bytes: number;
+  /** 훑은 항목 수 — 담았는지와 무관하게 센다. 순회를 끊는 기준이다 */
+  visits: number;
 }
 
 function emptyWalk(): Walk {
-  return { files: new Map(), handles: new Map(), truncated: false, bytes: 0 };
+  return { files: new Map(), handles: new Map(), truncated: false, bytes: 0, visits: 0 };
+}
+
+/**
+ * 더 걸어도 되는가. 아니면 잘렸다고 적고 순회 전체를 끊는다.
+ *
+ * 재귀 안에서 예산이 바닥나면 return 은 한 층만 빠져나온다 — 부모 루프도 매 항목마다
+ * 이 검사를 다시 하므로, 바닥난 예산이 위층까지 차례로 순회를 멈춘다.
+ */
+function walkOn(into: Walk): boolean {
+  if (into.files.size >= FOLDER_LIMITS.files || into.visits >= FOLDER_LIMITS.visits) {
+    into.truncated = true;
+    return false;
+  }
+  into.visits += 1;
+  return true;
 }
 
 function done(read: Walk): FolderRead {
@@ -96,10 +122,7 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
   for await (const [name, handle] of dir.entries()) {
     // 숨김 폴더와 의존성 더미는 자원일 리 없고 파일 수만 폭발시킨다.
     if (name.startsWith('.') || name === 'node_modules') continue;
-    if (into.files.size >= FOLDER_LIMITS.files) {
-      into.truncated = true;
-      return;
-    }
+    if (!walkOn(into)) return;
 
     const path = prefix ? `${prefix}/${name}` : name;
     if (isDirectory(handle)) {
@@ -261,10 +284,7 @@ async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Wa
 
     for (const entry of batch) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-      if (into.files.size >= FOLDER_LIMITS.files) {
-        into.truncated = true;
-        return;
-      }
+      if (!walkOn(into)) return;
 
       const path = `${prefix}/${entry.name}`;
       if (entry.isDirectory) {

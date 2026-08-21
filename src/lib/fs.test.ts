@@ -82,6 +82,32 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.truncated).toBe(true);
   });
 
+  it('한도 넘는 파일만 가득해도 끝까지 걷지 않는다', async () => {
+    // 담긴 수(files.size)만 보면 하나도 못 담은 채 폴더 전체를 계속 읽었다 —
+    // 큰 파일 만 개짜리 폴더에서 한도가 순회를 전혀 묶지 못했다 (spec §5.1).
+    let touched = 0;
+    const huge = FOLDER_LIMITS.bytes + MB;
+    const children = Array.from(
+      { length: FOLDER_LIMITS.visits + 500 },
+      (_, i) =>
+        ({
+          name: `big${i}.mp4`,
+          isFile: true,
+          isDirectory: false,
+          file: (cb: (f: File) => void) => {
+            touched++;
+            cb(fakeFile(`big${i}.mp4`, huge));
+          },
+        }) as unknown as FileSystemEntry
+    );
+
+    const read = await readDroppedFolder(drop(dirEntry('deck', children)));
+
+    expect(read?.truncated).toBe(true);
+    expect(read?.files.size).toBe(0);
+    expect(touched).toBeLessThanOrEqual(FOLDER_LIMITS.visits);
+  });
+
   it('숨김 파일과 node_modules 는 지나친다', async () => {
     const read = await readDroppedFolder(
       drop(
