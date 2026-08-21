@@ -60,3 +60,23 @@ export async function keepEdits(why: Notice): Promise<boolean> {
   if (choice === 'save') return save();
   return true;
 }
+
+/**
+ * 저장 단축키(`Ctrl+S`)의 저장. **물음이 떠 있으면 그 물음의 "저장하고 계속" 이다**
+ * (spec §4 · 저장하지 않은 편집을 지킨다).
+ *
+ * 물음 옆에서 그냥 `save()` 를 부르면 `unsaved` 만 풀린 채 물음이 남는다. 그 뒤에
+ * 대화상자의 저장 버튼을 눌러도 `save()` 가 저장할 것이 없다며 false 를 돌려,
+ * 하려던 일(열기·갈아타기)이 조용히 취소된다. 단축키를 물음의 답으로 돌리면
+ * 저장도 되고 하려던 일도 이어진다.
+ */
+export function shortcutSave(): void {
+  const { why, reply } = useUnsaved.getState();
+  if (why === null) {
+    void useEditor.getState().save();
+    return;
+  }
+  // 대화상자의 저장 버튼과 같은 기준 — 저장이 도는 동안(busy)에는 겹쳐 답하지 않는다.
+  if (useEditor.getState().busy) return;
+  reply('save');
+}

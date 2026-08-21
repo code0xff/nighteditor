@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditor } from './editor.js';
-import { keepEdits, useUnsaved } from './unsaved.js';
+import { keepEdits, shortcutSave, useUnsaved } from './unsaved.js';
 
 /**
  * 대화상자가 뜨기를 기다렸다가 대신 답한다 — 사람이 버튼을 누르는 자리다.
@@ -24,7 +24,7 @@ function edited(extra: Record<string, unknown> = {}): void {
 
 beforeEach(() => {
   useUnsaved.setState({ why: null, answer: null });
-  useEditor.setState({ patches: new Map(), file: null, unsaved: false });
+  useEditor.setState({ patches: new Map(), file: null, unsaved: false, busy: false });
 });
 
 describe('keepEdits', () => {
@@ -104,5 +104,65 @@ describe('keepEdits', () => {
 
     expect(await first).toBe(false);
     expect(await second).toBe(true);
+  });
+});
+
+describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
+  it('물음이 없으면 그냥 저장이다', () => {
+    const save = vi.fn().mockResolvedValue(true);
+    useEditor.setState({ save });
+
+    shortcutSave();
+
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it('물음이 떠 있으면 "저장하고 계속" 으로 흘러 하려던 일이 이어진다', async () => {
+    // 여기서 그냥 저장만 하면 unsaved 가 풀린 채 물음이 남고, 그 뒤의 저장 버튼이
+    // 저장할 것이 없다며 false 로 돌아 하려던 일(열기·갈아타기)이 취소된다.
+    const save = vi.fn().mockResolvedValue(true);
+    edited({ save });
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+      await Promise.resolve();
+    }
+
+    shortcutSave();
+
+    expect(await asked).toBe(true);
+    expect(save).toHaveBeenCalledOnce();
+    expect(useUnsaved.getState().why).toBeNull();
+  });
+
+  it('저장이 실패하면 여전히 계속하지 않는다', async () => {
+    const save = vi.fn().mockResolvedValue(false);
+    edited({ save });
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+      await Promise.resolve();
+    }
+
+    shortcutSave();
+
+    expect(await asked).toBe(false);
+  });
+
+  it('저장이 도는 동안(busy)에는 답하지 않는다 — 대화상자의 저장 버튼과 같은 기준', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    edited({ save, busy: true });
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+      await Promise.resolve();
+    }
+
+    shortcutSave();
+
+    expect(save).not.toHaveBeenCalled();
+    expect(useUnsaved.getState().why).not.toBeNull();
+    useUnsaved.getState().reply('cancel');
+    expect(await asked).toBe(false);
   });
 });

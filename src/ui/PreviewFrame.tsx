@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
+import { shortcutSave } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
 import { FORMAT_LABELS } from '@/lib/messages';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
@@ -20,7 +21,6 @@ export function PreviewFrame() {
   const onEdit = useEditor((s) => s.onEdit);
   const onBlocked = useEditor((s) => s.onBlocked);
   const select = useEditor((s) => s.select);
-  const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
   const revertQueue = useEditor((s) => s.revertQueue);
@@ -37,13 +37,14 @@ export function PreviewFrame() {
       else if (msg.type === 'blocked') onBlocked(msg.id);
       else if (msg.type === 'select') select(msg.id);
       // 프리뷰 안에서 누른 Ctrl+S. 호스트 창은 그 키를 보지 못한다 (spec §4).
-      else if (msg.type === 'save') void save();
+      // 호스트의 단축키와 같은 길을 탄다 — 저장 물음이 떠 있으면 "저장하고 계속" 이다.
+      else if (msg.type === 'save') shortcutSave();
       else if (msg.type === 'downloadCopy') downloadCopy();
       else if (msg.type === 'undo') undoLast();
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
-  }, [onReady, onEdit, onBlocked, select, save, downloadCopy, undoLast]);
+  }, [onReady, onEdit, onBlocked, select, downloadCopy, undoLast]);
 
   // 서식 막대에 붙일 문구를 건넨다. 에이전트는 언어팩을 불러올 수 없다 (ADR-007).
   // 언어를 바꾸면 다시 보내 이미 떠 있는 막대까지 함께 바뀌게 한다.

@@ -9,7 +9,7 @@ import { onBeforeUnload } from '@/lib/unsaved';
 import { ERROR_NOTICES } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { countAssets, useEditor } from '@/store/editor';
-import { keepEdits } from '@/store/unsaved';
+import { keepEdits, shortcutSave } from '@/store/unsaved';
 import { useToasts } from '@/store/toasts';
 import { UnsavedDialog } from '@/components/UnsavedDialog';
 import { useI18n } from '@/store/locale';
@@ -23,7 +23,6 @@ export function App() {
   const loadDropped = useEditor((s) => s.loadDropped);
   const loadFolder = useEditor((s) => s.loadFolder);
   const adopt = useEditor((s) => s.adopt);
-  const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
   const unsaved = useEditor((s) => s.unsaved);
@@ -44,9 +43,11 @@ export function App() {
   useEffect(() => onFileLaunch((f) => void adopt(f)), [adopt]);
 
   // 프리뷰 밖(툴바·사이드바)에 포커스가 있을 때의 단축키. 프리뷰 안쪽은 에이전트가 넘긴다.
+  // 저장은 곧장 save() 가 아니라 shortcutSave 다 — 저장 물음이 떠 있는 동안의 Ctrl+S 는
+  // 그 물음의 "저장하고 계속" 이어야 하려던 일이 취소되지 않는다 (spec §4).
   useEffect(
-    () => onEditorShortcuts({ save: () => void save(), downloadCopy, undo: undoLast }),
-    [save, downloadCopy, undoLast]
+    () => onEditorShortcuts({ save: shortcutSave, downloadCopy, undo: undoLast }),
+    [downloadCopy, undoLast]
   );
 
   // 알림은 오른쪽 위로 띄운다. 배너로 두면 뜰 때마다 읽던 자리가 아래로 밀린다.
