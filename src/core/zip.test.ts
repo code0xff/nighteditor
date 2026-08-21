@@ -139,6 +139,16 @@ describe('readZip · 픽스처 회귀', () => {
     expect(() => readZip(eocd)).toThrow(expect.objectContaining({ code: 'zip64' }));
   });
 
+  it('EOCD 보다 짧은 입력은 zip 이 아니라는 사유로 멈춘다', () => {
+    // 훑기 시작점이 음수라 아예 돌지 않고, 우리 진단으로 떨어져야 한다 —
+    // DataView 의 RangeError 원문이 새면 언어팩 대신 브라우저 문장이 보인다.
+    for (const len of [0, 1, 10, 21]) {
+      expect(() => readZip(new Uint8Array(len).fill(0x50))).toThrow(
+        expect.objectContaining({ code: 'notZip' })
+      );
+    }
+  });
+
   it('목차가 버퍼 밖의 로컬 헤더를 가리키면 우리 진단으로 멈춘다', () => {
     // DataView 의 RangeError 가 먼저 터지면 언어팩 진단 대신 브라우저 원문이 나간다.
     const zip = new Uint8Array(fixtureBundle());
