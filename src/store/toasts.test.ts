@@ -48,6 +48,31 @@ describe('toasts', () => {
     expect(useToasts.getState().toasts.length).toBeLessThanOrEqual(4);
   });
 
+  it('넘쳐도 오류는 밀려나지 않는다 — 사람이 닫기 전까지 화면에 있어야 한다', () => {
+    // 오류 뒤로 안내가 몇 개 지나갔다고 저장 실패가 사라지면,
+    // 스스로 사라진 것과 다르지 않다 (spec §4).
+    useToasts.getState().show({ key: 'notice.saveFailed' }, 'error');
+    useToasts.getState().show({ key: 'notice.saved' });
+    useToasts.getState().show({ key: 'notice.copyDownloaded' });
+    useToasts.getState().show({ key: 'notice.assetsLinked' });
+    useToasts.getState().show({ key: 'notice.folderTruncated' });
+
+    const keys = useToasts.getState().toasts.map((t) => t.notice.key);
+    expect(keys).toContain('notice.saveFailed');
+    expect(keys).not.toContain('notice.saved');
+    expect(useToasts.getState().toasts).toHaveLength(4);
+  });
+
+  it('전부 오류면 한도를 넘겨서라도 남긴다', () => {
+    useToasts.getState().show({ key: 'notice.saveFailed' }, 'error');
+    useToasts.getState().show({ key: 'notice.openFailed' }, 'error');
+    useToasts.getState().show({ key: 'notice.saveRejected' }, 'error');
+    useToasts.getState().show({ key: 'notice.folderUnsupported' }, 'error');
+    useToasts.getState().show({ key: 'notice.bundleNoDocument' }, 'error');
+
+    expect(useToasts.getState().toasts).toHaveLength(5);
+  });
+
   it('닫으면 그것만 사라진다', () => {
     useToasts.getState().show({ key: 'notice.saved' });
     useToasts.getState().show({ key: 'notice.saveFailed' }, 'error');
