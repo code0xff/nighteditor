@@ -66,7 +66,21 @@ function findEocd(bytes: Uint8Array): number {
     // 들어 있을 수 있고, 그걸 EOCD 로 읽으면 주석 바이트가 목차 위치·개수로 풀려
     // 멀쩡한 zip 을 거절하거나 빈 묶음으로 읽는다. 진짜 EOCD 는 자기 주석이
     // 버퍼 끝에 정확히 닿는다 — 안 닿는 후보는 지나치고 더 앞을 찾는다.
-    if (at + 22 + dv.getUint16(at + 20, true) === bytes.length) return at;
+    if (at + 22 + dv.getUint16(at + 20, true) !== bytes.length) continue;
+    const count = dv.getUint16(at + 10, true);
+    const centralAt = dv.getUint32(at + 16, true);
+    // zip64 는 이 칸들을 0xFF.. 로 채운다. 여기서 지나치면 "zip 이 아니다" 로 잘못
+    // 말하게 되므로 통과시켜 readZip 이 zip64 미지원이라고 말하게 둔다.
+    if (count === 0xffff || centralAt === 0xffffffff) return at;
+    // 주석 끝머리에 실린 22바이트짜리 가짜 EOCD 는 위 검사도 통과한다 — 제 주석 길이를
+    // 0 으로 적으면 끝에 닿는다. 목차 칸이 실제 목차를 가리키는지까지 확인해야
+    // 멀쩡한 zip 이 (개수 0짜리 가짜를 믿고) 빈 묶음으로 열리지 않는다.
+    // 빈 zip 의 목차는 크기 0 이라 EOCD 자리에서 시작한다.
+    const dirValid =
+      count === 0
+        ? centralAt === at
+        : centralAt + 46 <= at && dv.getUint32(centralAt, true) === CENTRAL_SIGNATURE;
+    if (dirValid) return at;
   }
   throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }
@@ -108,7 +122,10 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
     if (flags & 0x1) throw new ZipError('encrypted', { name }, `encrypted entry: ${name}`);
     if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
 
-    if (dv.getUint32(localAt, true) !== LOCAL_SIGNATURE) {
+    // 조작된 목차는 localAt 을 버퍼 밖에 둘 수 있다. 경계를 먼저 보지 않으면
+    // DataView 가 던진 RangeError 원문이 그대로 나가, 언어팩의 zip 진단 대신
+    // 브라우저 문장이 보인다 — 오류는 언제나 우리 코드로 말한다 (대원칙 3).
+    if (localAt + 30 > bytes.length || dv.getUint32(localAt, true) !== LOCAL_SIGNATURE) {
       throw new ZipError('badLocal', { name }, `local header not found: ${name}`);
     }
     // 로컬 헤더의 이름·부가 필드 길이는 중앙 디렉터리와 다를 수 있다. 여기 값을 쓴다.

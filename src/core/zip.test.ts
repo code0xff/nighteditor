@@ -91,6 +91,43 @@ describe('readZip · 픽스처 회귀', () => {
 
     expect(names).toContain('deck/index.html');
   });
+
+  it('주석 끝의 가짜 EOCD 레코드를 진짜로 믿지 않는다', () => {
+    // 주석이 22바이트짜리 EOCD 모양으로 끝나면(제 주석 길이 0 → 끝에 닿음) 끝-정렬
+    // 검사만으로는 걸러지지 않는다. 개수·목차 위치가 0 인 가짜를 믿으면 멀쩡한 zip 이
+    // 빈 묶음으로 열린다 — 목차 칸이 실제 목차를 가리키는지까지 봐야 한다.
+    const zip = fixtureBundle();
+    const fake = new Uint8Array(22);
+    new DataView(fake.buffer).setUint32(0, 0x06054b50, true); // 나머지 칸은 전부 0
+    const withComment = new Uint8Array(zip.length + fake.length);
+    withComment.set(zip);
+    withComment.set(fake, zip.length);
+    // 진짜 EOCD 의 주석 길이 칸이 뒤에 붙인 가짜까지 덮게 한다.
+    new DataView(withComment.buffer).setUint16(zip.length - 2, fake.length, true);
+
+    const names = readZip(withComment).map((e) => e.name);
+
+    expect(names).toContain('deck/index.html');
+  });
+
+  it('목차가 버퍼 밖의 로컬 헤더를 가리키면 우리 진단으로 멈춘다', () => {
+    // DataView 의 RangeError 가 먼저 터지면 언어팩 진단 대신 브라우저 원문이 나간다.
+    const zip = new Uint8Array(fixtureBundle());
+    const dv = new DataView(zip.buffer);
+    // 픽스처는 주석이 없어 EOCD 가 마지막 22바이트다. 디렉터리 항목은 로컬 헤더를
+    // 읽기 전에 걸러지므로, 목차를 걸어 **첫 파일 항목**의 로컬 위치를 조작한다.
+    const centralAt = dv.getUint32(zip.length - 22 + 16, true);
+    let at = centralAt;
+    for (;;) {
+      const nameLength = dv.getUint16(at + 28, true);
+      const name = new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLength));
+      if (!name.endsWith('/') && !name.startsWith('__MACOSX/')) break;
+      at += 46 + nameLength + dv.getUint16(at + 30, true) + dv.getUint16(at + 32, true);
+    }
+    dv.setUint32(at + 42, 0xfffffff0, true);
+
+    expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badLocal' }));
+  });
 });
 
 describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () => {
