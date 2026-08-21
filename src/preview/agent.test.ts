@@ -1038,4 +1038,36 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
     expect(String(edit?.html)).not.toContain('data-ne-bar');
     expect(String(edit?.html)).toBe('가나다라마바사');
   });
+
+  it('막대가 블록 안으로 옮겨져 있어도 취소가 막대를 죽이지 않는다', () => {
+    // Escape 는 innerHTML 을 스냅숏으로 되돌린다. 막대가 블록 안에 있는 채로 되돌리면
+    // 막대가 DOM 에서 떨어지는데 참조는 남아, 다음 선택부터 막대를 다시 만들지도
+    // 붙이지도 않는다 — 세션 내내 서식 기능이 사라진다.
+    const selectText = () => {
+      const node = el(0)!.firstChild!;
+      const range = document.createRange();
+      range.setStart(node, 1);
+      range.setEnd(node, 4);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    };
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    selectText();
+
+    const bar = document.querySelector<HTMLElement>('[data-ne-bar]')!;
+    bar.remove();
+    el(0)!.appendChild(bar);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    // 막대는 살아 있고, 되돌린 블록에는 막대가 없다.
+    expect(document.documentElement.contains(bar)).toBe(true);
+    expect(el(0)!.innerHTML).toBe('가나다라마바사');
+
+    // 다시 편집하고 글자를 고르면 그 막대가 다시 뜬다.
+    click(el(0)!);
+    selectText();
+    expect(bar.style.display).toBe('flex');
+  });
 });

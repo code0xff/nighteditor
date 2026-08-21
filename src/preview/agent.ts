@@ -107,6 +107,11 @@ export function previewAgent(): () => void {
     const el = elementFor(editingId);
     if (el) {
       el.removeAttribute('contenteditable');
+      // commit 과 같은 방어: 아티팩트 스크립트가 막대를 블록 안으로 옮겨 놨을 수 있다.
+      // 그대로 innerHTML 을 되돌리면 막대가 DOM 에서 떨어져 나가는데 참조(bar)는
+      // 남아 있어, 다음 선택에서 placeBar 가 막대를 다시 만들지도 붙이지도 않는다 —
+      // 세션 내내 서식 막대가 사라진다. 되돌리기 전에 블록 밖으로 빼돌린다.
+      if (bar && el.contains(bar)) document.documentElement.appendChild(bar);
       if (snapshot !== null) el.innerHTML = snapshot;
     }
     editingId = null;
