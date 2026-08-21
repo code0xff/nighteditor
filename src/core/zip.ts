@@ -124,7 +124,8 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
   const entries: ZipEntry[] = [];
   let at = centralAt;
   for (let i = 0; i < count; i++) {
-    if (at + 46 > bytes.length || dv.getUint32(at, true) !== CENTRAL_SIGNATURE) {
+    // 목차는 EOCD 앞에서 끝나야 한다 — 버퍼 길이로만 재면 EOCD 자체를 목차로 읽는다.
+    if (at + 46 > eocd || dv.getUint32(at, true) !== CENTRAL_SIGNATURE) {
       throw new ZipError('badCentral', {}, 'broken central directory');
     }
     const flags = dv.getUint16(at + 8, true);
@@ -135,8 +136,15 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
     const extraLength = dv.getUint16(at + 30, true);
     const commentLength = dv.getUint16(at + 32, true);
     const localAt = dv.getUint32(at + 42, true);
+    // 이름·부가·주석까지의 끝도 EOCD 를 넘으면 안 된다 — subarray 는 조용히 잘라
+    // 주므로, 여기서 막지 않으면 잘린 이름으로 지어낸 항목이 진짜 파일 행세를 하고
+    // 커서는 버퍼 밖으로 걸어 나간다 (대원칙 3 · spec §6).
+    const recordEnd = at + 46 + nameLength + extraLength + commentLength;
+    if (recordEnd > eocd) {
+      throw new ZipError('badCentral', {}, 'central record overruns the EOCD');
+    }
     const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength));
-    at += 46 + nameLength + extraLength + commentLength;
+    at = recordEnd;
 
     // 암호화된 항목은 풀 수 없다. 반쯤 읽어 깨진 파일을 붙이느니 말하고 멈춘다.
     if (flags & 0x1) throw new ZipError('encrypted', { name }, `encrypted entry: ${name}`);

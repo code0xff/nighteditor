@@ -195,6 +195,19 @@ describe('readZip · 픽스처 회귀', () => {
     expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badLocal' }));
   });
 
+  it('목차 항목이 EOCD 를 넘어가면 지어낸 항목 없이 멈춘다', () => {
+    // 이름 길이를 부풀린 목차는 subarray 가 조용히 잘라 준 바이트로 가짜 이름을
+    // 만들고, 커서는 버퍼 밖으로 걸어 나간다. 항목 하나짜리 목차라면 그 가짜가
+    // 유일한 "파일" 이 되어, 깨진 zip 이 문서 없는 묶음 행세를 한다 (spec §6).
+    const zip = new Uint8Array(fixtureBundle());
+    const dv = new DataView(zip.buffer);
+    dv.setUint16(zip.length - 22 + 10, 1, true); // 항목 수를 1로 — 넘친 항목이 마지막이 되게
+    const centralAt = dv.getUint32(zip.length - 22 + 16, true);
+    dv.setUint16(centralAt + 28, 0xffff, true); // 이름 길이를 부풀린다
+
+    expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badCentral' }));
+  });
+
   it('파일 수 한도를 목차를 읽는 동안 센다', () => {
     // 다 만들고 나서 세면 거절할 zip 의 항목을 전부(최대 65,534개) 만든 뒤에야
     // 거절하게 된다 — 한도는 담는 수가 아니라 읽는 일 자체를 묶는다 (spec §5.1).
