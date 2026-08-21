@@ -25,7 +25,7 @@ export function isLocale(value: unknown): value is Locale {
 }
 
 const ko = {
-  'app.emptyTitle': 'HTML 파일이나 zip을 여기에 끌어다 놓으세요',
+  'app.emptyTitle': 'HTML 파일이나 zip, 폴더를 여기에 끌어다 놓으세요',
   'app.emptyHint': '글자를 눌러 고치면, 저장할 때 고친 부분만 바뀌어요',
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
 
@@ -105,7 +105,7 @@ export type MessageKey = keyof typeof ko;
 export const MESSAGE_KEYS = Object.keys(ko) as MessageKey[];
 
 const en: Record<MessageKey, string> = {
-  'app.emptyTitle': 'Drag an HTML file or zip here, or click Open',
+  'app.emptyTitle': 'Drag an HTML file, a zip, or a folder here',
   'app.emptyHint': 'Click any text to edit it. Saving changes only what you edited.',
   'app.blocked': "You can't edit this one · {reason}",
 
