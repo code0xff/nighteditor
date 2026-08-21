@@ -25,4 +25,9 @@ export type ToPreview =
   | { type: 'locked'; ids: number[] }
   | { type: 'revert'; id: number; html: string }
   /** 변경 목록에서 고른 블록을 화면에 보여준다 (스크롤 + 잠깐 짚어주기) */
-  | { type: 'reveal'; id: number };
+  | { type: 'reveal'; id: number }
+  /**
+   * 서식 막대에 붙일 문구. 에이전트는 언어팩을 불러올 수 없어(ADR-007) 호스트가 건넨다 —
+   * 화면 문구의 출처는 언제나 언어팩 하나다 (spec §1).
+   */
+  | { type: 'labels'; labels: Record<string, string> };

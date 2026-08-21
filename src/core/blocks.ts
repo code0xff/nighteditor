@@ -4,7 +4,12 @@
  * "텍스트를 담은 가장 바깥 요소이면서, 그 안이 인라인 마크업뿐인 것"이 블록이다.
  */
 
-/** 블록 경계를 만들지 않는 태그 — 블록 안에 내용물로 보존된다 */
+/**
+ * 블록 경계를 만들지 않는 태그 — 블록 안에 내용물로 보존된다.
+ *
+ * 옛 표현 태그(`font`·`strike`·`big`·`tt`)도 넣는다. 우리는 만들지 않지만(§4.1)
+ * 남이 만든 문서에는 있고, 빠져 있으면 그것을 품은 문단이 통째로 편집 불가가 된다.
+ */
 export const INLINE_TAGS: ReadonlySet<string> = new Set([
   'b',
   'strong',
@@ -18,6 +23,27 @@ export const INLINE_TAGS: ReadonlySet<string> = new Set([
   'u',
   'sup',
   'sub',
+  'mark',
+  's',
+  'del',
+  'ins',
+  'abbr',
+  'cite',
+  'q',
+  'kbd',
+  'samp',
+  'var',
+  'time',
+  'wbr',
+  'bdi',
+  'bdo',
+  'ruby',
+  'rt',
+  'rp',
+  'font',
+  'strike',
+  'big',
+  'tt',
 ]);
 
 /** 내부가 텍스트가 아니라 코드인 태그 — 순회에서 통째로 제외 */

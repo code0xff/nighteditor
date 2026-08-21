@@ -13,6 +13,10 @@ export function previewAgent(): () => void {
   const LOCKED = 'data-ne-locked';
   const DARK = 'data-ne-dark';
   const REVEALED = 'data-ne-revealed';
+  const BAR = 'data-ne-bar';
+
+  /** 색은 몇 가지만 고르게 한다. 아무 색이나 열어 주면 문서의 색 체계를 이기기 쉽다 */
+  const COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#2563eb', '#7c3aed', '#111827'];
 
   // 떼어낼 수 있어야 한다. 파일을 바꿔 열 때 이전 에이전트가 남아 있으면
   // 옛 상태로 이벤트를 가로채 새 문서의 편집을 방해한다.
@@ -31,6 +35,9 @@ export function previewAgent(): () => void {
   let composing = false;
   /** 짚어둔 표시를 지울 시각. 연달아 고르면 앞의 것을 취소한다 */
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 서식 막대와, 막대를 누르는 사이에 지켜 둘 선택 범위 */
+  let bar: HTMLElement | null = null;
+  let saved: Range | null = null;
   /** 조합 중이라 미뤄둔 확정이 있는지 */
   let pendingCommit = false;
   const locked = new Set<number>();
@@ -71,6 +78,7 @@ export function previewAgent(): () => void {
     editingId = null;
     snapshot = null;
     pendingCommit = false;
+    hideBar();
     post({ type: 'select', id: null });
   };
 
@@ -85,6 +93,7 @@ export function previewAgent(): () => void {
     editingId = null;
     snapshot = null;
     pendingCommit = false;
+    hideBar();
     post({ type: 'select', id: null });
   };
 
@@ -106,6 +115,146 @@ export function previewAgent(): () => void {
     post({ type: 'select', id });
   };
 
+  // --- 인라인 서식 (spec §4.1) -----------------------------------------
+
+  /**
+   * 서식을 건다.
+   *
+   * `styleWithCSS` 를 **명령마다** 정한다. 한 번만 켜 두면 어디선가 뒤집혔을 때
+   * 조용히 다른 마크업이 나온다.
+   *
+   * - 끄면: 굵게·기울임·밑줄이 `<b>` `<i>` `<u>` 로 나온다. 사람이 읽는 diff 에 좋고
+   *   문서가 이미 쓰던 표기와도 같다
+   * - 켜면: 색·크기가 `<span style>` 로 나온다. 끄면 `<font>` 가 나오는데, 그 태그가
+   *   섞이면 다음에 이 파일을 열 때 그 문단이 통째로 편집 불가가 된다
+   */
+  const CSS_COMMANDS = new Set(['foreColor', 'fontSize', 'backColor', 'hiliteColor']);
+
+  const format = (command: string, value?: string): void => {
+    if (editingId === null) return;
+    const el = elementFor(editingId);
+    if (!el) return;
+
+    // 막대를 누르는 사이에 선택이 풀렸을 수 있다. 들고 있던 범위를 되살린다.
+    if (saved) {
+      const sel = getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(saved);
+    }
+    el.focus();
+    document.execCommand('styleWithCSS', false, String(CSS_COMMANDS.has(command)));
+    document.execCommand(command, false, value);
+    saved = getSelection()?.rangeCount ? (getSelection()?.getRangeAt(0) ?? null) : null;
+    placeBar();
+  };
+
+  /**
+   * 크기는 배수로 적는다.
+   *
+   * `fontSize` 가 만드는 것은 `x-large` 같은 절대 키워드다. 아티팩트마다 본문 크기가
+   * 달라 절대값을 박으면 그 문서의 크기 체계와 어긋난다. 방금 만든 자리만 찾아
+   * **원래 크기의 몇 배**로 고쳐 적는다.
+   */
+  const resize = (times: string): void => {
+    if (editingId === null) return;
+    const el = elementFor(editingId);
+    if (!el) return;
+    format('fontSize', '7');
+    for (const node of el.querySelectorAll<HTMLElement>('[style*="font-size"]')) {
+      // 방금 명령이 만든 것만 고른다 — 원래 문서가 쓰던 크기는 건드리지 않는다.
+      if (node.style.fontSize === 'xxx-large' || node.style.fontSize === '-webkit-xxx-large') {
+        node.style.fontSize = times;
+      }
+    }
+    commitLater();
+  };
+
+  /** 서식은 입력이 아니라 명령이라 input 이벤트가 늦게 온다. 확정은 focusout 이 한다 */
+  const commitLater = (): void => {
+    saved = getSelection()?.rangeCount ? (getSelection()?.getRangeAt(0) ?? null) : null;
+  };
+
+  /**
+   * 막대에 붙일 문구. 호스트가 언어팩에서 건네준다 (spec §1).
+   * 아직 못 받았으면 비워 둔다 — 여기에 한 언어를 박으면 그 언어가 굳는다.
+   */
+  let labels: Record<string, string> = {};
+
+  const button = (label: string, name: string, run: () => void): HTMLElement => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.textContent = label;
+    el.setAttribute('data-ne-label', name);
+    el.title = labels[name] ?? '';
+    el.style.cssText =
+      'all:unset;cursor:pointer;padding:2px 6px;border-radius:4px;font:600 12px/1.4 system-ui;';
+    // 누르는 순간 포커스가 옮겨 가면 선택이 풀린다. 기본 동작부터 막는다.
+    el.addEventListener('mousedown', (e) => e.preventDefault());
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      run();
+    });
+    return el;
+  };
+
+  const buildBar = (): HTMLElement => {
+    const box = document.createElement('div');
+    box.setAttribute(BAR, '');
+    box.style.cssText =
+      'position:absolute;z-index:2147483647;display:none;gap:2px;align-items:center;' +
+      'padding:4px;border-radius:8px;background:#101014;color:#e9e9ec;' +
+      'box-shadow:0 6px 20px rgba(0,0,0,.35);font:12px system-ui;';
+
+    box.append(
+      button('B', 'format.bold', () => format('bold')),
+      button('I', 'format.italic', () => format('italic')),
+      button('U', 'format.underline', () => format('underline')),
+      button('A-', 'format.smaller', () => resize('0.85em')),
+      button('A+', 'format.bigger', () => resize('1.35em'))
+    );
+
+    for (const color of COLORS) {
+      const dot = button(' ', 'format.color', () => format('foreColor', color));
+      dot.style.cssText +=
+        `width:12px;height:12px;border-radius:50%;background:${color};` +
+        'box-shadow:inset 0 0 0 1px rgba(255,255,255,.25);';
+      box.append(dot);
+    }
+    box.append(button('✕', 'format.clear', () => format('removeFormat')));
+    return box;
+  };
+
+  const hideBar = (): void => {
+    saved = null;
+    if (bar) bar.style.display = 'none';
+  };
+
+  /** 고른 글자 위에 막대를 놓는다. 고른 것이 없으면 감춘다 */
+  const placeBar = (): void => {
+    const sel = getSelection();
+    const el = editingId === null ? null : elementFor(editingId);
+    const inside =
+      el && sel && sel.rangeCount > 0 && !sel.isCollapsed && el.contains(sel.anchorNode);
+    if (!inside) {
+      if (bar) bar.style.display = 'none';
+      return;
+    }
+
+    if (!bar) {
+      bar = buildBar();
+      document.body.appendChild(bar);
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    bar.style.display = 'flex';
+    // 막대를 그린 뒤라야 크기를 안다. 문서 좌표로 옮겨 스크롤해도 따라가게 한다.
+    const top = rect.top + scrollY - bar.offsetHeight - 8;
+    bar.style.top = `${Math.max(scrollY + 4, top)}px`;
+    bar.style.left = `${Math.max(4, rect.left + scrollX)}px`;
+  };
+
+  on(document, 'selectionchange', () => placeBar());
+
   // --- 이벤트 가로채기 (ADR-007) ---------------------------------------
   // 버블 단계에서 막는다. 캡처에서 끊으면 이벤트가 대상에 도달하지 못해
   // 캐럿이 배치되지 않는다. 이 스크립트는 문서 맨 앞에서 실행되므로
@@ -119,6 +268,11 @@ export function previewAgent(): () => void {
   };
 
   on(document, 'click', ((e: MouseEvent) => {
+    // 서식 막대는 문서가 아니라 우리 물건이다. 블록 밖 클릭으로 세면 누르는 순간 편집이 끝난다.
+    if (e.target instanceof Element && e.target.closest(`[${BAR}]`)) {
+      e.stopImmediatePropagation();
+      return;
+    }
     const el = blockOf(e.target);
     if (el) {
       startEdit(el);
@@ -162,6 +316,18 @@ export function previewAgent(): () => void {
       return;
     }
     if (editingId === null) return;
+    // Ctrl/⌘+B · I · U — 굵게 · 기울임 · 밑줄 (spec §4.1).
+    // 브라우저에도 같은 기본 동작이 있지만 styleWithCSS 를 켜지 않아 <font> 를 남긴다.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const key = e.key.toLowerCase();
+      const command =
+        key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'u' ? 'underline' : '';
+      if (command) {
+        consume(e);
+        format(command);
+        return;
+      }
+    }
     // Enter 는 편집을 확정하고 닫는다. 블록은 한 덩어리라(대원칙 4) 줄바꿈을
     // 넣는 것보다 확정하고 나가는 쪽이 훨씬 자주 필요하다. 줄바꿈은 Shift+Enter 다.
     // 조합 중이라면 IME 확정 키이므로 건드리지 않는다 — 막으면 글자를 완성할 수 없다.
@@ -203,7 +369,10 @@ export function previewAgent(): () => void {
     if (pendingCommit) commit();
   });
 
-  on(document, 'focusout', () => {
+  on(document, 'focusout', (e) => {
+    // 서식 막대로 포커스가 간 것은 편집을 끝낸 것이 아니다.
+    const to = (e as FocusEvent).relatedTarget;
+    if (to instanceof Element && to.closest(`[${BAR}]`)) return;
     // commit 이 조합 여부를 직접 처리한다. 여기서 걸러내면 pendingCommit 이
     // 세팅되지 않아 조합 중 포커스가 빠졌을 때 편집이 통째로 사라진다.
     commit();
@@ -221,7 +390,13 @@ export function previewAgent(): () => void {
   on(window, 'message', ((e: MessageEvent) => {
     // 호스트가 보낸 것만 받는다. 아무나 locked 를 비우면 INV-5 의 두 번째 방어선이 뚫린다.
     if (e.source !== parent) return;
-    const msg = e.data as { type?: string; ids?: number[]; id?: number; html?: string } | null;
+    const msg = e.data as {
+      type?: string;
+      ids?: number[];
+      id?: number;
+      html?: string;
+      labels?: Record<string, string>;
+    } | null;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'locked' && msg.ids) {
       locked.clear();
@@ -236,6 +411,12 @@ export function previewAgent(): () => void {
         const show = locked.has(Number(el.getAttribute(MARKER))) && (el.textContent ?? '').trim();
         if (show) el.setAttribute(LOCKED, '');
         else el.removeAttribute(LOCKED);
+      }
+    } else if (msg.type === 'labels' && msg.labels) {
+      labels = msg.labels;
+      // 언어를 바꾸면 이미 그려 둔 막대도 함께 바뀌어야 한다.
+      for (const el of bar?.querySelectorAll('[data-ne-label]') ?? []) {
+        el.setAttribute('title', labels[el.getAttribute('data-ne-label') ?? ''] ?? '');
       }
     } else if (msg.type === 'reveal' && typeof msg.id === 'number') {
       const el = elementFor(msg.id);
@@ -307,6 +488,8 @@ export function previewAgent(): () => void {
 
   return () => {
     if (revealTimer !== null) clearTimeout(revealTimer);
+    bar?.remove();
+    bar = null;
     for (const { target, type, fn } of bound) target.removeEventListener(type, fn);
   };
 }

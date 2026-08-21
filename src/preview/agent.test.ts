@@ -641,3 +641,143 @@ describe('previewAgent · 고른 블록 보여주기', () => {
     expect(() => fromHost({ type: 'reveal', id: 99 })).not.toThrow();
   });
 });
+
+describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
+  // happy-dom 에는 execCommand 가 없다. 실제 편집은 브라우저가 하는 일이라,
+  // 여기서는 **무엇을 어떤 모드로 부르는지**만 본다.
+  beforeEach(() => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+  });
+
+  /** 블록 안의 글자 일부를 고른다 */
+  function select(id: number, from: number, to: number): void {
+    const node = el(id)?.firstChild;
+    if (!node) throw new Error('고를 글자가 없다');
+    const range = document.createRange();
+    range.setStart(node, from);
+    range.setEnd(node, to);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }
+
+  it('고른 글자 위에 막대가 뜨고, 고른 것이 없으면 사라진다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+
+    select(0, 1, 4);
+    const bar = document.querySelector<HTMLElement>('[data-ne-bar]');
+    expect(bar?.style.display).toBe('flex');
+
+    getSelection()?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+    expect(bar?.style.display).toBe('none');
+  });
+
+  it('편집 중이 아니면 막대를 띄우지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+
+    select(0, 1, 4);
+
+    expect(document.querySelector<HTMLElement>('[data-ne-bar]')?.style.display ?? 'none').toBe(
+      'none'
+    );
+  });
+
+  it('막대를 누른 클릭은 편집을 닫지 않는다', () => {
+    // 블록 밖 클릭으로 세면 서식 버튼을 누르는 순간 편집이 끝난다.
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+
+    const button = document.querySelector('[data-ne-bar] button');
+    click(button!);
+
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+    expect(sent.some((m) => m.type === 'edit')).toBe(false);
+  });
+
+  it('굵게·기울임·밑줄은 태그로, 색·크기는 style 로 뽑는다', () => {
+    // <font> 가 섞이면 다음에 이 파일을 열 때 그 문단이 통째로 편집 불가가 된다.
+    const modes: [string, boolean][] = [];
+    document.execCommand = ((command: string, _ui: boolean, value: string) => {
+      if (command === 'styleWithCSS') modes.push(['pending', value === 'true']);
+      else if (modes.length > 0) modes[modes.length - 1]![0] = command;
+      return true;
+    }) as typeof document.execCommand;
+
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+    const buttons = [...document.querySelectorAll('[data-ne-bar] button')];
+    for (const button of buttons) click(button);
+
+    expect(modes.filter(([c]) => c === 'bold' || c === 'italic' || c === 'underline')).toEqual([
+      ['bold', false],
+      ['italic', false],
+      ['underline', false],
+    ]);
+    expect(modes.filter(([c]) => c === 'foreColor').every(([, css]) => css)).toBe(true);
+    expect(modes.filter(([c]) => c === 'fontSize').every(([, css]) => css)).toBe(true);
+  });
+
+  it('Ctrl+B · I · U 가 아티팩트로 새지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    const artifact = vi.fn();
+    document.addEventListener('keydown', artifact);
+
+    const e = keydown('b', { ctrlKey: true });
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(artifact).not.toHaveBeenCalled();
+  });
+
+  it('막대 문구는 호스트가 건넨다 — 에이전트는 언어팩을 모른다', () => {
+    // 여기에 한 언어를 박으면 그 언어가 굳는다. 화면 문구의 출처는 언어팩 하나다 (spec §1).
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+
+    fromHost({ type: 'labels', labels: { 'format.bold': 'Bold' } });
+
+    const bold = document.querySelector('[data-ne-label="format.bold"]');
+    expect(bold?.getAttribute('title')).toBe('Bold');
+  });
+
+  it('문구를 받기 전에는 비워 둔다 — 한 언어를 박아 두지 않는다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+
+    const titles = [...document.querySelectorAll('[data-ne-label]')].map((b) =>
+      b.getAttribute('title')
+    );
+
+    expect(titles.every((title) => title === '')).toBe(true);
+  });
+
+  it('언어를 바꾸면 떠 있는 막대도 바뀐다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+    fromHost({ type: 'labels', labels: { 'format.bold': 'Bold' } });
+
+    fromHost({ type: 'labels', labels: { 'format.bold': '굵게' } });
+
+    expect(document.querySelector('[data-ne-label="format.bold"]')?.getAttribute('title')).toBe(
+      '굵게'
+    );
+  });
+
+  it('편집을 닫으면 막대도 사라진다', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p><div id="bg">여백</div>`);
+    click(el(0)!);
+    select(0, 1, 4);
+
+    click(document.getElementById('bg')!);
+
+    expect(document.querySelector<HTMLElement>('[data-ne-bar]')?.style.display).toBe('none');
+  });
+});

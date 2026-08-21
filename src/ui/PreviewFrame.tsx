@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
+import { FORMAT_LABELS } from '@/lib/messages';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
 
 /**
@@ -43,6 +44,15 @@ export function PreviewFrame() {
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
   }, [onReady, onEdit, onBlocked, select, save, downloadCopy, undoLast]);
+
+  // 서식 막대에 붙일 문구를 건넨다. 에이전트는 언어팩을 불러올 수 없다 (ADR-007).
+  // 언어를 바꾸면 다시 보내 이미 떠 있는 막대까지 함께 바뀌게 한다.
+  useEffect(() => {
+    const labels: Record<string, string> = {};
+    for (const key of FORMAT_LABELS) labels[key] = t(key);
+    const msg: ToPreview = { type: 'labels', labels };
+    frame.current?.contentWindow?.postMessage(msg, '*');
+  }, [t, previewDoc]);
 
   // 대조가 끝나 잠금이 확정되면 프리뷰에 알린다. UI 차단만으로는 부족하다 (INV-5).
   useEffect(() => {
