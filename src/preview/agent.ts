@@ -39,6 +39,12 @@ export function previewAgent(): () => void {
   /** 서식 막대와, 막대를 누르는 사이에 지켜 둘 선택 범위 */
   let bar: HTMLElement | null = null;
   let saved: Range | null = null;
+  /**
+   * 막대를 누르는 중인지. 그 사이에 풀린 선택은 사용자가 떠난 것이 아니라서
+   * `saved` 를 지키고, 그 밖의 자리에서 선택이 풀리면 `saved` 도 버린다 —
+   * 남겨 두면 다음 Ctrl+B 가 지금 고른 곳이 아니라 옛 글자에 걸린다 (spec §4.1).
+   */
+  let barHeld = false;
   /** 조합 중이라 미뤄둔 확정이 있는지 */
   let pendingCommit = false;
   const locked = new Set<number>();
@@ -145,12 +151,20 @@ export function previewAgent(): () => void {
     if (!el) return;
 
     // 막대를 누르는 사이에 선택이 풀렸을 수 있다. 들고 있던 범위를 되살린다.
-    if (saved) {
+    // 지역 변수로 옮겨 놓고 쓴다 — removeAllRanges 가 selectionchange 를 동기로 쏘면
+    // placeBar 가 그 안에서 saved 를 비워, 되살릴 범위가 손에서 사라진다.
+    const restore = saved;
+    if (restore) {
       const sel = getSelection();
       sel?.removeAllRanges();
-      sel?.addRange(saved);
+      sel?.addRange(restore);
     }
     el.focus();
+    // 선택이 이 블록을 벗어나 이웃까지 걸쳐 있으면 걸지 않는다. execCommand 는 이웃
+    // 블록까지 바꾸는데, 확정 메시지는 편집 중인 블록 것만 나가서 이웃의 변경은
+    // 추적되지 않은 채 저장에서 사라진다 (대원칙 2).
+    const range = getSelection()?.rangeCount ? getSelection()?.getRangeAt(0) : null;
+    if (!range || !el.contains(range.startContainer) || !el.contains(range.endContainer)) return;
     document.execCommand('styleWithCSS', false, String(CSS_COMMANDS.has(command)));
     document.execCommand(command, false, value);
     saved = getSelection()?.rangeCount ? (getSelection()?.getRangeAt(0) ?? null) : null;
@@ -216,6 +230,11 @@ export function previewAgent(): () => void {
   const buildBar = (): HTMLElement => {
     const box = document.createElement('div');
     box.setAttribute(BAR, '');
+    // 누르는 동안임을 표시한다. 이때 선택이 풀려도 saved 를 지켜야 명령 직전에 되살린다.
+    // 내려놓는 쪽은 document 의 mouseup 이다 — 막대 밖에서 손을 떼도 표시가 남지 않게.
+    box.addEventListener('mousedown', () => {
+      barHeld = true;
+    });
     box.style.cssText =
       'position:absolute;z-index:2147483647;display:none;gap:2px;align-items:center;' +
       'padding:4px;border-radius:8px;background:#101014;color:#e9e9ec;' +
@@ -249,9 +268,19 @@ export function previewAgent(): () => void {
   const placeBar = (): void => {
     const sel = getSelection();
     const el = editingId === null ? null : elementFor(editingId);
+    // 시작과 끝 모두 편집 중인 블록 안이어야 한다. 시작만 보면 이웃 블록까지 걸친
+    // 선택으로도 막대가 떠서, 서식이 추적되지 않는 이웃까지 바꾼다 (대원칙 2).
     const inside =
-      el && sel && sel.rangeCount > 0 && !sel.isCollapsed && el.contains(sel.anchorNode);
+      el &&
+      sel &&
+      sel.rangeCount > 0 &&
+      !sel.isCollapsed &&
+      el.contains(sel.anchorNode) &&
+      el.contains(sel.focusNode);
     if (!inside) {
+      // 막대를 누르는 중이 아니라면 사용자가 선택을 떠난 것이다. 들고 있던 범위도
+      // 버린다 — 남겨 두면 다음 Ctrl+B 가 옛 글자에 걸린다.
+      if (!barHeld) saved = null;
       if (bar) bar.style.display = 'none';
       return;
     }
@@ -271,6 +300,10 @@ export function previewAgent(): () => void {
   };
 
   on(document, 'selectionchange', () => placeBar());
+  // 막대 밖에서 손을 떼도 "누르는 중" 이 남지 않게 문서 어디서든 내려놓는다.
+  on(document, 'mouseup', () => {
+    barHeld = false;
+  });
 
   // --- 이벤트 가로채기 (ADR-007) ---------------------------------------
   // 버블 단계에서 막는다. 캡처에서 끊으면 이벤트가 대상에 도달하지 못해

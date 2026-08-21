@@ -781,3 +781,110 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(document.querySelector<HTMLElement>('[data-ne-bar]')?.style.display).toBe('none');
   });
 });
+
+describe('previewAgent · 서식 범위는 편집 중인 블록을 넘지 않는다 (spec §4.1)', () => {
+  beforeEach(() => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+  });
+
+  /** 블록 두 개에 걸치는 선택을 만든다 */
+  function selectAcross(): void {
+    const range = document.createRange();
+    range.setStart(el(0)!.firstChild!, 1);
+    range.setEnd(el(1)!.firstChild!, 2);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }
+
+  it('이웃 블록까지 걸친 선택에는 막대를 띄우지 않는다', () => {
+    // 시작만 보면 걸친 선택으로도 막대가 떠서, 추적되지 않는 이웃까지 바꾼다 (대원칙 2).
+    mount(`<p ${MARKER_ATTR}="0">가나다라</p><p ${MARKER_ATTR}="1">마바사아</p>`);
+    click(el(0)!);
+
+    selectAcross();
+
+    expect(document.querySelector<HTMLElement>('[data-ne-bar]')?.style.display ?? 'none').toBe(
+      'none'
+    );
+  });
+
+  it('이웃 블록까지 걸친 선택에는 Ctrl+B 도 걸리지 않는다', () => {
+    const commands: string[] = [];
+    document.execCommand = ((command: string) => {
+      commands.push(command);
+      return true;
+    }) as typeof document.execCommand;
+    mount(`<p ${MARKER_ATTR}="0">가나다라</p><p ${MARKER_ATTR}="1">마바사아</p>`);
+    click(el(0)!);
+    selectAcross();
+
+    keydown('b', { ctrlKey: true });
+
+    expect(commands).not.toContain('bold');
+  });
+});
+
+describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', () => {
+  /** bold 가 걸린 순간의 선택 내용을 붙잡는다 */
+  let selectedAtBold: string | null;
+
+  beforeEach(() => {
+    selectedAtBold = null;
+    document.execCommand = ((command: string) => {
+      if (command === 'bold') selectedAtBold = getSelection()?.toString() ?? '';
+      return true;
+    }) as typeof document.execCommand;
+  });
+
+  function select(from: number, to: number): void {
+    const node = el(0)!.firstChild!;
+    const range = document.createRange();
+    range.setStart(node, from);
+    range.setEnd(node, to);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }
+
+  it('캐럿을 옮겨 선택을 떠나면 옛 범위를 버린다', () => {
+    // 남겨 두면 다음 Ctrl+B 가 지금 자리가 아니라 옛 글자에 걸린다.
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(1, 4);
+
+    // 캐럿만 남기고 이동한다 — 선택을 떠났다.
+    const caret = document.createRange();
+    caret.setStart(el(0)!.firstChild!, 6);
+    caret.collapse(true);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(caret);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    keydown('b', { ctrlKey: true });
+
+    expect(selectedAtBold).toBe('');
+  });
+
+  it('막대를 누르는 사이에 풀린 선택은 명령 직전에 되살린다', () => {
+    // 이 경우까지 버리면 막대의 존재 이유가 사라진다 — 누르는 동안 풀린 선택에
+    // 아무 서식도 걸 수 없게 된다.
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(1, 4);
+
+    const button = document.querySelector('[data-ne-bar] button')!;
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    // 브라우저가 이 순간 선택을 풀 수 있다.
+    getSelection()?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+    button.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    click(button);
+
+    expect(selectedAtBold).toBe('나다라');
+  });
+});
+
