@@ -17,6 +17,7 @@ export function Toolbar() {
   const file = useEditor((s) => s.file);
   const blocks = useEditor((s) => s.blocks);
   const patches = useEditor((s) => s.patches);
+  const unsaved = useEditor((s) => s.unsaved);
   const busy = useEditor((s) => s.busy);
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
@@ -77,7 +78,10 @@ export function Toolbar() {
           </Button>
         )}
         {file && (
-          <Button size="sm" onClick={() => void save()} disabled={busy || patches.size === 0}>
+          // 패치 개수로 잠그면 안 된다 (spec §5) — 저장하면 패치가 남은 채 unsaved 만
+          // 풀리고(눌리는데 아무 일도 없는 버튼이 된다), 저장한 편집을 되돌리면 패치
+          // 0개로 저장할 것이 생긴다. save() 의 조기 반환과 같은 기준을 본다.
+          <Button size="sm" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
             {t('toolbar.save')} {patches.size > 0 && `(${patches.size})`}
           </Button>

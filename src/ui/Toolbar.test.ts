@@ -1,0 +1,61 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { useEditor } from '@/store/editor';
+import { Toolbar } from './Toolbar';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+
+beforeEach(() => {
+  useEditor.setState({
+    file: { name: 'artifact.html', text: '', handle: null },
+    blocks: [],
+    patches: new Map(),
+    busy: false,
+    unsaved: false,
+  });
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(createElement(Toolbar));
+  });
+});
+
+afterEach(() => {
+  act(() => root?.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+});
+
+/** 저장 버튼 — 사본 내려받기는 아이콘뿐이라 글자가 있는 쪽이 저장이다 */
+function saveButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll('button')].find((b) =>
+    /저장|Save/.test(b.textContent ?? '')
+  );
+}
+
+describe('Toolbar · 저장 버튼은 파일과 다른가로 잠긴다 (spec §5)', () => {
+  it('저장한 뒤에는 패치가 남아 있어도 잠긴다 — 눌리는데 아무 일도 없는 버튼을 두지 않는다', () => {
+    // 저장해도 patches 는 남는다(INV-1). 개수로 열어 두면 save() 의 조기 반환과
+    // 어긋나, 버튼은 눌리는데 아무 일도 일어나지 않는다.
+    act(() => {
+      useEditor.setState({ patches: new Map([[0, '고친 값']]), unsaved: false });
+    });
+
+    expect(saveButton()?.disabled).toBe(true);
+  });
+
+  it('저장한 편집을 되돌리면 패치 0개여도 눌린다 — 파일을 화면과 같게 되쓸 일이 남았다', () => {
+    act(() => {
+      useEditor.setState({ patches: new Map(), unsaved: true });
+    });
+
+    expect(saveButton()?.disabled).toBe(false);
+  });
+});
