@@ -74,6 +74,23 @@ describe('readZip · 픽스처 회귀', () => {
     // 조용히 넘어가면 "열었는데 아무것도 없다" 로 보인다 (대원칙 3).
     expect(() => readZip(new TextEncoder().encode('이건 zip 이 아니다'))).toThrow(ZipError);
   });
+
+  it('주석 안에 EOCD 시그니처 바이트가 있어도 진짜 EOCD 를 찾는다', () => {
+    // 뒤에서부터 훑다 주석 속 바이트를 먼저 만나면, 주석이 목차 위치·개수로 풀려
+    // 멀쩡한 zip 이 깨졌다며 거절된다. 진짜 EOCD 는 주석이 버퍼 끝까지 닿는다.
+    const zip = fixtureBundle();
+    // 시그니처 네 바이트 뒤로 'x' 를 길게 — 그 자리를 EOCD 로 읽으면 어느 칸도 맞지 않는다.
+    const comment = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...Array(30).fill(0x78)]);
+    const withComment = new Uint8Array(zip.length + comment.length);
+    withComment.set(zip);
+    withComment.set(comment, zip.length);
+    // 픽스처는 주석이 없다 — EOCD 가 마지막 22바이트라, 주석 길이 칸은 끝에서 두 바이트다.
+    new DataView(withComment.buffer).setUint16(zip.length - 2, comment.length, true);
+
+    const names = readZip(withComment).map((e) => e.name);
+
+    expect(names).toContain('deck/index.html');
+  });
 });
 
 describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () => {

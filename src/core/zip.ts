@@ -61,7 +61,12 @@ function findEocd(bytes: Uint8Array): number {
   const dv = view(bytes);
   const from = Math.max(0, bytes.length - EOCD_MAX_BACK);
   for (let at = bytes.length - 22; at >= from; at--) {
-    if (dv.getUint32(at, true) === EOCD_SIGNATURE) return at;
+    if (dv.getUint32(at, true) !== EOCD_SIGNATURE) continue;
+    // 시그니처만으로는 모자란다 — zip 주석 안에 같은 네 바이트가 우연히(또는 일부러)
+    // 들어 있을 수 있고, 그걸 EOCD 로 읽으면 주석 바이트가 목차 위치·개수로 풀려
+    // 멀쩡한 zip 을 거절하거나 빈 묶음으로 읽는다. 진짜 EOCD 는 자기 주석이
+    // 버퍼 끝에 정확히 닿는다 — 안 닿는 후보는 지나치고 더 앞을 찾는다.
+    if (at + 22 + dv.getUint16(at + 20, true) === bytes.length) return at;
   }
   throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }
