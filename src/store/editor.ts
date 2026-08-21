@@ -638,7 +638,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
       // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
       // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
-      set(await replace(get, load(rebased, read.files)));
+      // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
+      // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
+      // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
+      const keep =
+        rebased.path && rebased.handle ? new Map([[rebased.path, rebased.handle]]) : undefined;
+      set(await replace(get, load(rebased, read.files, keep)));
       const attached = countAssets(get()).linked;
       set({
         notice: read.truncated

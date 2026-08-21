@@ -575,6 +575,31 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     expect(useEditor.getState().file?.name).toBe('other.html');
     expect(useEditor.getState().file?.handle).toBeNull();
   });
+
+  it('지금 문서의 쓰기 핸들만은 남긴다 — 갔다 돌아와도 덮어쓰기가 산다 (spec §5.1)', async () => {
+    // 핸들을 다 버리면 돌아온 문서가 연결할 때 읽어 둔 옛 바이트로 열리고,
+    // 저장은 조용히 사본 내려받기로 격하된다.
+    const text = '<html><body><p>본문</p></body></html>';
+    const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
+    const handle = fakeHandle('index.html', () => onDisk);
+    useEditor.setState({ file: { name: 'index.html', text, handle, path: 'index.html' } });
+    pickerReturns(
+      fakeTree('deck', {
+        'index.html': text,
+        'other.html': '<html><body><p>다른 문서</p></body></html>',
+      })
+    );
+
+    await useEditor.getState().linkFolder();
+    expect(useEditor.getState().bundleHandles.get('index.html')).toBe(handle);
+
+    await useEditor.getState().openFromBundle('other.html');
+    await useEditor.getState().openFromBundle('index.html');
+
+    expect(useEditor.getState().file?.handle).toBe(handle);
+    // 묶음의 옛 바이트가 아니라 디스크의 지금 내용으로 돌아와야 한다.
+    expect(useEditor.getState().source).toBe(onDisk);
+  });
 });
 
 describe('editor · 저장하는 사이의 편집', () => {
