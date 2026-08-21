@@ -49,7 +49,7 @@ function isCss(path: string): boolean {
 /**
  * 파일 묶음을 blob URL 묶음으로 바꾼다.
  *
- * CSS 는 두 번째 차례에 만든다. 그 안의 `url()` 을 다른 자원의 blob URL 로 바꿔야
+ * CSS 는 나중에 만든다. 그 안의 `url()` 을 다른 자원의 blob URL 로 바꿔야
  * 하는데, 그러려면 그 자원들의 URL 이 먼저 있어야 한다.
  */
 export async function buildAssets(
@@ -69,20 +69,38 @@ export async function buildAssets(
     if (!isCss(path)) add(path, blob.type ? blob : new Blob([blob], { type: mimeOf(path) }));
   }
 
+  // 스타일시트끼리도 서로를 부른다 (`@import url(…)`). 부르는 쪽의 blob 을 먼저
+  // 만들면 불리는 쪽의 URL 이 아직 없어 참조가 상대 경로로 남는다 — blob 문서에서
+  // 상대 경로는 풀리지 않는다. 그래서 무엇이 무엇을 부르는지 먼저 읽어 둔다.
+  const sheets = new Map<string, { text: string; wants: string[] }>();
+  for (const [path, blob] of files) {
+    if (isCss(path)) sheets.set(path, { text: await blob.text(), wants: [] });
+  }
+  for (const [path, sheet] of sheets) {
+    // 스타일시트는 자기가 놓인 자리를 기준으로 자기 안의 경로를 푼다.
+    sheet.wants = cssAssetPaths(sheet.text, dirOf(path)).filter((p) => p !== path && sheets.has(p));
+  }
+
+  // 불리는 쪽부터 만든다. 순환이면 더 기다려도 URL 은 생기지 않으므로,
+  // 남은 것을 그때까지 생긴 URL 만 단 채로 만든다 — blob 으로 이을 수 없는 고리다.
+  const left = new Map(sheets);
+  while (left.size > 0) {
+    const ready = [...left].filter(([, sheet]) => !sheet.wants.some((p) => left.has(p)));
+    for (const [path, sheet] of ready.length > 0 ? ready : [...left]) {
+      const css = rewriteCssUrls(sheet.text, dirOf(path), (p) => urls.get(p));
+      add(path, new Blob([css], { type: 'text/css' }));
+      left.delete(path);
+    }
+  }
+
   // 못 붙인 것은 **이 문서가 부르는** 스타일시트에서만 센다. 폴더에 굴러다니는 남의
   // 스타일시트가 부르는 글꼴까지 세면, 이 문서와 아무 상관 없는 파일을 찾으라고 조른다.
   const wanted = reachable ? new Set(reachable) : null;
   const missing = new Set<string>();
 
-  for (const [path, blob] of files) {
-    if (!isCss(path)) continue;
-    // 스타일시트는 자기가 놓인 자리를 기준으로 자기 안의 경로를 푼다.
-    const text = await blob.text();
-    const css = rewriteCssUrls(text, dirOf(path), (p) => urls.get(p));
-    add(path, new Blob([css], { type: 'text/css' }));
-
+  for (const [path, sheet] of sheets) {
     if (wanted && !wanted.has(path)) continue;
-    for (const want of cssAssetPaths(text, dirOf(path))) {
+    for (const want of cssAssetPaths(sheet.text, dirOf(path))) {
       if (!files.has(want)) missing.add(want);
     }
   }

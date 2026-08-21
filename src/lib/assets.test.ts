@@ -1,0 +1,72 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildAssets } from './assets.js';
+
+/** 만든 blob 을 URL 로 되찾을 수 있게 붙잡아 둔다 — 내용까지 검사하기 위해서다 */
+function stubObjectUrls(): Map<string, Blob> {
+  const blobs = new Map<string, Blob>();
+  let n = 0;
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: (blob: Blob) => {
+      const url = `blob:${n++}`;
+      blobs.set(url, blob);
+      return url;
+    },
+    revokeObjectURL: vi.fn(),
+  });
+  return blobs;
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+const css = (text: string): Blob => new Blob([text], { type: 'text/css' });
+
+describe('buildAssets · 스타일시트가 스타일시트를 부른다', () => {
+  it('부르는 쪽이 먼저 와도 불리는 쪽의 blob URL 이 들어간다', async () => {
+    // 옛 코드는 files 순서대로 CSS 를 만들어서, main.css 가 theme.css 보다 앞이면
+    // theme.css 의 URL 이 아직 없어 @import 가 상대 경로로 남았다 — blob 문서에서
+    // 상대 경로는 풀리지 않으므로 파일이 있는데도 적용되지 않았다.
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['main.css', css("@import url('theme.css');")],
+      ['theme.css', css('p{color:red}')],
+    ]);
+
+    const bundle = await buildAssets(files);
+    const main = blobs.get(bundle.urls.get('main.css') ?? '');
+    const themeUrl = bundle.urls.get('theme.css');
+
+    expect(themeUrl).toBeDefined();
+    expect(await main?.text()).toBe(`@import url('${themeUrl}');`);
+  });
+
+  it('하위 폴더의 스타일시트도 자기 자리를 기준으로 잇는다', async () => {
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['deck.css', css('@import url(sub/fonts.css);')],
+      ['sub/fonts.css', css('@font-face{src:url(f.woff2)}')],
+      ['sub/f.woff2', new Blob(['x'])],
+    ]);
+
+    const bundle = await buildAssets(files);
+    const deck = blobs.get(bundle.urls.get('deck.css') ?? '');
+    const fonts = blobs.get(bundle.urls.get('sub/fonts.css') ?? '');
+
+    expect(await deck?.text()).toBe(`@import url(${bundle.urls.get('sub/fonts.css')});`);
+    expect(await fonts?.text()).toBe(`@font-face{src:url(${bundle.urls.get('sub/f.woff2')})}`);
+  });
+
+  it('서로를 부르는 순환에서도 멈추지 않고 전부 만든다', async () => {
+    // blob 으로는 이을 수 없는 고리다 — 기다려도 URL 은 생기지 않으므로 그대로 만든다.
+    stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['a.css', css('@import url(b.css);')],
+      ['b.css', css('@import url(a.css);')],
+    ]);
+
+    const bundle = await buildAssets(files);
+
+    expect(bundle.urls.has('a.css')).toBe(true);
+    expect(bundle.urls.has('b.css')).toBe(true);
+  });
+});
