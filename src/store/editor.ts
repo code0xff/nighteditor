@@ -625,21 +625,29 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   save: async () => {
     const { file, source, blocks, patches, unsaved } = get();
-    // 고친 것이 없거나 이미 저장했으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
+    // 파일과 다른 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
     // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
-    if (!file || patches.size === 0 || !unsaved) return false;
+    //
+    // 패치 개수로 거르면 안 된다 (spec §5). 이미 저장한 편집을 되돌리면 패치는 0개인데
+    // 파일에는 옛 편집이 남아 있다 — 그때 여기서 false 로 나가면 "저장하고 계속하기" 가
+    // 쓸 것이 없다며 멈춰, 대화상자에서 빠져나갈 길이 취소와 버리기뿐이 된다.
+    // 패치 0개의 저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다.
+    if (!file || !unsaved) return false;
     set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
       const how = await saveFile(file, output);
-      set({
-        unsaved: false,
+      set((s) => ({
+        // 파일을 쓰는 동안에도 프리뷰는 편집할 수 있다. 그 사이 확정된 편집은 방금 쓴
+        // 파일에 없으므로, 쓰기 시작할 때의 패치 목록이 그대로일 때만 깨끗해진 것이다.
+        // (patches 는 편집·되돌리기마다 새 Map 이 된다 — 그대로면 같은 참조다.)
+        unsaved: s.patches === patches ? false : s.unsaved,
         notice: {
           key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
           params: { name: file.name, count: list.length },
         },
-      });
+      }));
       return true;
     } catch (e) {
       set({

@@ -500,7 +500,69 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
   });
 });
 
+describe('editor · 저장하는 사이의 편집', () => {
+  it('파일을 쓰는 동안 확정된 편집은 저장 안 된 채로 남는다', async () => {
+    // unsaved 를 무조건 지우면 그 편집이 "이미 저장됨" 으로 읽혀, 다음 파일을 열 때
+    // 묻지도 않고 사라진다.
+    let releaseWrite: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.resolve(new File(['<p>하나</p>'], 'deck.html', { type: 'text/html' })),
+      createWritable: () => Promise.resolve({ write: () => gate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>하나</p><p>둘</p></body></html>',
+      handle,
+    });
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
 
+    const saving = useEditor.getState().save();
+    useEditor.getState().onEdit(b?.id ?? -1, 'B 수정');
+    releaseWrite?.();
+    await saving;
+
+    expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('쓰는 동안 아무 일도 없었으면 깨끗해진다', async () => {
+    const handle = fakeHandle('deck.html', () => '<html><body><p>하나</p></body></html>');
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>하나</p></body></html>',
+      handle,
+    });
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    await useEditor.getState().save();
+
+    expect(useEditor.getState().unsaved).toBe(false);
+  });
+});
+
+describe('editor · 저장한 편집을 되돌린 것도 저장할 수 있다', () => {
+  it('패치가 0개여도 원본 그대로를 되써서 파일을 화면과 같게 만든다', async () => {
+    // 패치 개수로 막으면 "저장하고 계속하기" 가 false 로 끝나, 대화상자에서
+    // 빠져나갈 길이 취소와 버리기뿐이 된다 (spec §5).
+    const source = '<html><body><p>본문</p></body></html>';
+    const writes: string[] = [];
+    const handle = fakeHandle('deck.html', () => source, writes);
+    await useEditor.getState().adopt({ name: 'deck.html', text: source, handle });
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    await useEditor.getState().save();
+
+    useEditor.getState().revert(target?.id ?? -1);
+    expect(useEditor.getState().unsaved).toBe(true);
+
+    expect(await useEditor.getState().save()).toBe(true);
+    expect(writes[1]).toBe(source);
+    expect(useEditor.getState().unsaved).toBe(false);
+  });
+});
 
 describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
   it('옛 경로가 없으면 새 폴더에 실제로 있는 꼬리 경로로 옮긴다', async () => {
