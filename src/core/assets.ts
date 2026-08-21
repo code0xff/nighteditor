@@ -9,7 +9,7 @@
  */
 import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 import { applyEdits, type Edit } from './edits.js';
-import { encodeAttribute, encodeAttributeSerialized } from './entities.js';
+import { encodeAttribute, encodeAttributeSerialized, requoteAttribute } from './entities.js';
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
@@ -311,12 +311,18 @@ export interface AssetSwap {
   /** 프리뷰 문서에 들어가는 표기 */
   to: string;
   /**
-   * 브라우저가 innerHTML 로 직렬화했을 때의 표기 짝. `to` 와 같으면 생략한다.
+   * 브라우저가 innerHTML 로 직렬화했을 때의 표기 짝. 원문 쪽(`serializedFrom`)까지
+   * `from`/`to` 와 같으면 생략한다.
    *
    * 내보낸 보수적 인코딩(`&#32;` 등)은 브라우저를 한 바퀴 돌면 최소 인코딩으로
    * 갈아 끼워져 돌아온다 — 내보낸 표기만 들고 있으면 그 편집에서 blob 이 샌다.
    */
   serializedTo?: string;
+  /**
+   * 직렬화 문맥으로 되돌릴 원문 표기 — `from` 에서 `"` 만 `&quot;` 로 잠근 것.
+   * 디코딩된 값을 재인코딩하면 원문의 엔티티 표기가 갈려 손대지 않은 속성의
+   * diff 가 생긴다 (대원칙 2).
+   */
   serializedFrom?: string;
 }
 
@@ -340,13 +346,15 @@ export function assetSwaps(
     // 치환했다 되돌린 결과가 바이트 단위로 같아야 한다 (대원칙 1·2).
     const from = source.slice(ref.valueStart, ref.valueEnd);
     const serializedTo = value.url + encodeAttributeSerialized(blobSuffix(ref.suffix));
+    // 직렬화 짝의 원문 쪽도 같은 원칙이다 — 디코딩된 값(ref.url)을 재인코딩하면
+    // 표준이 아닌 원문 엔티티(`&#32;` 등)가 최소 표기로 갈려, 그 블록을 고치는
+    // 순간 손대지 않은 속성의 표기가 바뀐다 (대원칙 2). 원본 슬라이스를 그대로
+    // 쓰되, 직렬화 문맥(큰따옴표)에서 값을 조기 종료시키는 `"` 만 바꾼다.
+    const serializedFrom = requoteAttribute(from);
     const swap: AssetSwap = { start: ref.valueStart, end: ref.valueEnd, from, to: value.text };
-    if (serializedTo !== value.text) {
+    if (serializedTo !== value.text || serializedFrom !== from) {
       swap.serializedTo = serializedTo;
-      // 직렬화된 문맥에는 원본의 날 것(따옴표·공백이 그대로일 수 있다)을 되적을 수
-      // 없다 — 같은 값을 직렬화 규칙으로 다시 적은 표기로 되돌린다. 파서를 지나면
-      // 같은 참조다.
-      swap.serializedFrom = encodeAttributeSerialized(ref.url);
+      swap.serializedFrom = serializedFrom;
     }
     swaps.push(swap);
   }
@@ -383,10 +391,13 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
   // 먼저 나온 표기로 되돌린다 — 어느 쪽이든 같은 파일을 가리킨다.
   const back = new Map<string, string>();
   for (const swap of swaps) {
-    if (!back.has(swap.to)) back.set(swap.to, swap.from);
+    // 직렬화 짝이 먼저다 — fromPreview 가 받는 것은 브라우저가 직렬화한 HTML 이라,
+    // 두 표기가 같으면(to === serializedTo) 그 문맥에 맞는 쪽(serializedFrom,
+    // `"` 가 &quot; 로 잠긴 원본 슬라이스)으로 되돌려야 속성이 조기 종료되지 않는다.
     if (swap.serializedTo !== undefined && swap.serializedFrom !== undefined) {
       if (!back.has(swap.serializedTo)) back.set(swap.serializedTo, swap.serializedFrom);
     }
+    if (!back.has(swap.to)) back.set(swap.to, swap.from);
   }
   // 긴 표기부터 되돌린다 — 조각 없는 표기(`blob:u`)는 조각 있는 표기(`blob:u#icon`)의
   // 접두사라, 짧은 쪽을 먼저 바꾸면 긴 쪽이 영영 안 잡혀 조각이 blob 이름에 남는다.

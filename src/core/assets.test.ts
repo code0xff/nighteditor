@@ -474,6 +474,30 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
+  it('직렬화 짝도 원문 엔티티 표기로 되돌린다 (대원칙 2)', () => {
+    // parse5 가 준 값은 &#32; 가 이미 풀려 있다 — 디코딩된 값을 재인코딩해 짝을
+    // 만들면, 그 블록을 고치는 순간 손대지 않은 속성의 표기가 바뀐다.
+    // 원문 쪽도 원본 슬라이스가 기준이다.
+    const src = '<p><use href="sprite.svg#i&#32;con"/></p>';
+    const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+    expect(boundary.fromPreview('<use href="blob:sprite.svg#i con"></use>')).toBe(
+      '<use href="sprite.svg#i&#32;con"></use>'
+    );
+  });
+
+  it('원문의 날 큰따옴표만은 직렬화 문맥에 맞게 &quot; 로 잠근다', () => {
+    // 홑따옴표 원문에는 " 가 날 것으로 있을 수 있다. 직렬화 짝은 innerHTML 이
+    // 만든 큰따옴표 속성 안에 들어가므로, 날 것 그대로면 값이 조기 종료되어
+    // 뒤가 새 속성으로 풀린다. 파서를 지나면 같은 값이다.
+    const src = "<p><use href='sprite.svg#i\"c'/></p>";
+    const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+    expect(boundary.fromPreview('<use href="blob:sprite.svg#i&quot;c"></use>')).toBe(
+      '<use href="sprite.svg#i&quot;c"></use>'
+    );
+  });
+
   it('조각 없는 표기가 조각 있는 표기를 가로채지 않는다', () => {
     // blob:sprite.svg 는 blob:sprite.svg#icon 의 접두사다. 짧은 쪽을 먼저 되돌리면
     // 긴 쪽이 영영 안 잡혀 #icon 이 blob 이름 뒤에 남는다.

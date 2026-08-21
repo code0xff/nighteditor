@@ -41,6 +41,19 @@ export function encodeAttributeSerialized(text: string): string {
   return escapeAttribute(text);
 }
 
+/**
+ * **원문 표기**를 직렬화된 문맥(innerHTML 이 만든 큰따옴표 속성)에 되적을 수 있는 형태로.
+ *
+ * 디코딩된 값을 재인코딩(`encodeAttributeSerialized`)하면 표준이 아닌 원문 엔티티
+ * (`&#32;` 등)가 최소 표기로 갈려, 손대지 않은 속성의 표기가 바뀐다 (대원칙 2).
+ * 문자 참조 해석은 따옴표 종류와 무관하므로 원문 바이트를 그대로 두고, 큰따옴표
+ * 문맥에서 값을 조기 종료시키는 `"` 하나만 엔티티로 바꾼다 — 홑따옴표·따옴표 없는
+ * 원문에만 날 것으로 있을 수 있고, 파서를 지나면 같은 값으로 풀린다.
+ */
+export function requoteAttribute(raw: string): string {
+  return raw.replace(/"/g, '&quot;');
+}
+
 /** 공백 차이를 무시한 텍스트 비교용 정규화 */
 export function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
