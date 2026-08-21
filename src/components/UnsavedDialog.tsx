@@ -36,8 +36,12 @@ export function UnsavedDialog() {
       footer={
         <>
           {/* 셋의 글자 수가 제각각이라 그대로 두면 너비가 세 배까지 벌어져 들쭉날쭉해 보인다.
-              가장 짧은 것에 바닥을 깔아 나란히 보이게 한다 — 긴 것은 제 너비를 지킨다. */}
-          <Button variant="ghost" className="min-w-24" onClick={() => reply('cancel')}>
+              가장 짧은 것에 바닥을 깔아 나란히 보이게 한다 — 긴 것은 제 너비를 지킨다.
+
+              취소도 테두리를 준다. 높이는 셋 다 같지만 ghost 는 테두리도 배경도 없어
+              상자가 보이지 않아, 옆의 둘보다 낮고 작아 보인다. 무게는 채움(저장)과
+              테두리(취소·버리기)로 가른다. */}
+          <Button variant="outline" className="min-w-24" onClick={() => reply('cancel')}>
             {t('confirm.cancel')}
           </Button>
           <Button variant="outline" className="min-w-24" onClick={() => reply('discard')}>
