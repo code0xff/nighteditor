@@ -96,4 +96,40 @@ describe('buildAssets · 스타일시트가 스타일시트를 부른다', () =>
     expect(bundle.urls.has('a.css')).toBe(true);
     expect(bundle.urls.has('b.css')).toBe(true);
   });
+
+  it('순환을 밖에서 부르는 시트는 고리가 만들어진 뒤에 만든다', async () => {
+    // entry.css 가 서로 부르는 a.css·b.css 고리를 부른다. 옛 코드는 고리에 막히면
+    // 남은 전부를 한꺼번에 만들어, entry.css 가 a.css 의 URL 이 생기기 전에
+    // 만들어졌다 — @import 가 상대 경로로 남아 blob 문서에서 영영 풀리지 않았다.
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['entry.css', css("@import url('a.css');")],
+      ['a.css', css("@import url('b.css');")],
+      ['b.css', css("@import url('a.css');p{color:red}")],
+    ]);
+
+    const bundle = await buildAssets(files, ['entry.css']);
+    const entry = blobs.get(bundle.urls.get('entry.css') ?? '');
+
+    expect(await entry?.text()).toBe(`@import url('${bundle.urls.get('a.css')}');`);
+  });
+
+  it('고리에서 두 다리 건넌 시트도 차례대로 URL 을 단다', async () => {
+    // entry → mid → (a ⇄ b). 고리만 먼저 만들면 mid 가 다음 바퀴에서 a 의 URL 을
+    // 달고, entry 는 그다음 바퀴에서 mid 의 URL 을 단다.
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['entry.css', css("@import url('mid.css');")],
+      ['mid.css', css("@import url('a.css');")],
+      ['a.css', css("@import url('b.css');")],
+      ['b.css', css("@import url('a.css');")],
+    ]);
+
+    const bundle = await buildAssets(files);
+    const entry = blobs.get(bundle.urls.get('entry.css') ?? '');
+    const mid = blobs.get(bundle.urls.get('mid.css') ?? '');
+
+    expect(await mid?.text()).toBe(`@import url('${bundle.urls.get('a.css')}');`);
+    expect(await entry?.text()).toBe(`@import url('${bundle.urls.get('mid.css')}');`);
+  });
 });

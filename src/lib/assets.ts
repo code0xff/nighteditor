@@ -81,12 +81,32 @@ export async function buildAssets(
     sheet.wants = cssAssetPaths(sheet.text, dirOf(path)).filter((p) => p !== path && sheets.has(p));
   }
 
-  // 불리는 쪽부터 만든다. 순환이면 더 기다려도 URL 은 생기지 않으므로,
-  // 남은 것을 그때까지 생긴 URL 만 단 채로 만든다 — blob 으로 이을 수 없는 고리다.
+  // 불리는 쪽부터 만든다. 순환이면 더 기다려도 URL 은 생기지 않으므로 고리를 그대로
+  // 만들어야 하는데, 그때 **남은 것 전부**를 만들면 안 된다 — 고리를 밖에서 부르는
+  // 시트(문서의 진입 시트 등)까지 고리 멤버의 URL 이 생기기 전에 만들어져, 그 @import
+  // 가 상대 경로로 남아 blob 문서에서 영영 풀리지 않는다. 고리에 든 시트만 만들고,
+  // 부르는 쪽은 다음 바퀴에서 방금 생긴 URL 을 달고 만든다 (spec §5.1).
   const left = new Map(sheets);
+  /** 남은 시트의 @import 만 따라가 자기 자신으로 돌아오는가 — 고리의 멤버인가 */
+  const inCycle = (start: string): boolean => {
+    const seen = new Set<string>();
+    const queue = [...(left.get(start)?.wants ?? [])];
+    for (let at = 0; at < queue.length; at++) {
+      const path = queue[at] as string;
+      if (path === start) return true;
+      if (seen.has(path) || !left.has(path)) continue;
+      seen.add(path);
+      queue.push(...(left.get(path)?.wants ?? []));
+    }
+    return false;
+  };
   while (left.size > 0) {
     const ready = [...left].filter(([, sheet]) => !sheet.wants.some((p) => left.has(p)));
-    for (const [path, sheet] of ready.length > 0 ? ready : [...left]) {
+    // ready 가 비었으면 남은 모두가 고리를 기다리는 중이고, 그 안에 고리가 반드시 있다
+    // (남은 시트마다 남은 시트를 부르니, 따라가다 보면 어딘가로 되돌아온다) — 매 바퀴
+    // 최소 한 장은 만들어져 루프는 끝난다.
+    const batch = ready.length > 0 ? ready : [...left].filter(([path]) => inCycle(path));
+    for (const [path, sheet] of batch) {
       const css = rewriteCssUrls(sheet.text, dirOf(path), (p) => urls.get(p));
       add(path, new Blob([css], { type: 'text/css' }));
       left.delete(path);
