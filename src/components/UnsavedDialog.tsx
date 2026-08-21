@@ -35,13 +35,15 @@ export function UnsavedDialog() {
       title={t('confirm.title')}
       footer={
         <>
-          <Button variant="ghost" onClick={() => reply('cancel')}>
+          {/* 셋의 글자 수가 제각각이라 그대로 두면 너비가 세 배까지 벌어져 들쭉날쭉해 보인다.
+              가장 짧은 것에 바닥을 깔아 나란히 보이게 한다 — 긴 것은 제 너비를 지킨다. */}
+          <Button variant="ghost" className="min-w-24" onClick={() => reply('cancel')}>
             {t('confirm.cancel')}
           </Button>
-          <Button variant="outline" onClick={() => reply('discard')}>
+          <Button variant="outline" className="min-w-24" onClick={() => reply('discard')}>
             {t('confirm.discard')}
           </Button>
-          <Button disabled={saving} onClick={() => reply('save')}>
+          <Button className="min-w-24" disabled={saving} onClick={() => reply('save')}>
             {overwrites ? <IconSave /> : <IconDownloadCopy />}
             {t(overwrites ? 'confirm.save' : 'confirm.saveCopy')}
           </Button>

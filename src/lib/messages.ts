@@ -65,9 +65,9 @@ const ko = {
   'confirm.whyClose': '문서를 닫으면 고친 내용이 사라져요.',
   'confirm.whySwitch': '{path} 문서로 옮기면 고친 내용이 사라져요.',
   'confirm.whyAssets': '외부 파일을 붙이려면 프리뷰를 다시 그려야 해서, 고친 내용이 사라져요.',
-  'confirm.save': '저장하고 계속하기',
-  'confirm.saveCopy': '사본 받고 계속하기',
-  'confirm.discard': '버리고 계속하기',
+  'confirm.save': '저장하고 계속',
+  'confirm.saveCopy': '사본 받고 계속',
+  'confirm.discard': '버리고 계속',
   'confirm.cancel': '취소',
 
   'changes.blocks': '블록',
@@ -176,7 +176,7 @@ const en: Record<MessageKey, string> = {
   'confirm.whySwitch': 'Switching to {path} will lose them.',
   'confirm.whyAssets': 'Attaching files redraws the preview, which will lose them.',
   'confirm.save': 'Save and continue',
-  'confirm.saveCopy': 'Download a copy and continue',
+  'confirm.saveCopy': 'Save a copy and continue',
   'confirm.discard': 'Discard and continue',
   'confirm.cancel': 'Cancel',
 
