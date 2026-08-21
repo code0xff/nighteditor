@@ -54,8 +54,13 @@ describe('언어팩 · 언어 선택', () => {
 
 describe('언어팩 · 보간', () => {
   it('파라미터를 채운다', () => {
-    expect(translate('ko', 'changes.total', { count: 3 })).toBe('전체 3');
-    expect(translate('en', 'changes.total', { count: 3 })).toBe('3 total');
+    // 문구 자체가 아니라 **채워졌는지**를 본다. 문구는 다듬는 것이고,
+    // 여기서 한 글자까지 박아 두면 말투를 고칠 때마다 멀쩡한 테스트가 깨진다.
+    for (const locale of LOCALES) {
+      const filled = translate(locale, 'changes.total', { count: 3 });
+      expect(filled).toContain('3');
+      expect(filled).not.toContain('{count}');
+    }
   });
 
   it('값이 없는 자리표시자는 그대로 남긴다 — 조용히 비우지 않는다 (대원칙 3)', () => {
@@ -63,20 +68,26 @@ describe('언어팩 · 보간', () => {
   });
 
   it('중첩된 Notice 를 같은 언어로 펼친다', () => {
+    // 안쪽 사유까지 같은 언어여야 한다. 한국어 문장에 영어 사유가 섞이면
+    // 번역이 반만 된 것처럼 보인다.
     const notice = { detail: patchNotice('locked', { id: 7, reason: 'CODE_BLOCK' }) };
-    expect(translate('ko', 'notice.saveRejected', notice)).toBe(
-      '저장 거부: 잠긴 블록은 수정할 수 없다: id=7 (코드 블록)'
-    );
-    expect(translate('en', 'notice.saveRejected', notice)).toBe(
-      "Save rejected: Locked blocks can't be edited: id=7 (Code block)"
-    );
+    for (const locale of LOCALES) {
+      const rendered = translate(locale, 'notice.saveRejected', notice);
+      expect(rendered).toContain('id=7');
+      expect(rendered).toContain(translate(locale, 'lock.CODE_BLOCK'));
+      expect(rendered).not.toContain('{');
+    }
   });
 });
 
 describe('언어팩 · core 코드 번역', () => {
   it('잠금 사유를 사람 말로 옮긴다', () => {
-    expect(translate('ko', lockNotice('SCRIPT_GENERATED').key)).toBe('스크립트가 생성');
-    expect(translate('en', lockNotice('SCRIPT_GENERATED').key)).toBe('Script-generated');
+    // 사유 코드(SCRIPT_GENERATED)가 화면에 그대로 새어 나오면 안 된다.
+    for (const locale of LOCALES) {
+      const rendered = translate(locale, lockNotice('SCRIPT_GENERATED').key);
+      expect(rendered).not.toContain('SCRIPT_GENERATED');
+      expect(rendered.length).toBeGreaterThan(2);
+    }
   });
 
   it('PatchError 의 코드와 파라미터만으로 문장을 만든다 — core 는 언어를 모른다 (INV-6)', () => {
