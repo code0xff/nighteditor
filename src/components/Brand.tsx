@@ -1,18 +1,18 @@
-/** Product wordmark: the app icon (or an icon tile) + a two-tone name.
- *  Edit the defaults (or pass props) to brand it for your app:
- *    <Brand name="acme" suffix="console" /> renders  [icon] acme console
- *  Icons come from @/lib/icons — swap APP_ICON there, or pass logo={null} to fall back
- *  to the primary tile with a lucide icon. Keep the h-7 w-7 mark + tracking-tight text. */
+/**
+ * 제품 워드마크 — 앱 아이콘 + 이름.
+ *
+ * 이름은 **한 단어**다. 두 톤으로 쪼개면 `night` 와 `editor` 가 서로 다른 것처럼 읽히고,
+ * 저장소 이름·PWA 매니페스트·`<title>` 에 적힌 이름과도 어긋난다.
+ * 아이콘을 갈아끼우려면 `@/lib/icons` 의 `APP_ICON` 을 고친다.
+ */
 import { APP_ICON, IconBrand, type LucideIcon } from '@/lib/icons';
 
 export function Brand({
-  name = 'app',
-  suffix = 'console',
+  name = 'nighteditor',
   logo = APP_ICON,
   icon: Icon = IconBrand,
 }: {
   name?: string;
-  suffix?: string;
   logo?: string | null;
   icon?: LucideIcon;
 }) {
@@ -25,9 +25,7 @@ export function Brand({
           <Icon className="h-4 w-4" />
         </span>
       )}
-      <span className="text-sm font-semibold tracking-tight">
-        {name} {suffix && <span className="text-muted-foreground">{suffix}</span>}
-      </span>
+      <span className="text-sm font-semibold tracking-tight">{name}</span>
     </div>
   );
 }

@@ -27,7 +27,7 @@ export function Toolbar() {
 
   return (
     <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur">
-      <Brand name="night" suffix="editor" />
+      <Brand />
 
       <Button variant="outline" size="sm" onClick={() => void openFile()} disabled={busy}>
         <IconOpen />
