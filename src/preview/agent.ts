@@ -487,15 +487,13 @@ export function previewAgent(): () => void {
     }
   }) as EventListener);
 
-  /**
-   * `rgb()`/`rgba()` 의 밝기(0–255). 완전히 투명하면 null — 뒤에 깔린 색을 더 찾아야 한다.
-   */
-  const lumOf = (value: string): number | null => {
+  /** `rgb()`/`rgba()` 를 [r, g, b, a] 로 뜯는다. 색이 아니면 null */
+  const colorOf = (value: string): [number, number, number, number] | null => {
     const m = /^rgba?\(([^)]+)\)/.exec(value);
     if (!m?.[1]) return null;
-    const [r, g, b, a] = m[1].split(',').map(Number);
-    if (r === undefined || g === undefined || b === undefined || a === 0) return null;
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const [r, g, b, a = 1] = m[1].split(',').map(Number);
+    if (r === undefined || g === undefined || b === undefined || Number.isNaN(a)) return null;
+    return [r, g, b, a];
   };
 
   /**
@@ -504,17 +502,35 @@ export function previewAgent(): () => void {
    *
    * 문서 단위가 아니라 블록 단위다. 어두운 바탕에 밝은 카드를 얹는 구성이 흔한데,
    * 문서 하나로 정하면 카드 안 블록의 표시가 통째로 안 보인다.
+   *
+   * 반투명 배경은 제 색만 읽으면 안 된다 — `rgba(0,0,0,.1)` 은 흰 바탕에서는 사실상
+   * 흰색인데 검은 값만 보고 어둡다고 하면 표시가 배경에 묻힌다. 불투명한 배경을 만날
+   * 때까지 모아, 그 위에 합성한 색으로 잰다 (spec §4 · 시각 표시).
    */
   const paintContrast = (): void => {
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
+      const layers: [number, number, number, number][] = [];
       let node: HTMLElement | null = el;
-      let lum: number | null = null;
-      while (node && lum === null) {
-        lum = lumOf(getComputedStyle(node).backgroundColor);
+      while (node) {
+        const color = colorOf(getComputedStyle(node).backgroundColor);
+        if (color && color[3] > 0) {
+          layers.push(color);
+          // 불투명을 만나면 그 아래는 보이지 않는다.
+          if (color[3] >= 1) break;
+        }
         node = node.parentElement;
       }
-      // 끝까지 투명하면 브라우저 기본값인 흰 바탕이다 — 밝은 쪽으로 둔다.
-      if (lum !== null && lum < 128) el.setAttribute(DARK, '');
+      // 끝까지 투명했으면 브라우저 기본값인 흰 바탕이 깔린다. 그 위에 바깥 색부터 얹는다.
+      let r = 255;
+      let g = 255;
+      let b = 255;
+      for (let i = layers.length - 1; i >= 0; i--) {
+        const [lr, lg, lb, a] = layers[i] as [number, number, number, number];
+        r = a * lr + (1 - a) * r;
+        g = a * lg + (1 - a) * g;
+        b = a * lb + (1 - a) * b;
+      }
+      if (0.2126 * r + 0.7152 * g + 0.0722 * b < 128) el.setAttribute(DARK, '');
       else el.removeAttribute(DARK);
     }
   };

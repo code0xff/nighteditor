@@ -888,3 +888,32 @@ describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', (
   });
 });
 
+describe('previewAgent · 반투명 배경의 밝기 (spec §4 · 시각 표시)', () => {
+  const scan = async (): Promise<void> => {
+    window.dispatchEvent(new Event('load'));
+    await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('흰 바탕 위의 옅은 검정은 밝은 배경이다', async () => {
+    // rgba(0,0,0,.1) 의 색 값만 읽으면 어둡다고 잘못 판정해 표시가 배경에 묻힌다.
+    mount(
+      `<div style="background-color:rgb(255,255,255)">` +
+        `<div style="background-color:rgba(0,0,0,0.1)"><p ${MARKER_ATTR}="0">본문</p></div>` +
+        `</div>`
+    );
+    await scan();
+
+    expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(false);
+  });
+
+  it('어두운 바탕 위의 옅은 흰색은 여전히 어두운 배경이다', async () => {
+    mount(
+      `<div style="background-color:rgb(16,16,20)">` +
+        `<div style="background-color:rgba(255,255,255,0.1)"><p ${MARKER_ATTR}="0">본문</p></div>` +
+        `</div>`
+    );
+    await scan();
+
+    expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(true);
+  });
+});
