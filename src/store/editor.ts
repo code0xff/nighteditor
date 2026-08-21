@@ -361,6 +361,17 @@ async function openBundle(
 /** 묶음은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
 class BundleEmptyError extends Error {}
 
+/**
+ * 폴더에서 문서를 못 찾았을 때 — 스캔이 잘렸으면 그 사정을 함께 말한다 (spec §5.1).
+ * "문서가 없다" 라고만 하면 거짓말일 수 있다 — 문서는 한도 밖에 있었을 수 있다.
+ */
+function folderFailedNotice(e: unknown, read: FolderRead | null): Notice {
+  if (e instanceof BundleEmptyError && read?.truncated) {
+    return { key: 'notice.bundleNoDocumentTruncated', params: { count: read.files.size } };
+  }
+  return openFailedNotice(e);
+}
+
 export const useEditor = create<EditorState>((set, get) => ({
   file: null,
   source: '',
@@ -434,7 +445,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
       return true;
     } catch (e) {
-      set({ notice: openFailedNotice(e) });
+      set({ notice: folderFailedNotice(e, read) });
       return true;
     } finally {
       set({ busy: false });
@@ -579,9 +590,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
     set({ notice: null });
+    // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
+    let read: FolderRead | null = null;
     try {
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
-      const read = await pickFolder(null, 'readwrite');
+      read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
       set({ busy: true });
@@ -590,7 +603,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
     } catch (e) {
-      set({ notice: openFailedNotice(e) });
+      set({ notice: folderFailedNotice(e, read) });
     } finally {
       set({ busy: false });
     }

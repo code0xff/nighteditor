@@ -489,6 +489,35 @@ describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
   });
 });
 
+describe('editor · 잘린 스캔에서 문서를 못 찾으면 그 사정도 말한다 (spec §5.1)', () => {
+  it('놓은 폴더가 잘렸으면 "문서가 없다" 라고만 하지 않는다', async () => {
+    // 문서는 한도 밖에 있었을 수 있다 — 없다고 단정하면 거짓말이 된다 (대원칙 3).
+    await useEditor.getState().loadFolder({
+      files: new Map([['notes.txt', new File(['메모'], 'notes.txt')]]),
+      handles: new Map(),
+      truncated: true,
+    });
+
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.bundleNoDocumentTruncated',
+      params: { count: 1 },
+    });
+  });
+
+  it('열기 대화상자로 고른 폴더도 같다 — 깊이 한도 밖의 문서는 못 찾은 것이 아니다', async () => {
+    let tree: Tree = { 'index.html': '<p>깊다</p>' };
+    for (let i = 0; i < 9; i++) tree = { [`d${i}`]: tree };
+    pickerReturns(fakeTree('deck', tree));
+
+    await useEditor.getState().openFolder();
+
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.bundleNoDocumentTruncated',
+      params: { count: 0 },
+    });
+  });
+});
+
 describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () => {
   it('고치던 것이 있으면 대화상자를 띄우고, 취소하면 지금 문서에 머문다', async () => {
     // launchQueue 로 들어와도 다른 파일 열기다. 조용히 갈아타면 편집이 사라진다 (spec §4).

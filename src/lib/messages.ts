@@ -94,6 +94,8 @@ const ko = {
   'notice.folderUnsupported': '이 브라우저는 폴더 열기를 지원하지 않아요',
   'notice.bundlePicked': '문서가 {count}개예요. 우선 {path}부터 열었어요',
   'notice.bundleNoDocument': '여기에서 HTML 문서를 찾지 못했어요',
+  'notice.bundleNoDocumentTruncated':
+    '읽은 {count}개 파일에는 HTML 문서가 없었어요. 폴더가 커서 끝까지 읽지는 못했어요',
 
   'assets.missing':
     '옆에 있어야 할 파일 {count}개를 못 찾았어요. 화면만 달라 보일 뿐, 고치고 저장하는 데는 문제없어요',
@@ -195,6 +197,8 @@ const en: Record<MessageKey, string> = {
   'notice.folderUnsupported': "This browser can't open folders",
   'notice.bundlePicked': '{count} documents in here. Opened {path} first',
   'notice.bundleNoDocument': "Couldn't find an HTML document in here",
+  'notice.bundleNoDocumentTruncated':
+    "No HTML document in the {count} files read. That folder is large, so the scan didn't finish",
 
   'assets.missing':
     'Missing files this document expects next to it: {count}. Only the preview looks different; editing and saving are exact',
@@ -316,6 +320,7 @@ export const ERROR_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   'notice.saveRejected',
   'notice.folderUnsupported',
   'notice.bundleNoDocument',
+  'notice.bundleNoDocumentTruncated',
   'notice.assetsNotFound',
 ]);
 
