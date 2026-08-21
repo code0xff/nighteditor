@@ -17,7 +17,13 @@ import {
   type Picked,
 } from '@/lib/fs';
 import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/bundle';
-import { claimDocument, reserveReplacement, useReplacement, type Replacement } from './replacement';
+import {
+  claimDocument,
+  refuseWhileReplacing,
+  reserveReplacement,
+  useReplacement,
+  type Replacement,
+} from './replacement';
 import { keepEdits } from './unsaved';
 import type { AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
@@ -105,9 +111,10 @@ export interface EditorState {
    * 늦게 훑힌 폴더가 더 새 예약을 받아 나중에 놓은 폴더를 덮는다.
    */
   openDropped: (file: File | undefined, folder: Promise<FolderRead | null>) => Promise<void>;
-  loadDropped: (file: File) => Promise<void>;
+  /** @param within 이어받을 예약. 없으면 이 호출이 곧 사용자 행동이라 새로 예약한다 */
+  loadDropped: (file: File, within?: Replacement) => Promise<void>;
   /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
-  loadFolder: (read: FolderRead | null) => Promise<boolean>;
+  loadFolder: (read: FolderRead | null, within?: Replacement) => Promise<boolean>;
   /** 폴더를 골라 그 안의 문서를 연다 (spec §5.1) */
   openFolder: () => Promise<void>;
   /** 여는 도중의 실패를 알림으로 돌린다 — 화면 쪽에서 잡은 오류가 들어온다 */
@@ -215,6 +222,18 @@ function nextPatches(
 /** <title> 은 프리뷰에 렌더되지 않아 클릭이 닿지 않는다. 별도 필드로 편집한다 (spec §2.1) */
 export function titleBlock(blocks: readonly Block[]): Block | undefined {
   return blocks.find((b) => b.rcdata);
+}
+
+/**
+ * 문서를 바꾸는 일을 새로 시작하면 안 되는 동안 — 저장 중이거나 갈아 끼우는 중 (ADR-010).
+ *
+ * 열기·문서 고르기·폴더 연결·저장 버튼이 전부 이 하나를 본다. 화면마다 두 표시를
+ * 제각기 조합하면 하나만 구독한 화면이 생겨, 흩어진 표시의 틈이 되살아난다.
+ */
+export function useEditorBusy(): boolean {
+  const saving = useEditor((s) => s.saving);
+  const replacing = useReplacement((s) => s.replacing);
+  return saving || replacing;
 }
 
 /**
@@ -559,9 +578,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 훑기를 기다리는 사이도 마찬가지다 — 밀려났으면 설치도 알림도 남의 몫이다.
       if (!mine.current()) return;
       // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
-      // 아래 둘은 제 예약을 새로 받아 이어 간다 — 방금 확인한 최신 자리를 물려받는
-      // 셈이라, 이 사이에는 기다림이 없어 끼어들 틈도 없다.
-      if (!(await get().loadFolder(read)) && file) await get().loadDropped(file);
+      // 같은 예약을 들려 보낸다 — 새로 예약하면 이 흐름이 저 자신을 밀어내는
+      // 모양이 되고, 그 사이의 틈은 주석이 아니라 예약이 막아야 한다 (ADR-010).
+      if (!(await get().loadFolder(read, mine)) && file) await get().loadDropped(file, mine);
     } finally {
       mine.release();
     }
@@ -569,9 +588,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // 폴더를 놓으면 그 안의 문서를 연다. 옛 드롭 API 는 쓰기 권한을 주지 않으므로
   // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
-  loadFolder: async (read) => {
+  loadFolder: async (read, within) => {
     if (!read) return false;
-    const mine = reserveReplacement();
+    const mine = within ?? reserveReplacement();
     set({ notice: null });
     try {
       const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
@@ -588,8 +607,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
-  loadDropped: async (file) => {
-    const mine = reserveReplacement();
+  loadDropped: async (file, within) => {
+    const mine = within ?? reserveReplacement();
     set({ notice: null });
     try {
       await replace(get, set, mine, openPicked(droppedFile(file)));
@@ -624,10 +643,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다 (spec §4).
     // 제목 칸과 프리뷰는 이 동안 잠겨 있어, 여기 오는 것은 이미 열려 있던 블록의
     // 확정(blur·IME 마무리)뿐이다. 저장 중(saving)과 다르다 — 그 편집은 살아남는다.
-    if (useReplacement.getState().replacing) {
-      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
-      return;
-    }
+    if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
     const before = get().patches;
@@ -667,10 +683,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 갈아 끼우는 동안의 되돌리기는 이전 문서를 고치는 일이다 — 바뀐 패치도, 프리뷰로
     // 보낼 되돌림도 설치 순간 갈 곳이 없다. 버튼은 잠겨 있지만 단축키(Ctrl+Z)는
     // 언제든 눌린다 (spec §4).
-    if (useReplacement.getState().replacing) {
-      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
-      return;
-    }
+    if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const { patches, blocks, revertQueue } = get();
     const next = new Map(patches);
     next.delete(id);
@@ -687,10 +700,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   revertAll: () => {
     // revert 와 같은 이유 — 갈아 끼우는 동안 이전 문서를 고치지 않는다 (spec §4).
-    if (useReplacement.getState().replacing) {
-      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
-      return;
-    }
+    if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const { patches, blocks, revertQueue } = get();
     const restored = [...patches.keys()].map((id) => ({
       id,

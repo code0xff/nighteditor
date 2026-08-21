@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
 import { IconDownloadCopy, IconSave } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
-import { titleBlock, useEditor } from '@/store/editor';
+import { titleBlock, useEditor, useEditorBusy } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
@@ -19,7 +19,7 @@ export function Toolbar() {
   const blocks = useEditor((s) => s.blocks);
   const patches = useEditor((s) => s.patches);
   const unsaved = useEditor((s) => s.unsaved);
-  const saving = useEditor((s) => s.saving);
+  const busy = useEditorBusy();
   // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
   const replacing = useReplacement((s) => s.replacing);
   const onEdit = useEditor((s) => s.onEdit);
@@ -87,9 +87,9 @@ export function Toolbar() {
           // 패치 개수로 잠그면 안 된다 (spec §5) — 저장하면 패치가 남은 채 unsaved 만
           // 풀리고(눌리는데 아무 일도 없는 버튼이 된다), 저장한 편집을 되돌리면 패치
           // 0개로 저장할 것이 생긴다. save() 의 조기 반환과 같은 기준을 본다.
-          // 저장이 도는 동안(saving)과 갈아 끼우는 동안(replacing)도 잠근다 —
+          // 저장이 도는 동안과 갈아 끼우는 동안도 잠근다(useEditorBusy) —
           // 앞은 겹쳐 쓰지 않으려고, 뒤는 이전 문서를 저장하는 일이 되기 때문이다.
-          <Button size="sm" onClick={() => void save()} disabled={saving || replacing || !unsaved}>
+          <Button size="sm" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
             {t('toolbar.save')} {patches.size > 0 && `(${patches.size})`}
           </Button>

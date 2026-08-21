@@ -11,8 +11,7 @@
 import { create } from 'zustand';
 import type { Notice } from '@/lib/messages';
 import { useEditor } from './editor';
-import { useReplacement, type Replacement } from './replacement';
-import { useToasts } from './toasts';
+import { refuseWhileReplacing, type Replacement } from './replacement';
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
@@ -87,10 +86,7 @@ export function shortcutSave(): void {
     // 언제든 눌리므로, 되돌리기(Ctrl+Z)와 같은 자리에서 거절하고 알린다 (spec §4).
     // 물음이 떠 있을 때의 "저장하고 계속" 은 다르다 — 그 저장은 갈아 끼우기의
     // 일부라 막지 않는다.
-    if (useReplacement.getState().replacing) {
-      useToasts.getState().show({ key: 'app.saveWhileReplacing' }, 'error');
-      return;
-    }
+    if (refuseWhileReplacing('app.saveWhileReplacing')) return;
     void useEditor.getState().save();
     return;
   }

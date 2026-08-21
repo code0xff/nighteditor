@@ -35,6 +35,7 @@
  * 세대가 달라졌으면 결과(상태 갱신·알림·제 표시 해제)를 버린다 (spec §5).
  */
 import { create } from 'zustand';
+import { useToasts } from './toasts';
 
 interface ReplacementState {
   /** 확정된 갈아 끼우기가 진행 중 — 화면 잠금의 유일한 근거 */
@@ -87,6 +88,21 @@ export function reserveReplacement(): Replacement {
       if (current()) useReplacement.setState({ replacing: false });
     },
   };
+}
+
+/**
+ * 갈아 끼우는 동안의 변경 시도를 거절하고 알린다. 거절했으면 true.
+ *
+ * 화면은 잠겨 있지만 단축키(Ctrl+S·Ctrl+Z)와 이미 열려 있던 블록의 확정(blur)은
+ * 언제든 들어온다. 받아 두었다가 버리는 것은 조용히 버리는 것과 같아, 거절하는
+ * 정책도 잠금과 같은 자리(이 파일)에서 하나로 정한다 (spec §4 · 대원칙 3).
+ */
+export function refuseWhileReplacing(
+  key: 'app.editWhileReplacing' | 'app.saveWhileReplacing'
+): boolean {
+  if (!useReplacement.getState().replacing) return false;
+  useToasts.getState().show({ key }, 'error');
+  return true;
 }
 
 /**

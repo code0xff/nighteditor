@@ -8,7 +8,7 @@ import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
 import { ERROR_NOTICES } from '@/lib/messages';
 import { cn } from '@/lib/utils';
-import { countAssets, useEditor } from '@/store/editor';
+import { countAssets, useEditor, useEditorBusy } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
 import { shortcutSave } from '@/store/unsaved';
 import { useToasts } from '@/store/toasts';
@@ -27,7 +27,8 @@ export function App() {
   const undoLast = useEditor((s) => s.undoLast);
   const unsaved = useEditor((s) => s.unsaved);
   // 저장이 도는 동안도, 갈아 끼우는 동안도 폴더 연결을 새로 시작하지 않는다 (ADR-010).
-  const saving = useEditor((s) => s.saving);
+  const busy = useEditorBusy();
+  // 문구만은 갈아 끼우기에만 붙는다 — "읽는 중" 은 예약이 확정된 동안의 일이다.
   const replacing = useReplacement((s) => s.replacing);
   const linkFolder = useEditor((s) => s.linkFolder);
   // 참조는 있는데 못 붙인 자원. 조용히 깨진 채로 두지 않는다 (대원칙 3 · spec §5.1).
@@ -92,7 +93,7 @@ export function App() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={saving || replacing}
+                disabled={busy}
                 // 묻는 것은 linkFolder 가 한다. 여기서 먼저 물으면 두 번 묻게 되고,
                 // 저장을 고르면 그 사이 제스처가 만료돼 폴더 대화상자가 거절될 수 있다.
                 onClick={() => void linkFolder()}
