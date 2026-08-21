@@ -69,7 +69,9 @@ export function injectAgentScript(html: string, agentSource: string): string {
  * 아티팩트의 레이아웃을 흔들지 않는 것이 조건이다.
  * - `outline` 만 쓴다. `border` 는 박스 크기를 바꿔 문서가 밀린다
  * - 색·글꼴·간격은 건드리지 않는다
- * - 아티팩트 CSS 가 이겨 표시가 사라지면 안 되므로 이 몇 줄만 `!important` 다
+ * - 아티팩트 CSS 가 이겨 표시가 사라지면 안 되므로 이 몇 줄만 `!important` 다 —
+ *   표시가 읽는 `--ne-*` 변수 정의까지. 이 스타일은 아티팩트 CSS 보다 먼저
+ *   주입되므로, 변수를 지키지 않으면 같은 선택자 한 줄로 표시가 통째로 사라진다
  *
  * 표시는 흑백이다. 아티팩트마다 배색이 제각각이라 고정된 색은 어떤 문서에서는
  * 배경에 묻히고 어떤 문서에서는 아티팩트의 색을 침범한다.
@@ -80,8 +82,10 @@ export function injectEditorStyle(html: string): string {
   const editable = `[${MARKER_ATTR}]:not([${LOCKED_ATTR}])`;
   const style =
     '<style>' +
-    `[${MARKER_ATTR}]{--ne-mark:#101012;--ne-soft:rgba(16,16,18,.45);--ne-tint:rgba(16,16,18,.05)}` +
-    `[${DARK_ATTR}]{--ne-mark:#fff;--ne-soft:rgba(255,255,255,.5);--ne-tint:rgba(255,255,255,.09)}` +
+    `[${MARKER_ATTR}]{--ne-mark:#101012!important;--ne-soft:rgba(16,16,18,.45)!important;` +
+    '--ne-tint:rgba(16,16,18,.05)!important}' +
+    `[${DARK_ATTR}]{--ne-mark:#fff!important;--ne-soft:rgba(255,255,255,.5)!important;` +
+    '--ne-tint:rgba(255,255,255,.09)!important}' +
     `${editable}{cursor:text}` +
     `${editable}:hover{outline:2px solid var(--ne-soft)!important;outline-offset:2px!important}` +
     `[${MARKER_ATTR}][contenteditable="true"]{outline:2px solid var(--ne-mark)!important;` +

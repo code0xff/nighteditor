@@ -131,6 +131,19 @@ describe('injectEditorStyle', () => {
     expect(injectEditorStyle('<p>본문</p>').startsWith('<style>')).toBe(true);
   });
 
+  it('표시가 읽는 변수 정의도 아티팩트 CSS 에 지지 않는다', () => {
+    // 이 스타일은 아티팩트 CSS 보다 먼저 주입된다. 변수 정의가 !important 가 아니면
+    // [data-ne-id]{--ne-soft:transparent} 한 줄로 호버·편집·짚기 외곽선이 통째로
+    // 사라진다 — !important 로 지킨 outline 이 그 변수의 값을 읽기 때문이다.
+    const style = /<style>(.*?)<\/style>/s.exec(styled)?.[1] ?? '';
+    for (const name of ['--ne-mark', '--ne-soft', '--ne-tint']) {
+      const declarations = style.match(new RegExp(`${name}:[^;}]*`, 'g')) ?? [];
+      // 밝은 바탕용·어두운 바탕용 두 벌 모두다.
+      expect(declarations.length).toBeGreaterThanOrEqual(2);
+      for (const declaration of declarations) expect(declaration).toContain('!important');
+    }
+  });
+
   it('원본 문자열의 블록 offset 을 건드리지 않는다 (INV-3)', () => {
     // 주입은 프리뷰 전용이다. 저장 경로는 언제나 원본에서 출발한다.
     const after = parseBlocks(injectEditorStyle(injectMarkers(source, blocks)));
