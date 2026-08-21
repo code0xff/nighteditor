@@ -15,8 +15,8 @@ export function previewAgent(): () => void {
   const REVEALED = 'data-ne-revealed';
   const BAR = 'data-ne-bar';
 
-  /** 색은 몇 가지만 고르게 한다. 아무 색이나 열어 주면 문서의 색 체계를 이기기 쉽다 */
-  const COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#2563eb', '#7c3aed', '#111827'];
+  /** 색 칸은 이만큼까지만. 더 늘리면 고르는 일이 되어 버린다 */
+  const MAX_COLORS = 10;
 
   // 떼어낼 수 있어야 한다. 파일을 바꿔 열 때 이전 에이전트가 남아 있으면
   // 옛 상태로 이벤트를 가로채 새 문서의 편집을 방해한다.
@@ -204,6 +204,32 @@ export function previewAgent(): () => void {
   };
 
   /**
+   * **이 문서가 글자에 쓰는 색**을 많이 쓰인 순서로 모은다.
+   *
+   * 우리가 고른 색을 주면 문서가 가진 색 체계를 이긴다. 아티팩트는 제 배색이 있고,
+   * 거기 없던 빨강을 새로 들이는 것은 고치는 일이 아니라 디자인을 바꾸는 일이다.
+   * 쓸 수 있는 색은 이미 그 문서 안에 있다.
+   *
+   * 글자가 있는 요소만 센다 — 빈 칸의 색은 화면에 나타난 적이 없다.
+   */
+  const paletteOf = (): string[] => {
+    const used = new Map<string, number>();
+    for (const el of document.body?.querySelectorAll<HTMLElement>('*') ?? []) {
+      const text = [...el.childNodes].some(
+        (node) => node.nodeType === 3 && (node.nodeValue ?? '').trim().length > 0
+      );
+      if (!text) continue;
+      const color = getComputedStyle(el).color;
+      if (/^rgba?\(/.test(color)) used.set(color, (used.get(color) ?? 0) + 1);
+    }
+
+    return [...used.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, MAX_COLORS)
+      .map(([color]) => color);
+  };
+
+  /**
    * 막대에 붙일 문구. 호스트가 언어팩에서 건네준다 (spec §1).
    * 아직 못 받았으면 비워 둔다 — 여기에 한 언어를 박으면 그 언어가 굳는다.
    */
@@ -248,11 +274,13 @@ export function previewAgent(): () => void {
       button('A+', 'format.bigger', () => resize('1.35em'))
     );
 
-    for (const color of COLORS) {
+    for (const color of paletteOf()) {
       const dot = button(' ', 'format.color', () => format('foreColor', color));
+      // 기본 버튼은 `all:unset` 이라 display 가 inline 이고 좌우 패딩이 남는다.
+      // 그대로 두면 width·height 가 먹지 않아 옆으로 퍼진 타원이 된다.
       dot.style.cssText +=
-        `width:12px;height:12px;border-radius:50%;background:${color};` +
-        'box-shadow:inset 0 0 0 1px rgba(255,255,255,.25);';
+        'display:block;padding:0;width:12px;height:12px;border-radius:50%;' +
+        `background:${color};box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);`;
       box.append(dot);
     }
     box.append(button('✕', 'format.clear', () => format('removeFormat')));

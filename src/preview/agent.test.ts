@@ -771,6 +771,42 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     );
   });
 
+  it('색은 이 문서가 글자에 쓰는 것으로만 채운다', () => {
+    // 우리가 고른 색을 주면 문서가 가진 배색을 이긴다. 거기 없던 색을 새로 들이는 것은
+    // 고치는 일이 아니라 디자인을 바꾸는 일이다.
+    mount(
+      `<h1 ${MARKER_ATTR}="0" style="color: rgb(94, 201, 138)">제목</h1>` +
+        `<p ${MARKER_ATTR}="1" style="color: rgb(233, 233, 236)">가나다라마바사</p>`
+    );
+    click(el(1)!);
+    select(1, 1, 4);
+
+    const dots = [...document.querySelectorAll<HTMLElement>('[data-ne-bar] button')].filter(
+      (b) => b.style.borderRadius === '50%'
+    );
+
+    expect(dots.map((d) => d.style.backgroundColor).sort()).toEqual([
+      'rgb(233, 233, 236)',
+      'rgb(94, 201, 138)',
+    ]);
+  });
+
+  it('색 칸은 찌그러지지 않는다', () => {
+    // 버튼 기본 스타일이 all:unset 이라 display 가 inline 이고 좌우 패딩이 남는다.
+    // 그대로 두면 width·height 가 먹지 않아 옆으로 퍼진 타원이 된다.
+    mount(`<p ${MARKER_ATTR}="0" style="color: rgb(0, 0, 0)">가나다라마바사</p>`);
+    click(el(0)!);
+    select(0, 1, 4);
+
+    const dot = [...document.querySelectorAll<HTMLElement>('[data-ne-bar] button')].find(
+      (b) => b.style.borderRadius === '50%'
+    );
+
+    expect(dot?.style.display).toBe('block');
+    expect(dot?.style.padding).toBe('0px');
+    expect(dot?.style.width).toBe(dot?.style.height);
+  });
+
   it('편집을 닫으면 막대도 사라진다', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p><div id="bg">여백</div>`);
     click(el(0)!);
