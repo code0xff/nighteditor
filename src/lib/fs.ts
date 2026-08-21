@@ -87,7 +87,7 @@ export interface FolderRead {
 /** 걸어가는 동안의 누계. 한도를 재귀 사이에서 이어 세려면 한 곳에 모아야 한다 */
 interface Walk extends FolderRead {
   bytes: number;
-  /** 훑은 항목 수 — 담았는지와 무관하게 센다. 순회를 끊는 기준이다 */
+  /** 훑은 항목 수 — 담았는지도, 걸렀는지도 무관하게 센다. 순회를 끊는 기준이다 */
   visits: number;
 }
 
@@ -122,9 +122,11 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
   const depth = prefix ? prefix.split('/').length : 0;
 
   for await (const [name, handle] of dir.entries()) {
+    // 예산은 거르기 **전에** 쓴다. 거르는 데도 걷는 값은 들어서, 지나친 항목을 안
+    // 세면 숨김 항목만 수천 개인 폴더에서 순회가 한도를 비켜 가 끝나지 않는다 (spec §5.1).
+    if (!walkOn(into)) return;
     // 숨김 폴더와 의존성 더미는 자원일 리 없고 파일 수만 폭발시킨다.
     if (name.startsWith('.') || name === 'node_modules') continue;
-    if (!walkOn(into)) return;
 
     const path = prefix ? `${prefix}/${name}` : name;
     if (isDirectory(handle)) {
@@ -285,8 +287,9 @@ async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Wa
     if (batch.length === 0) return;
 
     for (const entry of batch) {
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      // 예산이 거르기보다 먼저다 — 위의 walk 와 같은 이유다 (spec §5.1).
       if (!walkOn(into)) return;
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
       const path = `${prefix}/${entry.name}`;
       if (entry.isDirectory) {
