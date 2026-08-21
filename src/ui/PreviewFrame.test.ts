@@ -53,3 +53,24 @@ describe('PreviewFrame · 서식 문구는 에이전트가 준비된 뒤에 다�
     expect(labels?.labels?.['format.bold']).toBeTruthy();
   });
 });
+
+describe('PreviewFrame · 갈아 끼우는 동안은 프리뷰를 잠근다 (spec §4)', () => {
+  it('replacing 동안 클릭이 닿지 않고, 끝나면 되살아난다', () => {
+    // 이 사이 화면에 뜬 것은 아직 이전 문서다 — 여기서 시작한 편집은 새 문서가
+    // 서는 순간 사라질 자리라, 시작 자체를 막는다.
+    act(() => {
+      root = createRoot(host!);
+      root.render(createElement(PreviewFrame));
+    });
+
+    act(() => {
+      useEditor.setState({ replacing: true });
+    });
+    expect(host!.querySelector('iframe')?.classList.contains('pointer-events-none')).toBe(true);
+
+    act(() => {
+      useEditor.setState({ replacing: false });
+    });
+    expect(host!.querySelector('iframe')?.classList.contains('pointer-events-none')).toBe(false);
+  });
+});

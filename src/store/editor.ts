@@ -44,6 +44,14 @@ export interface EditorState {
   scanned: boolean;
   busy: boolean;
   /**
+   * 문서를 갈아 끼우는 중이다 — 물음에 답한 뒤부터 새 상태가 설치될 때까지.
+   *
+   * 이 사이 화면에는 아직 이전 문서가 떠 있지만, 여기서 받은 편집은 새 상태가
+   * 설치되는 순간 갈 곳이 없다 — 받아 두었다가 버리면 조용히 사라진다 (spec §4).
+   * `busy` 로는 못 가른다 — 저장도 busy 인데, 저장하는 사이의 편집은 살아남아야 한다.
+   */
+  replacing: boolean;
+  /**
    * 아직 파일에 없는 편집이 있다 — 지금 만들 결과물이 `savedText` 와 다르다 (spec §5).
    *
    * `patches` 로는 어느 방향으로도 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1)
@@ -409,6 +417,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   editOrder: [],
   scanned: false,
   busy: false,
+  replacing: false,
   unsaved: false,
   savedText: '',
   notice: null,
@@ -431,13 +440,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 묻는 동안에는 busy 를 세우지 않는다. 세우면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      set({ busy: true });
+      set({ busy: true, replacing: true });
       set(await replace(get, openPicked(picked)));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
@@ -447,13 +456,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
     // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
     if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-    set({ busy: true, notice: null });
+    set({ busy: true, replacing: true, notice: null });
     try {
       set(await replace(get, load(file)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
@@ -461,7 +470,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
   loadFolder: async (read) => {
     if (!read) return false;
-    set({ busy: true, notice: null });
+    set({ busy: true, replacing: true, notice: null });
     try {
       set(await replace(get, openBundle(read.files, undefined, read.handles)));
       if (read.truncated) {
@@ -472,19 +481,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ notice: folderFailedNotice(e, read) });
       return true;
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
   loadDropped: async (file) => {
-    set({ busy: true, notice: null });
+    set({ busy: true, replacing: true, notice: null });
     try {
       set(await replace(get, openPicked(droppedFile(file))));
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
       set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
@@ -508,6 +517,14 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   onEdit: (id, html, pristine = false) => {
+    // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다. 받아 두었다가
+    // 버리면 조용히 사라지는 것이라, 받지 않고 그 사실을 알린다 (대원칙 3 · spec §4).
+    // 제목 칸과 프리뷰는 이 동안 잠겨 있어, 여기 오는 것은 이미 열려 있던 블록의
+    // 확정(blur·IME 마무리)뿐이다. 저장 중(busy)과 다르다 — 그 편집은 살아남는다.
+    if (get().replacing) {
+      useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
+      return;
+    }
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
     const before = get().patches;
@@ -523,7 +540,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
-  failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false }),
+  failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false, replacing: false }),
 
   // 잠긴 블록을 누르면 이유를 말한다 (대원칙 3). 누를 때마다 뜨는 것이라 여기서 띄운다 —
   // 화면 쪽에서 blockedId 변화를 보면 같은 블록을 다시 눌렀을 때 아무 일도 일어나지 않는다.
@@ -624,7 +641,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      set({ busy: true });
+      set({ busy: true, replacing: true });
       set(await replace(get, openBundle(read.files, undefined, read.handles)));
       if (read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
@@ -632,7 +649,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     } catch (e) {
       set({ notice: folderFailedNotice(e, read) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
@@ -656,7 +673,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const read = await pickFolder(file.handle);
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
-      set({ busy: true });
+      set({ busy: true, replacing: true });
 
       // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
       // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
@@ -694,7 +711,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 
@@ -711,12 +728,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ notice: null });
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
-      set({ busy: true });
+      set({ busy: true, replacing: true });
       set(await replace(get, openBundle(bundle, path, get().bundleHandles)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false });
+      set({ busy: false, replacing: false });
     }
   },
 

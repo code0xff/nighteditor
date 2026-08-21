@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
 import { countAssets, useEditor } from './editor.js';
+import { useToasts } from './toasts.js';
 import { useUnsaved } from './unsaved.js';
 
 const dropped = () => new File([fixtureSource()], 'artifact.html', { type: 'text/html' });
@@ -20,8 +21,10 @@ beforeEach(() => {
     notice: null,
     unsaved: false,
     savedText: '',
+    replacing: false,
   });
   useUnsaved.setState({ why: null, answer: null });
+  useToasts.getState().clear();
 });
 
 describe('editor · 파일 열기 (동적 import 경로)', () => {
@@ -425,6 +428,45 @@ describe('editor · 리뷰가 짚은 자리', () => {
     await asking;
 
     expect(busyWhileAsking).toBe(false);
+  });
+
+  it('갈아 끼우는 동안의 편집은 거절하고 알린다', async () => {
+    // 물음에 답한 뒤 새 문서를 읽는 사이의 편집은 새 상태가 설치되는 순간 사라진다.
+    // 받아 두었다가 버리면 조용히 사라지는 것이다 (대원칙 3) — 받지 않고 알린다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.setState({ replacing: true });
+
+    useEditor.getState().onEdit(target?.id ?? -1, '사라질 편집');
+
+    expect(useEditor.getState().patches.size).toBe(0);
+    expect(useEditor.getState().unsaved).toBe(false);
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editWhileReplacing')).toBe(
+      true
+    );
+  });
+
+  it('여는 동안 replacing 이 서고, 끝나면 풀린다', async () => {
+    // 화면(제목 칸·프리뷰)이 이 값을 보고 잠근다. 서지 않으면 잠글 근거가 없고,
+    // 안 풀리면 새 문서를 영영 못 고친다.
+    const seen: boolean[] = [];
+    const unsub = useEditor.subscribe((s) => seen.push(s.replacing));
+    await useEditor.getState().loadDropped(dropped());
+    unsub();
+
+    expect(seen).toContain(true);
+    expect(useEditor.getState().replacing).toBe(false);
+  });
+
+  it('여는 데 실패해도 replacing 이 풀린다 — 보던 문서를 계속 고칠 수 있어야 한다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+
+    await useEditor.getState().loadDropped(new File(['x'], 'bad.zip', { type: 'application/zip' }));
+
+    expect(useEditor.getState().replacing).toBe(false);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    expect(useEditor.getState().patches.size).toBe(1);
   });
 
   it('눌렀다 그냥 빠져나온 것은 고친 것이 아니다', async () => {

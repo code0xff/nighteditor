@@ -16,6 +16,7 @@ beforeEach(() => {
     blocks: [],
     patches: new Map(),
     busy: false,
+    replacing: false,
     unsaved: false,
   });
   host = document.createElement('div');
@@ -57,5 +58,38 @@ describe('Toolbar · 저장 버튼은 파일과 다른가로 잠긴다 (spec §5
     });
 
     expect(saveButton()?.disabled).toBe(false);
+  });
+});
+
+describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §4)', () => {
+  const title = {
+    id: 0,
+    tag: 'title',
+    innerStart: 0,
+    innerEnd: 2,
+    sourceInner: '제목',
+    sourceText: '제목',
+    rcdata: true,
+    locked: null,
+  };
+
+  /** 제목 칸 — Input 은 이것 하나다 */
+  const titleInput = (): HTMLInputElement | null =>
+    document.querySelector<HTMLInputElement>('#doc-title');
+
+  it('replacing 동안 잠긴다 — 이 사이의 편집은 새 문서가 서면 사라질 자리다', () => {
+    act(() => {
+      useEditor.setState({ blocks: [title], replacing: true });
+    });
+
+    expect(titleInput()?.disabled).toBe(true);
+  });
+
+  it('저장하는 동안(busy)은 잠기지 않는다 — 그 편집은 살아남는다 (spec §5)', () => {
+    act(() => {
+      useEditor.setState({ blocks: [title], replacing: false, busy: true });
+    });
+
+    expect(titleInput()?.disabled).toBe(false);
   });
 });

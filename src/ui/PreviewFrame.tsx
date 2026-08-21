@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
 import { shortcutSave } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
+import { cn } from '@/lib/utils';
 import { FORMAT_LABELS } from '@/lib/messages';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
 
@@ -27,6 +28,7 @@ export function PreviewFrame() {
   const drainReverts = useEditor((s) => s.drainReverts);
   const revealId = useEditor((s) => s.revealId);
   const drainReveal = useEditor((s) => s.drainReveal);
+  const replacing = useEditor((s) => s.replacing);
 
   useEffect(() => {
     const handle = (e: MessageEvent) => {
@@ -91,7 +93,10 @@ export function PreviewFrame() {
     <iframe
       ref={frame}
       title={t('preview.title')}
-      className="h-full w-full border-0 bg-white"
+      // 갈아 끼우는 동안(replacing)은 프리뷰를 잠근다 — 화면에는 아직 이전 문서가
+      // 있지만, 여기서 시작한 편집은 새 문서가 서는 순간 사라질 자리다 (spec §4).
+      // 그래도 들어온 확정(열려 있던 블록의 blur 등)은 스토어의 onEdit 이 거절한다.
+      className={cn('h-full w-full border-0 bg-white', replacing && 'pointer-events-none')}
       sandbox="allow-scripts allow-same-origin"
       srcDoc={previewDoc}
     />
