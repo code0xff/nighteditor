@@ -96,3 +96,10 @@ pnpm verify   # typecheck + lint + format + test + build
 ```bash
 git config core.hooksPath .githooks   # 클론 후 1회 — push 전 verify 강제
 ```
+
+## 라이선스
+
+[Apache License 2.0](LICENSE) · Copyright 2026 code0xff
+
+특허 조항이 있고 변경 사실을 밝히면 상업적 이용도 된다. 소스 파일마다 헤더를 붙이지는
+않는다 — 이 저장소는 파일 단위로 흩어져 쓰이는 라이브러리가 아니라 통째로 도는 앱이다.

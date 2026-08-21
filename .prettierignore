@@ -3,3 +3,4 @@ dist/
 coverage/
 src/__fixtures__/artifact.html
 *.md
+LICENSE
