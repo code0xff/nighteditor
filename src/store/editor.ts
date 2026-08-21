@@ -850,7 +850,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
       // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
-      await replace(get, set, mine, openBundle(bundle, path, get().bundleHandles));
+      // 물음에 저장으로 답했으면 묶음이 방금 그 결과물로 갈렸다 (내려받기 저장은
+      // 묶음이 유일한 원천이다, spec §5). 멈추기 전에 받아 둔 묶음을 그대로 쓰면
+      // 설치가 저장 전 바이트를 되살려, 돌아왔을 때 저장한 내용이 조용히 사라진다.
+      const fresh = get().bundle;
+      if (!fresh) return;
+      await replace(get, set, mine, openBundle(fresh, path, get().bundleHandles));
     } catch (e) {
       if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {

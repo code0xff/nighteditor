@@ -1046,6 +1046,37 @@ describe('editor · 내려받기로 저장한 편집은 묶음에도 남는다',
   });
 });
 
+describe('editor · 물음에 저장으로 답한 갈아타기는 저장 뒤의 묶음으로 연다 (spec §5)', () => {
+  it('갈아탔다 돌아오면 방금 저장한 결과물이 열린다', async () => {
+    // 옛 코드는 묻기 전에 받아 둔 묶음으로 열었다 — 물음의 저장이 묶음을 결과물로
+    // 갈아 끼워도(내려받기 저장은 묶음이 유일한 원천), 설치가 저장 전 바이트를
+    // 되살려 돌아왔을 때 저장한 내용이 조용히 사라졌다.
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    const doc = (body: string) => new File([`<html><body><p>${body}</p></body></html>`], 'x');
+    await useEditor.getState().loadFolder({
+      files: new Map([
+        ['index.html', doc('본문')],
+        ['other.html', doc('다른 문서')],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const switching = useEditor.getState().openFromBundle('other.html');
+    await answerWith('save');
+    await switching;
+    expect(useEditor.getState().source).toContain('다른 문서');
+
+    await useEditor.getState().openFromBundle('index.html');
+
+    expect(useEditor.getState().source).toContain('고친 값');
+    expect(useEditor.getState().unsaved).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다', () => {
   it('저장한 편집이 있는 블록에서 pristine 으로 나와도 패치가 살아 있다', async () => {
     // 프리뷰의 pristine 은 "편집을 열 때의 화면과 같다" 다. 화면은 저장한 편집을
