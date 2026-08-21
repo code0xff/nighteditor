@@ -314,7 +314,7 @@ function pickViaInput(): Promise<Picked | null> {
       const file = input.files?.[0];
       resolve(file ? droppedFile(file) : null);
     };
-    // 취소를 처리하지 않으면 프라미스가 영영 안 풀려 busy 가 걸린 채 굳는다.
+    // 취소를 처리하지 않으면 프라미스가 영영 안 풀려 여는 흐름이 끝나지 못한다.
     input.oncancel = () => resolve(null);
     input.click();
   });

@@ -51,7 +51,7 @@ export function Toolbar() {
                 className="h-8 w-56"
                 value={titleValue}
                 // 갈아 끼우는 동안(replacing)의 편집은 새 문서가 서면 사라질 자리다.
-                // 받는 척하고 버리는 대신 칸을 잠근다 (spec §4). busy 로 잠그면 안 된다 —
+                // 받는 척하고 버리는 대신 칸을 잠근다 (spec §4). saving 으로 잠그면 안 된다 —
                 // 저장하는 사이의 편집은 살아남으므로 그때는 계속 받는다.
                 disabled={replacing || title.locked !== null}
                 title={
