@@ -56,11 +56,15 @@ export interface EditorState {
   bundle: ReadonlyMap<string, Blob> | null;
   /** 묶음 안의 HTML 후보들. 하나뿐이면 고를 것이 없다 */
   candidates: string[];
+  /** 묶음 안에서 되쓸 수 있는 파일의 핸들. 폴더를 열어 받았을 때만 채워진다 */
+  bundleHandles: ReadonlyMap<string, OpenedFile['handle']>;
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
   /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
   loadFolder: (read: FolderRead | null) => Promise<boolean>;
+  /** 폴더를 골라 그 안의 문서를 연다 (spec §5.1) */
+  openFolder: () => Promise<void>;
   adopt: (file: OpenedFile) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
@@ -152,7 +156,8 @@ function openFailedNotice(e: unknown): Notice {
  */
 async function load(
   file: OpenedFile,
-  files?: ReadonlyMap<string, Blob>
+  files?: ReadonlyMap<string, Blob>,
+  handles?: ReadonlyMap<string, OpenedFile['handle']>
 ): Promise<Partial<EditorState>> {
   const [{ parseBlocks }, { buildPreviewDocument }, { dirOf, parseAssetRefs }, { buildAssets }] =
     await Promise.all([
@@ -176,6 +181,7 @@ async function load(
     docPath,
     bundle: files ?? null,
     candidates: files ? candidatesOf(files) : [],
+    bundleHandles: handles ?? new Map(),
     previewDoc: buildPreviewDocument(file.text, blocks, { refs, dir: docDir, urls: assets.urls }),
     patches: new Map(),
     selectedId: null,
@@ -214,7 +220,8 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
  */
 async function openBundle(
   files: ReadonlyMap<string, Blob>,
-  want?: string
+  want?: string,
+  handles?: ReadonlyMap<string, OpenedFile['handle']>
 ): Promise<Partial<EditorState>> {
   const candidates = candidatesOf(files);
   const path = want && candidates.includes(want) ? want : candidates[0];
@@ -222,8 +229,15 @@ async function openBundle(
   if (!path || !entry) throw new BundleEmptyError();
 
   const next = await load(
-    { name: path.split('/').pop() ?? path, text: await entry.text(), handle: null, path },
-    files
+    {
+      name: path.split('/').pop() ?? path,
+      text: await entry.text(),
+      // 열기 대화상자로 고른 폴더에서만 핸들이 온다. 없으면 사본 내려받기로 간다.
+      handle: handles?.get(path) ?? null,
+      path,
+    },
+    files,
+    handles
   );
   // 후보가 여럿이면 어느 것을 열었는지 말한다. 조용히 하나 고르면 나머지는 없는 셈이 된다.
   return candidates.length > 1 && !want
@@ -256,6 +270,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   docPath: '',
   bundle: null,
   candidates: [],
+  bundleHandles: new Map(),
 
   openFile: async () => {
     set({ busy: true, notice: null });
@@ -289,7 +304,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!read) return false;
     set({ busy: true, notice: null });
     try {
-      set(await replace(get, openBundle(read.files)));
+      set(await replace(get, openBundle(read.files, undefined, read.handles)));
       if (read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
@@ -393,6 +408,33 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   /**
+   * 폴더를 골라 그 안의 문서를 연다 (spec §5.1).
+   *
+   * 편집 권한까지 함께 받는다. 열기로 연 것은 덮어쓴다는 규칙을 폴더에서도 지키려면
+   * 되쓸 핸들이 있어야 하고, 그 핸들은 대화상자에서만 나온다.
+   * 사용자가 편집 허용을 거절하면 브라우저가 취소로 돌려주므로 아무 일도 일어나지 않는다.
+   */
+  openFolder: async () => {
+    if (!canPickFolder()) {
+      set({ notice: { key: 'notice.folderUnsupported' } });
+      return;
+    }
+    set({ busy: true, notice: null });
+    try {
+      const read = await pickFolder(null, 'readwrite');
+      if (!read) return;
+      set(await replace(get, openBundle(read.files, undefined, read.handles)));
+      if (read.truncated) {
+        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+      }
+    } catch (e) {
+      set({ notice: openFailedNotice(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /**
    * 폴더를 열어 외부 자원을 붙인다 (spec §5.1).
    *
    * 파일 핸들은 그대로 두므로 **덮어쓰기 저장은 계속 된다.** 폴더는 읽기 전용으로만 받는다.
@@ -440,7 +482,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
     set({ busy: true, notice: null });
     try {
-      set(await replace(get, openBundle(bundle, path)));
+      set(await replace(get, openBundle(bundle, path, get().bundleHandles)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
     } finally {

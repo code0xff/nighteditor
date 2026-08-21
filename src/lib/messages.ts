@@ -30,6 +30,7 @@ const ko = {
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
 
   'toolbar.open': '열기',
+  'toolbar.openFolder': '폴더 열기',
   'toolbar.title': '제목',
   'toolbar.document': '문서가 {count}개예요. 열 문서를 고르세요',
   'toolbar.save': '저장',
@@ -107,6 +108,7 @@ const en: Record<MessageKey, string> = {
   'app.blocked': "You can't edit this one · {reason}",
 
   'toolbar.open': 'Open',
+  'toolbar.openFolder': 'Open a folder',
   'toolbar.title': 'Title',
   'toolbar.document': '{count} documents in here. Pick one to open',
   'toolbar.save': 'Save',

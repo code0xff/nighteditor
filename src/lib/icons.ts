@@ -12,6 +12,7 @@ import {
   FileUp,
   FolderOpen,
   FolderSearch,
+  FolderTree,
   FileCode2,
   Unplug,
   Info,
@@ -38,6 +39,8 @@ export const IconBrand = FilePen;
 
 /** 파일 */
 export const IconOpen = FolderOpen;
+/** 폴더째 열기 — 파일 하나가 아니라 묶음을 연다 */
+export const IconOpenFolder = FolderTree;
 export const IconDrop = FileUp;
 export const IconSave = Save;
 export const IconDownloadCopy = Download;

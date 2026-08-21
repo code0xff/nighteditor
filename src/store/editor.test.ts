@@ -127,3 +127,71 @@ describe('editor · 저장', () => {
     expect(useEditor.getState().notice).toBeNull();
   });
 });
+
+describe('editor · 폴더 열기', () => {
+  /** showDirectoryPicker 가 주는 핸들 흉내 — 파일 핸들에는 getFile 이, 폴더에는 entries 가 있다 */
+  function fakeDir(files: Record<string, string>) {
+    const entries = Object.entries(files).map(([name, body]) => [
+      name,
+      {
+        name,
+        getFile: () => Promise.resolve(new File([body], name, { type: 'text/html' })),
+        createWritable: () =>
+          Promise.resolve({ write: () => Promise.resolve(), close: () => Promise.resolve() }),
+      },
+    ]);
+    return {
+      name: 'deck',
+      entries: () => ({
+        [Symbol.asyncIterator]: () => {
+          let at = 0;
+          return {
+            next: () =>
+              Promise.resolve(
+                at < entries.length
+                  ? { value: entries[at++], done: false }
+                  : { value: undefined, done: true }
+              ),
+          };
+        },
+      }),
+    };
+  }
+
+  function withPicker(dir: unknown) {
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      Promise.resolve(dir);
+  }
+
+  it('폴더 안의 문서를 열고, 되쓸 핸들을 함께 들고 온다', async () => {
+    // 열기로 연 것은 덮어쓴다 — 폴더에서도 같아야 한다.
+    withPicker(fakeDir({ 'index.html': '<p>본문</p>', 'style.css': 'p{color:red}' }));
+
+    await useEditor.getState().openFolder();
+
+    const { file, blocks, docPath } = useEditor.getState();
+    expect(file?.name).toBe('index.html');
+    expect(docPath).toBe('index.html');
+    expect(file?.handle).not.toBeNull();
+    expect(blocks.length).toBeGreaterThan(0);
+  });
+
+  it('편집 허용을 거절하면 아무 일도 일어나지 않는다', async () => {
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      Promise.reject(new DOMException('사용자가 취소', 'AbortError'));
+
+    await useEditor.getState().openFolder();
+
+    expect(useEditor.getState().file).toBeNull();
+    expect(useEditor.getState().notice).toBeNull();
+    expect(useEditor.getState().busy).toBe(false);
+  });
+
+  it('HTML 이 없는 폴더는 이유를 말한다', async () => {
+    withPicker(fakeDir({ 'style.css': 'p{color:red}' }));
+
+    await useEditor.getState().openFolder();
+
+    expect(useEditor.getState().notice).toEqual({ key: 'notice.bundleNoDocument' });
+  });
+});

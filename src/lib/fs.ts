@@ -62,6 +62,13 @@ export const FOLDER_LIMITS = { files: 500, bytes: 64 * 1024 * 1024, depth: 8 } a
 
 export interface FolderRead {
   files: Map<string, File>;
+  /**
+   * 되쓸 수 있는 파일의 핸들.
+   *
+   * 열기 대화상자로 고른 폴더에서만 채워진다. 드롭으로 받은 폴더는 옛 API 라
+   * 쓰기 권한을 주지 않아 비어 있고, 그때는 저장이 사본 내려받기로 간다.
+   */
+  handles: Map<string, FileHandle>;
   /** 한도에 걸려 다 읽지 못했다 */
   truncated: boolean;
 }
@@ -69,6 +76,14 @@ export interface FolderRead {
 /** 걸어가는 동안의 누계. 한도를 재귀 사이에서 이어 세려면 한 곳에 모아야 한다 */
 interface Walk extends FolderRead {
   bytes: number;
+}
+
+function emptyWalk(): Walk {
+  return { files: new Map(), handles: new Map(), truncated: false, bytes: 0 };
+}
+
+function done(read: Walk): FolderRead {
+  return { files: read.files, handles: read.handles, truncated: read.truncated };
 }
 
 export function canPickFolder(): boolean {
@@ -98,6 +113,7 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
     const file = await handle.getFile();
     into.bytes += file.size;
     into.files.set(path, file);
+    into.handles.set(path, handle);
   }
 }
 
@@ -108,16 +124,21 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
  * 자원을 붙이려면 사용자가 폴더를 직접 내줘야 한다.
  *
  * @param startIn 이 파일이 있던 자리에서 대화상자를 연다 — 대개 그 폴더가 정답이다
+ * @param mode `readwrite` 면 브라우저가 편집 허용까지 묻고, 그 대신 되쓸 수 있는 핸들이 온다.
+ *   자원만 붙이러 갈 때는 `read` 로 둔다 — 필요 없는 권한을 묻지 않는다
  */
-export async function pickFolder(startIn?: FileHandle | null): Promise<FolderRead | null> {
+export async function pickFolder(
+  startIn?: FileHandle | null,
+  mode: 'read' | 'readwrite' = 'read'
+): Promise<FolderRead | null> {
   const show = (window as unknown as PickerWindow).showDirectoryPicker;
   if (!show) return null;
 
   try {
-    const dir = await show(startIn ? { mode: 'read', startIn } : { mode: 'read' });
-    const read: Walk = { files: new Map(), truncated: false, bytes: 0 };
+    const dir = await show(startIn ? { mode, startIn } : { mode });
+    const read = emptyWalk();
     await walk(dir, '', read);
-    return { files: read.files, truncated: read.truncated };
+    return done(read);
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return null;
     throw e;
@@ -203,9 +224,9 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
   }
   if (roots.length === 0) return null;
 
-  const read: Walk = { files: new Map(), truncated: false, bytes: 0 };
+  const read = emptyWalk();
   for (const root of roots) await walkEntry(root, root.name, read);
-  return { files: read.files, truncated: read.truncated };
+  return done(read);
 }
 
 /** 옛 API 는 콜백뿐이다. 한 번에 다 주지 않으므로 빈 배열이 올 때까지 다시 읽는다 */
