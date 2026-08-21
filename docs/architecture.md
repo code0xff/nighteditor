@@ -28,6 +28,7 @@ src/
     edits.ts            offset 편집 목록을 내림차순으로 한 번에 적용
     assets.ts           외부 자원 참조 찾기 · 경로 해석 · 프리뷰 URL 치환
     zip.ts              zip 중앙 디렉터리 파싱 (해제는 lib/zip.ts)
+    bundle.ts           묶음(폴더·zip) 안에서 무엇을 열지 고르는 규칙
     patch.ts            패치 목록 → 원본 문자열 스플라이스
     verify.ts           소스-라이브 대조 검사
   preview/              ← iframe 내부에서 실행되는 에이전트 스크립트
@@ -39,12 +40,22 @@ src/
     zip.ts              zip 해제 (DecompressionStream)
     icons.ts            아이콘 단일 출처 — 의미 이름 → lucide 그림, 앱 아이콘 경로
     messages.ts         언어팩 — ko/en 사전, 키 타입, 보간. 화면 문구의 유일한 출처
-    preview.ts          프리뷰 문서 조립 (마커 + 에이전트 주입)
-  ui/                   ← React 컴포넌트
+    preview.ts          프리뷰 문서 조립 (마커 + 자원 치환 + 에이전트 주입)
+    shortcuts.ts        호스트 쪽 단축키 (프리뷰 안쪽은 에이전트가 가로챈다)
+    theme.ts            밝은/어두운 테마 (localStorage + <html class>)
+    unsaved.ts          beforeunload — 저장 전 편집을 두고 탭을 닫으려 할 때
+    utils.ts            cn() — 클래스 이름 합치기
+  ui/                   ← 화면 골격: App · Toolbar · PreviewFrame · ChangeList
+  components/           ← 화면 부품. `ui/*` 는 shadcn 생성물이라 원본 형태를 지킨다
   store/                ← Zustand
-    editor.ts           원본·블록·패치. 알림은 문장이 아니라 메시지 키로 보관한다
+    editor.ts           원본·블록·패치·묶음. 알림은 문장이 아니라 메시지 키로 보관한다
     locale.ts           UI 언어 (localStorage + <html lang>), useI18n
+    unsaved.ts          편집을 잃을 일을 하기 전에 묻는 자리 (저장 / 버림 / 취소)
 ```
+
+`lib/unsaved.ts` 와 `store/unsaved.ts` 는 이름이 같지만 하는 일이 다르다. 앞은 **브라우저가**
+되묻게 하는 것(`beforeunload`)이고, 뒤는 **우리가** 묻는 것이다. 브라우저 쪽은 문구도 버튼도
+우리가 정할 수 없어서, 앱 안에서 일어나는 일은 뒤쪽으로 묻는다.
 
 `core/`는 DOM도 React도 모른다. 문자열을 받아 문자열을 돌려준다.
 이 경계가 무너지면 패치 엔진을 테스트할 수 없게 된다.
@@ -67,6 +78,17 @@ src/
    └─ 패치 목록 [{ id, newInnerHtml }]
          │
          └─→ offset 역순 스플라이스 ──→ 저장본
+```
+
+외부 자원을 붙일 때도 원본은 그대로다 (ADR-009). 마커와 같은 목록에 실려 프리뷰에만 닿는다.
+
+```
+폴더 · zip ──→ 파일 묶음 ──→ blob URL 묶음
+                                │
+원본 HTML 문자열 ──→ 자원 참조 [{ path, valueStart, valueEnd }]
+                                │
+                    마커 편집 + 자원 편집 ──→ 내림차순 한 번에 적용 ──→ 프리뷰용 HTML
+                                                                        (저장 경로는 지나지 않는다)
 ```
 
 **원본 문자열은 세션 내내 수정되지 않는다.** 저장 시점에 원본 + 패치로 결과를 새로 만든다.
@@ -184,8 +206,15 @@ src/
 manifest 의 `file_handlers` 로 OS 에서 HTML 을 바로 열 수 있다. 이때 `launchQueue` 로
 `FileSystemFileHandle` 이 넘어오므로 대화상자 없이도 덮어쓰기가 된다.
 
+**폴더** 폴더를 열 때는 편집 권한(`readwrite`)까지 함께 받는다. 그래야 그 안의 문서에도
+되쓸 핸들이 생겨 "열기로 연 것은 덮어쓴다"가 폴더에서도 성립한다. 자원만 붙이러 가는
+길(폴더 연결)은 `read` 로 남긴다 — 필요 없는 권한을 묻지 않는다.
+드롭으로 받은 폴더는 옛 API 라 권한을 주지 않으므로 같은 폴더라도 사본으로 간다.
+
 **제약** 원본 덮어쓰기는 Chromium 계열에서만 된다. Firefox·Safari는 다운로드 폴백이라
 "열었던 파일에 그대로 저장"이 안 된다. **Chromium 우선**으로 간다.
+zip 은 어느 브라우저에서도 덮어쓸 수 없다 — 압축을 풀어 봐야 메모리 안의 바이트라
+되쓸 자리가 없다.
 
 **결과** 프리뷰 iframe에 `allow-scripts allow-same-origin`을 준다.
 샌드박스로서는 무력한 조합이지만, 대상이 사용자 자신의 로컬 파일이고 서버가 없으므로 감수한다.
