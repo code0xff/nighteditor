@@ -1107,3 +1107,95 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
     expect(bar.style.display).toBe('flex');
   });
 });
+
+describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec §4.1)', () => {
+  /** 텍스트 노드 하나에서 범위를 고른다 */
+  function selectIn(node: Node, from: number, to: number): void {
+    const range = document.createRange();
+    range.setStart(node, from);
+    range.setEnd(node, to);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }
+
+  const sizeButton = (label: string): Element => {
+    const button = [...document.querySelectorAll('[data-ne-bar] button')].find(
+      (b) => b.textContent === label
+    );
+    if (!button) throw new Error('크기 버튼이 없다');
+    return button;
+  };
+
+  it('명령이 만든 자리는 배수로 바뀌고, 원본의 같은 값 자리는 그대로다', () => {
+    // 브라우저처럼: fontSize 명령이 고른 범위를 xxx-large 스팬으로 감싼다.
+    document.execCommand = ((command: string) => {
+      if (command === 'fontSize') {
+        const range = getSelection()!.getRangeAt(0);
+        const span = document.createElement('span');
+        span.style.fontSize = 'xxx-large';
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        const after = document.createRange();
+        after.selectNodeContents(span);
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(after);
+      }
+      return true;
+    }) as typeof document.execCommand;
+    mount(
+      `<p ${MARKER_ATTR}="0">가나다라마바사<span id="orig" style="font-size: xxx-large">크게</span></p>`
+    );
+    click(el(0)!);
+    selectIn(el(0)!.firstChild!, 1, 4);
+
+    click(sizeButton('A+'));
+
+    const made = el(0)!.querySelector<HTMLElement>('span:not(#orig)');
+    expect(made?.textContent).toBe('나다라');
+    expect(made?.style.fontSize).toBe('1.35em');
+    // 고르지 않은, 원본이 같은 값을 쓰던 자리는 그대로다 (대원칙 2).
+    expect(el(0)!.querySelector<HTMLElement>('#orig')?.style.fontSize).toBe('xxx-large');
+  });
+
+  it('고른 범위 자체가 이미 그 값이면 — 명령이 아무것도 안 만들어도 — 배수가 적힌다', () => {
+    // 브라우저는 이미 그 크기인 범위에 fontSize 명령을 걸면 아무것도 바꾸지 않는다.
+    // 값("명령 전에 이미 그 값이던 자리")으로 가려내면 이때 A-/A+ 가 통째로 무시된다.
+    document.execCommand = (() => true) as typeof document.execCommand;
+    mount(
+      `<p ${MARKER_ATTR}="0"><span id="big" style="font-size: xxx-large">가나다</span>라마</p>`
+    );
+    click(el(0)!);
+    selectIn(document.getElementById('big')!.firstChild!, 0, 3);
+
+    click(sizeButton('A-'));
+
+    expect(document.getElementById('big')?.style.fontSize).toBe('0.85em');
+    expect(el(0)!.textContent).toBe('가나다라마');
+    // 고르지 않은 글자에는 아무것도 생기지 않는다.
+    expect(el(0)!.querySelectorAll('span').length).toBe(1);
+  });
+
+  it('이미 그 값인 자리의 일부만 골랐으면 갈라서 고른 부분만 바꾼다', () => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+    mount(
+      `<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large; color: rgb(1, 2, 3)">가나다라마</span></p>`
+    );
+    click(el(0)!);
+    selectIn(el(0)!.querySelector('span')!.firstChild!, 1, 4);
+
+    click(sizeButton('A-'));
+
+    const spans = [...el(0)!.querySelectorAll<HTMLElement>('span')];
+    expect(el(0)!.textContent).toBe('가나다라마');
+    expect(spans.map((s) => s.style.fontSize)).toEqual(['xxx-large', '0.85em', 'xxx-large']);
+    expect(spans[1]?.textContent).toBe('나다라');
+    // 겉모습(색)은 물려받는다 — 사용자는 크기만 청했다.
+    expect(spans.map((s) => s.style.color)).toEqual([
+      'rgb(1, 2, 3)',
+      'rgb(1, 2, 3)',
+      'rgb(1, 2, 3)',
+    ]);
+  });
+});

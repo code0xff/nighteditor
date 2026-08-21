@@ -191,29 +191,131 @@ export function previewAgent(): () => void {
     placeBar();
   };
 
+  /** `fontSize` 명령이 만드는 키워드 값인가 (execCommand 의 7 = xxx-large) */
+  const isBig = (node: HTMLElement): boolean =>
+    node.style.fontSize === 'xxx-large' || node.style.fontSize === '-webkit-xxx-large';
+
+  /**
+   * 요소의 (비어 있지 않은) 글자 전부가 범위 안에 드는가.
+   *
+   * 요소 경계가 아니라 **글자 자리**로 잰다 — 경계점으로 재면 (span,0) 과
+   * (첫 글자,0) 처럼 눈에는 같은 자리가 구조 순서 때문에 다르게 판정되어,
+   * 범위가 요소의 글자를 전부 덮고 있어도 "밖" 이 되어 버린다.
+   */
+  const coveredBy = (range: Range, node: HTMLElement): boolean => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let found = false;
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      if ((t.nodeValue ?? '').length === 0) continue;
+      found = true;
+      const tr = document.createRange();
+      tr.selectNodeContents(t);
+      if (
+        range.compareBoundaryPoints(Range.START_TO_START, tr) > 0 ||
+        range.compareBoundaryPoints(Range.END_TO_END, tr) < 0
+      ) {
+        return false;
+      }
+    }
+    return found;
+  };
+
+  /** 범위를 품은, 이미 그 값이 걸린 조상. 블록 자신과 마커 요소는 가르는 대상이 아니다 */
+  const bigHostOf = (range: Range, el: HTMLElement): HTMLElement | null => {
+    let node: Node | null = range.commonAncestorContainer;
+    while (node && node !== el) {
+      if (node instanceof HTMLElement && isBig(node) && !node.hasAttribute(MARKER)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  };
+
+  /**
+   * 이미 그 값이 걸린 자리(host)의 **일부**를 골랐을 때 — 명령은 이미 그 크기라
+   * 아무것도 만들지 않는다. 자리를 고른 범위에서 갈라 고른 부분만 새 배수로 적는다.
+   * 고르지 않은 부분은 원래 값 그대로의 껍데기에 남는다 (대원칙 2).
+   */
+  const splitResize = (host: HTMLElement, range: Range, times: string): void => {
+    // 고른 부분을 들어낸다. 들어내고 나면 range 는 그 틈에서 접혀 있다.
+    const picked = range.extractContents();
+    // 틈 뒤에 남은 부분도 들어낸다 — host 에는 고른 부분 앞만 남는다.
+    const tail = document.createRange();
+    tail.selectNodeContents(host);
+    tail.setStart(range.startContainer, range.startOffset);
+    const rest = tail.extractContents();
+
+    // 겉모습(색 등 다른 인라인 스타일)은 host 그대로 물려받는 껍데기에 담는다.
+    // id 는 물려받지 않는다 — 문서에 같은 id 가 둘이 된다.
+    const shell = (frag: DocumentFragment): HTMLElement => {
+      const s = host.cloneNode(false) as HTMLElement;
+      s.removeAttribute('id');
+      s.appendChild(frag);
+      return s;
+    };
+    const mid = shell(picked);
+    mid.style.fontSize = times;
+    host.parentNode?.insertBefore(mid, host.nextSibling);
+    // 글자도 요소도 없는 조각으로는 껍데기를 만들지 않는다 — 고치지 않은 구조에
+    // 빈 요소가 생겨 diff 가 사용자의 편집 범위를 넘는다 (대원칙 2).
+    if ((rest.textContent ?? '').length > 0 || rest.querySelector('*') !== null) {
+      mid.parentNode?.insertBefore(shell(rest), mid.nextSibling);
+    }
+    if ((host.textContent ?? '').length === 0 && host.querySelector('*') === null) host.remove();
+
+    // 고친 자리를 다시 골라 둔다 — 막대가 따라오고, 잇단 명령이 같은 글자에 걸린다.
+    const sel = getSelection();
+    const r = document.createRange();
+    r.selectNodeContents(mid);
+    sel?.removeAllRanges();
+    sel?.addRange(r);
+    placeBar();
+  };
+
   /**
    * 크기는 배수로 적는다.
    *
    * `fontSize` 가 만드는 것은 `x-large` 같은 절대 키워드다. 아티팩트마다 본문 크기가
-   * 달라 절대값을 박으면 그 문서의 크기 체계와 어긋난다. 방금 만든 자리만 찾아
+   * 달라 절대값을 박으면 그 문서의 크기 체계와 어긋난다. 명령이 지나간 뒤 그 값을
    * **원래 크기의 몇 배**로 고쳐 적는다.
+   *
+   * 고쳐 적을 자리는 값이 아니라 **고른 범위**로 가려낸다 (spec §4.1). 값으로 가려내면
+   * ("명령 전에 이미 그 값이던 자리는 원본의 것") 고른 범위 자체가 이미 그 값일 때 —
+   * 원본이 xxx-large 를 쓰던 자리 — 명령이 아무 노드도 새로 만들지 않아 A-/A+ 가
+   * 아무 일도 하지 않는다. 범위 안에 온전히 든 자리는 명령이 만들었든 원본에 있었든
+   * 사용자가 크기를 청한 글자고, 범위 밖은 원본의 것이라 건드리지 않는다.
    */
   const resize = (times: string): void => {
     if (editingId === null) return;
     const el = elementFor(editingId);
     if (!el) return;
-    // 명령을 걸기 **전에** 이미 그 값을 쓰던 자리를 기억해 둔다. 원래 문서에 같은 값이
-    // 있었다면, 그것까지 바꾸면 고르지도 않은 글자의 크기가 달라진다.
-    const isBig = (node: HTMLElement): boolean =>
-      node.style.fontSize === 'xxx-large' || node.style.fontSize === '-webkit-xxx-large';
-    const before = new Set(
-      [...el.querySelectorAll<HTMLElement>('[style*="font-size"]')].filter(isBig)
-    );
 
     format('fontSize', '7');
 
+    // 명령 뒤의 선택 범위 — 명령이 무엇을 어떻게 만들었든 이 안이 사용자가 청한 곳이다.
+    // format 과 같은 울타리를 다시 확인한다. format 이 (범위가 블록을 벗어나) 아무것도
+    // 하지 않고 물러났다면 여기서도 물러나야, 걸지 않은 명령의 뒷정리를 하지 않는다.
+    const sel = getSelection();
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    if (
+      !range ||
+      range.collapsed ||
+      !el.contains(range.startContainer) ||
+      !el.contains(range.endContainer)
+    ) {
+      return;
+    }
+
+    let touched = false;
     for (const node of el.querySelectorAll<HTMLElement>('[style*="font-size"]')) {
-      if (isBig(node) && !before.has(node)) node.style.fontSize = times;
+      if (isBig(node) && coveredBy(range, node)) {
+        node.style.fontSize = times;
+        touched = true;
+      }
+    }
+    // 범위가 그 값 자리의 일부에만 걸쳐 있으면 명령도 위 훑기도 지나친다. 갈라서 적는다.
+    if (!touched) {
+      const host = bigHostOf(range, el);
+      if (host) splitResize(host, range, times);
     }
     commitLater();
   };
