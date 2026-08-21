@@ -151,6 +151,18 @@ describe('documentBaseDir (spec §5.1)', () => {
     expect(documentBaseDir('<base href="../shared/">', 'deck')).toBe('shared');
   });
 
+  it('질의·조각만 있는 base 는 자리를 옮기지 않는다', () => {
+    // URL 해석에서 `?v=2` 는 문서 제 주소에 질의만 갈아 끼운 것이다 — 기준은
+    // 문서 자리 그대로여야지, 빈 경로를 접어 한 단계 올라가면 안 된다.
+    expect(documentBaseDir('<base href="?v=2">', 'deck/sub')).toBe('deck/sub');
+    expect(documentBaseDir('<base href="#top">', 'deck/sub')).toBe('deck/sub');
+  });
+
+  it('마지막 조각 속의 %2F 는 구분자가 아니라 이름의 일부다', () => {
+    // 푼 뒤에 파일 이름을 떼면 이름 속 슬래시에서 잘려, dir 이 아니라 dir/a 가 된다.
+    expect(documentBaseDir('<base href="dir/a%2Fb.css">', '')).toBe('dir');
+  });
+
   it('마지막 조각이 점 조각이면 자리 표시다 — 파일 이름으로 떼지 않는다 (spec §5.1)', () => {
     // 풀기 전에 마지막 조각을 떼면 deck/sub 의 `..` 가 deck 이 아니라
     // deck/sub 로 남아, 상대 자원을 전부 엉뚱한 자리에서 찾는다.

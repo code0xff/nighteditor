@@ -160,15 +160,22 @@ export function documentBaseDir(source: string, docDir: string): string | null {
   if (isExternal(trimmed)) return null;
 
   const { path } = splitSuffix(trimmed);
-  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나거나 마지막 조각이 `.`·`..` 이면
-  // 그 자체가 자리 표시고, 아니면 마지막 조각은 파일 이름이다 (URL 해석 규칙과 같다).
-  // 파일 이름도 **끝까지 푼 뒤에** 떼어낸다 (spec §5.1) — 풀기 전에 떼면
+  // 질의·조각만 있는 base(`?v=2`·`#top`)는 자리를 옮기지 않는다 — URL 해석에서
+  // 문서 제 주소에 질의만 갈아 끼운 것이라 기준 디렉터리는 문서 자리 그대로다.
+  if (!path) return docDir;
+  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나거나 마지막 조각이 `.`·`..`
+  // (인코딩 포함)이면 그 자체가 자리 표시라 통째로 접는다 — 풀기 전에 떼면
   // `..`·`foo/..` 의 마지막 조각이 접히는 대신 잘려 나가, deck/sub 의 `..` 가
-  // deck 이 아니라 deck/sub 로 남는다.
-  const last = decodeSegment(path.split('/').pop() ?? '');
-  const marksDir = path.endsWith('/') || last === '.' || last === '..';
-  const resolved = collapse(docDir, path);
-  return marksDir ? resolved : dirOf(resolved);
+  // deck 이 아니라 deck/sub 로 남는다 (spec §5.1).
+  const segments = path.split('/');
+  const last = decodeSegment(segments[segments.length - 1] ?? '');
+  if (path.endsWith('/') || last === '.' || last === '..') return collapse(docDir, path);
+  // 마지막 조각은 파일 이름이다 — **인코딩된 조각째로** 떼어낸다. 조각 안의 %2F 는
+  // 구분자가 아니라 이름의 일부라, 푼 뒤에 떼면 이름 속 슬래시에서 잘린다.
+  const dir = segments.slice(0, -1).join('/');
+  if (dir) return collapse(docDir, `${dir}/`);
+  // 조각 하나짜리 base — 이름만 갈렸다. 절대면 뿌리, 아니면 문서 자리다.
+  return path.startsWith('/') ? '' : docDir;
 }
 
 /**
