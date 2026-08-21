@@ -84,28 +84,47 @@ export async function buildAssets(
   // 불리는 쪽부터 만든다. 순환이면 더 기다려도 URL 은 생기지 않으므로 고리를 그대로
   // 만들어야 하는데, 그때 **남은 것 전부**를 만들면 안 된다 — 고리를 밖에서 부르는
   // 시트(문서의 진입 시트 등)까지 고리 멤버의 URL 이 생기기 전에 만들어져, 그 @import
-  // 가 상대 경로로 남아 blob 문서에서 영영 풀리지 않는다. 고리에 든 시트만 만들고,
-  // 부르는 쪽은 다음 바퀴에서 방금 생긴 URL 을 달고 만든다 (spec §5.1).
+  // 가 상대 경로로 남아 blob 문서에서 영영 풀리지 않는다. 고리도 여럿일 수 있다 —
+  // 서로 얽힌 시트들(강결합 덩어리)이 한 단위고, 다른 고리에 기대는 고리를 한꺼번에
+  // 만들면 그 @import 도 같은 이유로 상대 경로로 남는다. 그래서 남은 시트에 더는
+  // 기대지 않는 **덩어리 하나**만 만들고, 기대던 쪽(고리든 낱장이든)은 다음 바퀴에서
+  // 방금 생긴 URL 을 달고 만든다 (spec §5.1).
   const left = new Map(sheets);
-  /** 남은 시트의 @import 만 따라가 자기 자신으로 돌아오는가 — 고리의 멤버인가 */
-  const inCycle = (start: string): boolean => {
+  /** start 에서 남은 시트의 @import 만 따라가 닿는 시트들 (자기 자신 포함 가능) */
+  const reach = (start: string): Set<string> => {
     const seen = new Set<string>();
     const queue = [...(left.get(start)?.wants ?? [])];
     for (let at = 0; at < queue.length; at++) {
       const path = queue[at] as string;
-      if (path === start) return true;
       if (seen.has(path) || !left.has(path)) continue;
       seen.add(path);
       queue.push(...(left.get(path)?.wants ?? []));
     }
-    return false;
+    return seen;
+  };
+  /**
+   * 남은 시트끼리 서로 닿는 덩어리(강결합 덩어리) 중, 남은 다른 시트에 더는 기대지
+   * 않는 것 하나. ready 가 비었을 때만 부른다 — 그때 남은 모두가 남은 시트를
+   * 기다리는 중이라 고리가 반드시 있고, 덩어리 사이의 의존에는 고리가 없으므로
+   * (있다면 이미 한 덩어리다) 밖에 기댈 곳 없는 덩어리도 반드시 있다.
+   */
+  const sinkCycle = (): [string, { text: string; wants: string[] }][] => {
+    for (const start of left.keys()) {
+      const forward = reach(start);
+      if (!forward.has(start)) continue; // 고리의 멤버가 아니다
+      const scc = new Set([start, ...[...forward].filter((p) => reach(p).has(start))]);
+      const leans = [...scc].some((member) =>
+        (left.get(member)?.wants ?? []).some((want) => left.has(want) && !scc.has(want))
+      );
+      if (!leans) return [...left].filter(([path]) => scc.has(path));
+    }
+    // 여기 올 수 없다 — 그래도 온다면 남은 전부를 만들어 순회만은 끝낸다 (탭을 굳히지 않는다).
+    return [...left];
   };
   while (left.size > 0) {
     const ready = [...left].filter(([, sheet]) => !sheet.wants.some((p) => left.has(p)));
-    // ready 가 비었으면 남은 모두가 고리를 기다리는 중이고, 그 안에 고리가 반드시 있다
-    // (남은 시트마다 남은 시트를 부르니, 따라가다 보면 어딘가로 되돌아온다) — 매 바퀴
-    // 최소 한 장은 만들어져 루프는 끝난다.
-    const batch = ready.length > 0 ? ready : [...left].filter(([path]) => inCycle(path));
+    // 매 바퀴 최소 한 장(ready 한 장 또는 덩어리 하나)은 만들어져 루프는 끝난다.
+    const batch = ready.length > 0 ? ready : sinkCycle();
     for (const [path, sheet] of batch) {
       const css = rewriteCssUrls(sheet.text, dirOf(path), (p) => urls.get(p));
       add(path, new Blob([css], { type: 'text/css' }));

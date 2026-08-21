@@ -114,6 +114,28 @@ describe('buildAssets · 스타일시트가 스타일시트를 부른다', () =>
     expect(await entry?.text()).toBe(`@import url('${bundle.urls.get('a.css')}');`);
   });
 
+  it('고리가 여럿이면 한 덩어리씩 만든다 — 다른 고리를 부르는 @import 도 URL 을 단다', async () => {
+    // a⇄b 와 c⇄d 는 서로 다른 고리인데 a 가 c 를 부른다. 고리에 든 시트를 전부
+    // 한꺼번에 만들면 a 가 c 의 URL 이 생기기 전에 만들어져, 그 @import 가 상대
+    // 경로로 남았다 — 기대지 않는 덩어리(c⇄d)부터 만들어야 한다 (spec §5.1).
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['a.css', css("@import url('b.css');@import url('c.css');")],
+      ['b.css', css("@import url('a.css');")],
+      ['c.css', css("@import url('d.css');")],
+      ['d.css', css("@import url('c.css');")],
+    ]);
+
+    const bundle = await buildAssets(files);
+    const a = blobs.get(bundle.urls.get('a.css') ?? '');
+
+    // 같은 고리 안의 b 는 어차피 이을 수 없어 상대 경로로 남지만,
+    // 다른 고리의 c 는 그 고리가 먼저 만들어졌으므로 URL 이 달린다.
+    expect(await a?.text()).toBe(
+      `@import url('b.css');@import url('${bundle.urls.get('c.css')}');`
+    );
+  });
+
   it('고리에서 두 다리 건넌 시트도 차례대로 URL 을 단다', async () => {
     // entry → mid → (a ⇄ b). 고리만 먼저 만들면 mid 가 다음 바퀴에서 a 의 URL 을
     // 달고, entry 는 그다음 바퀴에서 mid 의 URL 을 단다.
