@@ -210,7 +210,7 @@ const en: Record<MessageKey, string> = {
   'patch.stale': "That block doesn't match the original (id={id})",
   'patch.duplicate': 'Two changes for the same block (id={id})',
 
-  'zip.notZip': "Not a zip, or its end is cut off",
+  'zip.notZip': 'Not a zip, or its end is cut off',
   'zip.zip64': "Can't read the zip64 format",
   'zip.badCentral': 'The zip index is broken',
   'zip.encrypted': 'An entry is password-protected ({name})',
