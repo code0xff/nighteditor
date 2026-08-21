@@ -71,6 +71,19 @@ describe('parseBlocks · 잠금과 특례', () => {
     expect(cnt[0]?.sourceText).toBe('');
   });
 
+  it('빈 <title> 은 잠그지 않는다 — 제목을 새로 지을 수 있어야 한다 (spec §2.1)', () => {
+    // 빈 잎 요소 잠금은 "화면의 글자를 소스로 되짚을 수 없다" 는 프리뷰 클릭 편집의
+    // 사정이다. 제목 칸은 소스에서 값을 얻으므로 그 사정이 없고, 여기서 잠그면
+    // 제목이 빈 문서는 제목을 지을 길이 없다. 스크립트가 채운 제목은 대조가 잠근다.
+    const list = parseBlocks(
+      '<!doctype html><html><head><title></title></head><body><p>본문</p></body></html>'
+    );
+    const title = list.find((b) => b.tag === 'title');
+
+    expect(title?.rcdata).toBe(true);
+    expect(title?.locked).toBeNull();
+  });
+
   it('.pg 는 부모가 직접 텍스트를 가져 블록이 되지 않는다', () => {
     // 인라인은 부모 문장의 일부라 내려가지 않는다 (spec §2). 여기서 마커를 붙이면
     // 부모 블록의 innerHTML 에 섞여 저장본까지 따라간다.

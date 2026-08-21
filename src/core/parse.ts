@@ -105,6 +105,11 @@ export function parseBlocks(source: string): Block[] {
         const sourceInner = source.slice(innerStart, innerEnd);
         // 주석만 든 요소는 비어 있지 않다 — 지우면 사용자가 쓴 것이 사라진다.
         if (sourceInner.trim().length === 0) {
+          // <title> 같은 RCDATA 는 예외다 (spec §2.1) — 프리뷰에 렌더되지 않아 별도
+          // 입력 칸으로 편집하고, 그 값은 라이브 DOM 이 아니라 소스에서 온다. 여기서
+          // 잠그면 제목이 빈 문서는 제목을 새로 지을 길이 없다. 스크립트가 채운
+          // 제목은 렌더 후 대조(ADR-005)가 따로 잠근다.
+          const emptyLock = RCDATA_TAGS.has(node.tagName) ? null : 'EMPTY_IN_SOURCE';
           blocks.push({
             id: nextId++,
             tag: node.tagName,
@@ -113,7 +118,7 @@ export function parseBlocks(source: string): Block[] {
             sourceInner,
             sourceText: '',
             rcdata: RCDATA_TAGS.has(node.tagName),
-            locked: lock ?? 'EMPTY_IN_SOURCE',
+            locked: lock ?? emptyLock,
           });
           return;
         }
