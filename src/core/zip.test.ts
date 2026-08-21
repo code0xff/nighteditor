@@ -128,6 +128,16 @@ describe('readZip · 픽스처 회귀', () => {
 
     expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badLocal' }));
   });
+
+  it('파일 수 한도를 목차를 읽는 동안 센다', () => {
+    // 다 만들고 나서 세면 거절할 zip 의 항목을 전부(최대 65,534개) 만든 뒤에야
+    // 거절하게 된다 — 한도는 담는 수가 아니라 읽는 일 자체를 묶는다 (spec §5.1).
+    expect(() => readZip(fixtureBundle(), 2)).toThrow(
+      expect.objectContaining({ code: 'tooManyFiles', params: { limit: 2 } })
+    );
+    // 한도 안이면 그대로 다 읽힌다.
+    expect(readZip(fixtureBundle(), 5)).toHaveLength(5);
+  });
 });
 
 describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () => {

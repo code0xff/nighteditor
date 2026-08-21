@@ -89,8 +89,12 @@ function findEocd(bytes: Uint8Array): number {
  * 파일 목록을 읽는다. 디렉터리 항목과 맥OS 가 끼워 넣는 `__MACOSX` 는 걸러낸다.
  *
  * 못 읽는 zip 은 조용히 빈 목록을 주지 않고 이유를 들고 던진다 (대원칙 3).
+ *
+ * @param maxFiles 담을 파일 수의 한도. 목차를 읽는 **동안** 세서, 넘는 zip 은
+ *   항목을 끝까지 만들지 않고 거절한다 — 다 만들고 나서 세면 한도가 있으나 마나다
+ *   (spec §5.1). 같은 이름이 겹쳐도 항목마다 센다.
  */
-export function readZip(bytes: Uint8Array): ZipEntry[] {
+export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY): ZipEntry[] {
   const dv = view(bytes);
   const eocd = findEocd(bytes);
 
@@ -121,6 +125,14 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
     // 암호화된 항목은 풀 수 없다. 반쯤 읽어 깨진 파일을 붙이느니 말하고 멈춘다.
     if (flags & 0x1) throw new ZipError('encrypted', { name }, `encrypted entry: ${name}`);
     if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+
+    if (entries.length >= maxFiles) {
+      throw new ZipError(
+        'tooManyFiles',
+        { limit: maxFiles },
+        `too many files (limit ${maxFiles})`
+      );
+    }
 
     // 조작된 목차는 localAt 을 버퍼 밖에 둘 수 있다. 경계를 먼저 보지 않으면
     // DataView 가 던진 RangeError 원문이 그대로 나가, 언어팩의 zip 진단 대신

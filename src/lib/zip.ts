@@ -63,14 +63,10 @@ export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
   const files = new Map<string, Blob>();
   let bytes = 0;
 
-  for (const entry of readZip(new Uint8Array(await zip.arrayBuffer()))) {
-    if (files.size >= FOLDER_LIMITS.files) {
-      throw new ZipError(
-        'tooManyFiles',
-        { limit: FOLDER_LIMITS.files },
-        `too many files (limit ${FOLDER_LIMITS.files})`
-      );
-    }
+  // 파일 수 한도는 readZip 이 목차를 읽는 동안 센다. 여기서 결과를 놓고 세면
+  // 거절할 zip 의 항목을 전부 만든 뒤에야 거절하게 되고, 같은 이름이 겹친 항목은
+  // files.size 에 눌려 한도를 비껴간다 (spec §5.1).
+  for (const entry of readZip(new Uint8Array(await zip.arrayBuffer()), FOLDER_LIMITS.files)) {
     if (bytes + entry.size > FOLDER_LIMITS.bytes) {
       throw new ZipError('tooBig', {}, 'inflates past the budget');
     }
