@@ -2,6 +2,7 @@ import { Brand } from '@/components/Brand';
 import { DocSelect } from '@/components/DocSelect';
 import { LangSelect } from '@/components/LangSelect';
 import { OpenButton } from '@/components/OpenButton';
+import { RepoLink } from '@/components/RepoLink';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -82,6 +83,7 @@ export function Toolbar() {
           </Button>
         )}
         <LangSelect />
+        <RepoLink />
         <ThemeToggle />
       </div>
     </header>
