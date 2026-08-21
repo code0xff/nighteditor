@@ -7,13 +7,24 @@ import { DARK_ATTR, LOCKED_ATTR, MARKER_ATTR } from '../core/markers.js';
 let sent: Record<string, unknown>[] = [];
 let dispose: (() => void) | null = null;
 
-function mount(html: string): void {
+/** 에이전트는 호스트가 보낸 메시지만 받는다 */
+const fromHost = (data: unknown) =>
+  window.dispatchEvent(new MessageEvent('message', { data, source: window.parent }));
+
+/**
+ * @param verified 대조가 끝난 상태로 세울지. 기본이 true 다 — 편집은 잠금 목록이
+ *   온 뒤에만 열리므로(spec §4), 대부분의 테스트는 그 뒤의 세계를 다룬다.
+ */
+function mount(html: string, { verified = true } = {}): void {
   document.body.innerHTML = html;
   sent = [];
   vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
     sent.push(msg as Record<string, unknown>);
   }) as typeof window.parent.postMessage);
   dispose = previewAgent();
+  // 잠금 목록이 대조 종료의 신호다. 빈 목록이라도 보내야 편집이 열린다.
+  if (verified) fromHost({ type: 'locked', ids: [] });
+  sent = [];
 }
 
 const el = (id: number) => document.querySelector<HTMLElement>(`[${MARKER_ATTR}="${id}"]`);
@@ -37,10 +48,6 @@ const beforeinput = (inputType: string): InputEvent => {
   (document.activeElement ?? document.body).dispatchEvent(e);
   return e;
 };
-
-/** 에이전트는 호스트가 보낸 메시지만 받는다 */
-const fromHost = (data: unknown) =>
-  window.dispatchEvent(new MessageEvent('message', { data, source: window.parent }));
 
 beforeEach(() => {
   document.body.innerHTML = '';
@@ -75,6 +82,8 @@ describe('previewAgent · 자기완결 제약 (ADR-007)', () => {
 
     const revived = new Function(`return (${previewAgent.toString()})`)() as typeof previewAgent;
     dispose = revived();
+    // 편집은 대조가 끝나야 열린다 (spec §4) — 되살린 함수도 같은 계약을 따라야 한다.
+    fromHost({ type: 'locked', ids: [] });
 
     click(el(0)!);
     expect(sent).toContainEqual({ type: 'select', id: 0 });
@@ -150,6 +159,31 @@ describe('previewAgent · 이벤트 가로채기', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
 
     expect(artifact).toHaveBeenCalled();
+  });
+});
+
+describe('previewAgent · 대조 전에는 편집을 열지 않는다 (spec §4)', () => {
+  it('잠금 목록이 오기 전의 클릭은 notReady 만 보낸다', () => {
+    // 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져
+    // 화면과 저장본이 갈라진다 — 열지 않고 사정만 알린다 (대원칙 3).
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`, { verified: false });
+
+    click(el(0)!);
+
+    expect(sent).toContainEqual({ type: 'notReady' });
+    expect(sent.find((m) => m.type === 'select')).toBeUndefined();
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
+  });
+
+  it('잠금 목록이 오면 그때부터 편집이 열린다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`, { verified: false });
+    click(el(0)!);
+    expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
+
+    fromHost({ type: 'locked', ids: [] });
+    click(el(0)!);
+
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 });
 
@@ -970,6 +1004,8 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
       sent.push(msg as Record<string, unknown>);
     }) as typeof window.parent.postMessage);
     dispose = previewAgent();
+    // 편집은 대조가 끝나야 열린다 (spec §4) — 잠금 목록이 그 신호다.
+    fromHost({ type: 'locked', ids: [] });
   }
 
   function selectBodyText(): void {

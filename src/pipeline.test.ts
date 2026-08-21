@@ -36,6 +36,11 @@ function mountPreview(html: string): FromPreview[] {
     sent.push(msg as FromPreview);
   }) as typeof window.parent.postMessage);
   dispose = previewAgent();
+  // 편집은 대조가 끝나 잠금 목록이 온 뒤에만 열린다 (spec §4). 호스트가 보내는
+  // 그 신호까지가 "실제 호스트가 하는 일"이다 — 빈 목록이라도 보내야 한다.
+  window.dispatchEvent(
+    new MessageEvent('message', { data: { type: 'locked', ids: [] }, source: window.parent })
+  );
   return sent;
 }
 

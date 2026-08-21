@@ -123,6 +123,8 @@ export interface EditorState {
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
+  /** 대조가 끝나기 전에 블록을 눌렀다 — 편집은 열리지 않았고, 사정을 말한다 (spec §4) */
+  onNotReady: () => void;
   select: (id: number | null) => void;
   revert: (id: number) => void;
   revertAll: () => void;
@@ -624,16 +626,33 @@ export const useEditor = create<EditorState>((set, get) => ({
   onReady: (live) => {
     const liveText = new Map(live.map((b) => [b.id, b.text]));
     const blocks = applyLiveLocks(get().blocks, liveText);
-    // 대조 전에 편집된 블록이 뒤늦게 잠길 수 있다. 그대로 두면 저장 때
-    // applyPatches 가 목록 전체를 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
+    // 뒤늦게 잠긴 블록의 패치를 그대로 두면 저장 때 applyPatches 가 목록 전체를
+    // 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
     const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));
+    const dropped = [...get().patches.keys()].filter((id) => lockedIds.has(id));
     const patches = new Map([...get().patches].filter(([id]) => !lockedIds.has(id)));
     const editOrder = get().editOrder.filter((id) => patches.has(id));
+    // 정상 경로에서는 지울 패치가 없다 — 대조 전에는 편집이 열리지 않는다 (spec §4).
+    // 그래도 지워야 한다면 조용히 지우지 않는다: 프리뷰도 소스 내용으로 되돌려
+    // 화면과 저장본을 다시 맞추고, 되돌렸다는 사실을 알린다 (대원칙 3).
+    const revertQueue = [
+      ...get().revertQueue,
+      ...dropped.map((id) => ({
+        id,
+        html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
+      })),
+    ];
+    if (dropped.length > 0) {
+      useToasts
+        .getState()
+        .show({ key: 'app.editsReverted', params: { count: dropped.length } }, 'locked');
+    }
     // 패치가 빠졌으면 결과물도 달라졌을 수 있다 — 기준은 언제나 하나다 (spec §5).
     set({
       blocks,
       patches,
       editOrder,
+      revertQueue,
       scanned: true,
       unsaved: differsFromDisk({ ...get(), blocks, patches }),
     });
@@ -676,6 +695,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ blockedId: id, selectedId: null });
   },
   select: (id) => set({ selectedId: id, blockedId: null }),
+
+  // 대조가 끝나기 전의 클릭 — 프리뷰는 편집을 열지 않았다. 왜 안 열리는지 말한다 (대원칙 3).
+  onNotReady: () => {
+    useToasts.getState().show({ key: 'app.editBeforeScan' }, 'locked');
+  },
 
   // 패치만 지우면 프리뷰에는 고친 내용이 그대로 남는다. 그 블록을 다시 눌렀다
   // 빠져나오면 패치가 되살아나 프리뷰와 저장본이 영영 어긋난다.

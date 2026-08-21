@@ -13,6 +13,8 @@ export type FromPreview =
   /** pristine 이면 편집 결과가 원래 내용과 같다 — 호스트는 패치를 지운다 */
   | { type: 'edit'; id: number; html: string; pristine: boolean }
   | { type: 'blocked'; id: number }
+  /** 대조가 끝나기 전에 블록을 눌렀다 — 편집은 열지 않았고, 호스트가 사정을 말한다 (spec §4) */
+  | { type: 'notReady' }
   /** 프리뷰 안에서 Ctrl+S 를 눌렀다. iframe 의 키 이벤트는 호스트 창에 닿지 않는다 */
   | { type: 'save' }
   /** Ctrl+Shift+S — 원본은 그대로 두고 결과물만 내려받는다 */

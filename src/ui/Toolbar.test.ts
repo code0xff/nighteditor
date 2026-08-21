@@ -18,6 +18,8 @@ beforeEach(() => {
     patches: new Map(),
     saving: false,
     unsaved: false,
+    // 제목 칸은 대조가 끝나야 열린다 (spec §4) — 여기 테스트들은 그 뒤의 세계를 다룬다.
+    scanned: true,
   });
   useReplacement.setState({ replacing: false });
   host = document.createElement('div');
@@ -93,5 +95,13 @@ describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §
     });
 
     expect(titleInput()?.disabled).toBe(false);
+  });
+
+  it('대조가 끝나기 전에도 잠긴다 — 스크립트가 제목을 바꾸면 그 패치가 지워진다 (spec §4)', () => {
+    act(() => {
+      useEditor.setState({ blocks: [title], scanned: false });
+    });
+
+    expect(titleInput()?.disabled).toBe(true);
   });
 });

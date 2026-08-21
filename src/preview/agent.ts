@@ -48,6 +48,12 @@ export function previewAgent(): () => void {
   /** 조합 중이라 미뤄둔 확정이 있는지 */
   let pendingCommit = false;
   const locked = new Set<number>();
+  /**
+   * 대조(ADR-005)가 끝나 잠금 목록을 받았는가. 그 전에는 편집을 열지 않는다 —
+   * 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져 화면과 저장본이
+   * 갈라지고, 어느 블록이 잠길지도 아직 몰라 잠긴 블록의 편집까지 열린다 (spec §4).
+   */
+  let verified = false;
 
   const elementFor = (id: number): HTMLElement | null =>
     document.querySelector<HTMLElement>('[' + MARKER + '="' + id + '"]');
@@ -123,6 +129,11 @@ export function previewAgent(): () => void {
 
   const startEdit = (el: HTMLElement): void => {
     const id = idOf(el);
+    // 대조가 끝나기 전의 클릭은 편집을 열지 않고 사정만 알린다 (spec §4 · 대원칙 3).
+    if (!verified) {
+      post({ type: 'notReady' });
+      return;
+    }
     if (locked.has(id)) {
       post({ type: 'blocked', id });
       return;
@@ -489,6 +500,8 @@ export function previewAgent(): () => void {
     } | null;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'locked' && msg.ids) {
+      // 잠금 목록은 대조가 끝난 뒤에만 온다 — 이 신호부터 편집을 받는다 (spec §4).
+      verified = true;
       locked.clear();
       for (const id of msg.ids) locked.add(id);
       // 잠금 표식을 DOM 에도 붙인다. 주입된 스타일이 이걸 보고 커서와 테두리를 바꾼다.

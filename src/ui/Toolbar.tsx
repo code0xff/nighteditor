@@ -18,6 +18,7 @@ export function Toolbar() {
   const file = useEditor((s) => s.file);
   const blocks = useEditor((s) => s.blocks);
   const patches = useEditor((s) => s.patches);
+  const scanned = useEditor((s) => s.scanned);
   const unsaved = useEditor((s) => s.unsaved);
   const busy = useEditorBusy();
   // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
@@ -53,11 +54,15 @@ export function Toolbar() {
                 // 갈아 끼우는 동안(replacing)의 편집은 새 문서가 서면 사라질 자리다.
                 // 받는 척하고 버리는 대신 칸을 잠근다 (spec §4). saving 으로 잠그면 안 된다 —
                 // 저장하는 사이의 편집은 살아남으므로 그때는 계속 받는다.
-                disabled={replacing || title.locked !== null}
+                // 대조가 끝나기 전(!scanned)에도 잠근다 — 스크립트가 제목을 바꾸면 대조가
+                // 이 블록을 잠그며 그 패치를 지워, 화면과 저장본이 갈라진다 (spec §4).
+                disabled={replacing || !scanned || title.locked !== null}
                 title={
                   title.locked
                     ? t('toolbar.notEditable', { reason: lockNotice(title.locked) })
-                    : undefined
+                    : scanned
+                      ? undefined
+                      : t('app.editBeforeScan')
                 }
                 onChange={(e) => onEdit(title.id, e.target.value)}
               />

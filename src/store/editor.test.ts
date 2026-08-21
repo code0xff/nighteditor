@@ -1491,3 +1491,52 @@ describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (s
     expect(unsavedCount(useEditor.getState())).toBe(1);
   });
 });
+
+describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는다 (spec §4)', () => {
+  it('뒤늦게 잠긴 블록의 패치는 프리뷰 되돌리기와 알림을 남긴다', async () => {
+    // 정상 경로에서는 대조 전에 편집이 열리지 않는다. 그래도 패치가 있었다면
+    // 지우기만 하면 화면에는 고친 것이 남아, 화면과 저장본이 갈라진다 (대원칙 3).
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    if (!target) throw new Error('편집 가능한 블록이 필요하다');
+    useEditor.getState().onEdit(target.id, '대조 전의 편집');
+
+    // 스크립트가 그 블록의 글자를 바꿔치기한 라이브 텍스트를 흉내 낸다.
+    const live = useEditor.getState().blocks.map((b) => ({
+      id: b.id,
+      text: b.id === target.id ? '스크립트가 바꾼 글자' : b.sourceText,
+    }));
+    useEditor.getState().onReady(live);
+
+    const s = useEditor.getState();
+    expect(s.scanned).toBe(true);
+    expect(s.patches.has(target.id)).toBe(false);
+    // 프리뷰도 소스 내용으로 함께 되돌아간다.
+    expect(s.revertQueue).toContainEqual({ id: target.id, html: target.sourceInner });
+    // 그리고 되돌렸다는 사실을 말한다.
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editsReverted')).toBe(
+      true
+    );
+    // 지운 패치는 저장할 것도 아니다 — 화면·저장본·파일이 전부 같은 상태다.
+    expect(s.unsaved).toBe(false);
+  });
+
+  it('지울 패치가 없으면 알림도 되돌리기도 없다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+
+    useEditor
+      .getState()
+      .onReady(useEditor.getState().blocks.map((b) => ({ id: b.id, text: b.sourceText })));
+
+    expect(useEditor.getState().revertQueue).toHaveLength(0);
+    expect(useToasts.getState().toasts).toHaveLength(0);
+  });
+
+  it('대조 전의 클릭은 편집이 열리지 않았다고 말한다', () => {
+    useEditor.getState().onNotReady();
+
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editBeforeScan')).toBe(
+      true
+    );
+  });
+});

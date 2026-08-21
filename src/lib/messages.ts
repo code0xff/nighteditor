@@ -31,6 +31,8 @@ const ko = {
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
   'app.editWhileReplacing': '다른 문서를 여는 중이라 이 편집은 반영되지 않았어요',
   'app.saveWhileReplacing': '다른 문서를 여는 중이라 지금은 저장할 수 없어요',
+  'app.editBeforeScan': '아직 문서를 살펴보는 중이에요. 잠시 뒤에 다시 눌러 주세요',
+  'app.editsReverted': '살펴보니 고칠 수 없는 곳이라, 고친 {count}곳을 원래대로 되돌렸어요',
 
   'toolbar.openFile': '파일 열기',
   'toolbar.openFileHint': 'HTML 파일 하나, 또는 zip 을 엽니다',
@@ -136,6 +138,9 @@ const en: Record<MessageKey, string> = {
   'app.blocked': "You can't edit this one · {reason}",
   'app.editWhileReplacing': "Another document is being opened, so this edit wasn't applied",
   'app.saveWhileReplacing': "Another document is being opened, so saving isn't possible right now",
+  'app.editBeforeScan': 'Still checking the document. Try again in a moment',
+  'app.editsReverted':
+    "Checking found {count} edited spot(s) that can't be edited, so they were put back",
 
   'toolbar.openFile': 'Open a file',
   'toolbar.openFileHint': 'Opens one HTML file, or a zip',
