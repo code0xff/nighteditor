@@ -81,18 +81,16 @@ export function splitSuffix(url: string): { path: string; suffix: string } {
   return at < 0 ? { path: url, suffix: '' } : { path: url.slice(0, at), suffix: url.slice(at) };
 }
 
-export function resolvePath(baseDir: string, url: string): string | null {
-  const trimmed = url.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  // `scheme:` 과 프로토콜 상대 URL. 윈도 경로(`C:\`)도 여기서 걸린다.
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return null;
+/** 바깥으로 나가는 참조인가 — `scheme:` 과 프로토콜 상대 URL. 윈도 경로(`C:\`)도 걸린다 */
+function isExternal(url: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//');
+}
 
-  const { path: clean } = splitSuffix(trimmed);
-  if (!clean) return null;
-
+/** `.`·`..` 을 접고 퍼센트 인코딩을 푼 정규 경로. 뿌리는 빈 문자열이다 */
+function collapse(baseDir: string, path: string): string {
   // 절대 경로는 문서가 아니라 묶음의 뿌리를 기준으로 본다 — 폴더/zip 의 최상단이다.
-  const fromRoot = clean.startsWith('/');
-  const joined = fromRoot ? clean.slice(1) : `${baseDir ? `${baseDir}/` : ''}${clean}`;
+  const fromRoot = path.startsWith('/');
+  const joined = fromRoot ? path.slice(1) : `${baseDir ? `${baseDir}/` : ''}${path}`;
 
   const out: string[] = [];
   for (const segment of joined.split('/')) {
@@ -103,15 +101,61 @@ export function resolvePath(baseDir: string, url: string): string | null {
     }
     out.push(segment);
   }
-  if (out.length === 0) return null;
 
-  const path = out.join('/');
+  const collapsed = out.join('/');
   // 파일 이름에 공백이 있으면 문서에는 %20 으로 적힌다. 묶음의 키는 실제 이름이다.
   try {
-    return decodeURIComponent(path);
+    return decodeURIComponent(collapsed);
   } catch {
-    return path;
+    return collapsed;
   }
+}
+
+export function resolvePath(baseDir: string, url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith('#')) return null;
+  if (isExternal(trimmed)) return null;
+
+  const { path: clean } = splitSuffix(trimmed);
+  if (!clean) return null;
+
+  const path = collapse(baseDir, clean);
+  return path === '' ? null : path;
+}
+
+/**
+ * `<base href>` 가 정한 실효 기준 디렉터리 (spec §5.1).
+ *
+ * 문서가 기준을 옮겨 두면 브라우저는 상대 참조를 거기서 푼다. 문서 자리만 보고
+ * 찾으면 실제로 옆에 있는 파일을 없다고 세고, 프리뷰도 붙일 것을 안 붙인다.
+ * href 가 있는 **첫** `<base>` 하나만 유효하다 — HTML 사양과 같다.
+ *
+ * @returns 묶음 안 기준 디렉터리 (뿌리는 빈 문자열). base 가 바깥(절대 URL)을
+ *   가리키면 null — 그 문서의 상대 참조는 로컬 파일이 아니다.
+ */
+export function documentBaseDir(source: string, docDir: string): string | null {
+  const doc = parse(source);
+  let href: string | undefined;
+
+  const visit = (node: Node): void => {
+    if (href !== undefined) return;
+    if (isElement(node) && node.tagName === 'base') {
+      href = node.attrs.find((a) => !a.prefix && a.name === 'href')?.value;
+      if (href !== undefined) return;
+    }
+    for (const child of childrenOf(node)) visit(child);
+  };
+  visit(doc);
+
+  const trimmed = href?.trim();
+  if (!trimmed) return docDir;
+  if (isExternal(trimmed)) return null;
+
+  const { path } = splitSuffix(trimmed);
+  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나면 그 자체가 자리고,
+  // 아니면 마지막 조각은 파일 이름이라 떼어낸다 (URL 해석 규칙과 같다).
+  const dirPart = path.endsWith('/') ? path.slice(0, -1) || '/' : dirOf(path) || (path.startsWith('/') ? '/' : '');
+  return collapse(docDir, dirPart);
 }
 
 /**

@@ -265,7 +265,7 @@ async function load(
   const [
     { parseBlocks },
     { buildPreviewDocument },
-    { cssAssetPaths, dirOf, parseAssetRefs, styleTexts },
+    { cssAssetPaths, dirOf, documentBaseDir, parseAssetRefs, styleTexts },
     { buildAssets },
   ] = await Promise.all([
     import('@/core/parse'),
@@ -276,12 +276,18 @@ async function load(
   const docPath = file.path ?? '';
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
-  const refs = parseAssetRefs(file.text, docDir);
+  // 문서가 <base href> 로 기준을 옮겨 두면 상대 참조는 문서 자리가 아니라 거기서
+  // 풀린다 (spec §5.1). 바깥을 가리키면(null) 상대 참조는 로컬 파일이 아니라
+  // 붙일 것도, 없다고 셀 것도 없다 — 프리뷰는 문서를 그대로 보여준다.
+  const baseDir = documentBaseDir(file.text, docDir);
+  const refs = baseDir === null ? [] : parseAssetRefs(file.text, baseDir);
   // 속성 · 문서에 박힌 <style> · 붙인 스타일시트가 부르는 것까지 한자리에 모은다.
-  const inStyle = styleTexts(file.text).flatMap((css) => cssAssetPaths(css, docDir));
-  const assets = files
-    ? await buildAssets(files, [...refs.map((r) => r.path), ...inStyle])
-    : EMPTY_BUNDLE;
+  const inStyle =
+    baseDir === null ? [] : styleTexts(file.text).flatMap((css) => cssAssetPaths(css, baseDir));
+  const assets =
+    files && baseDir !== null
+      ? await buildAssets(files, [...refs.map((r) => r.path), ...inStyle])
+      : EMPTY_BUNDLE;
   const assetPaths = [...new Set([...refs.map((r) => r.path), ...inStyle, ...assets.missing])];
 
   return {
@@ -297,7 +303,13 @@ async function load(
     bundle: files ?? null,
     candidates: files ? candidatesOf(files) : [],
     bundleHandles: handles ?? new Map(),
-    previewDoc: buildPreviewDocument(file.text, blocks, { refs, dir: docDir, urls: assets.urls }),
+    previewDoc: buildPreviewDocument(
+      file.text,
+      blocks,
+      // base 가 바깥을 가리키면 치환할 것이 없다 — <style> 의 url() 까지 문서 기준이라
+      // 문서 자리 기준으로 바꾸면 틀린 자원을 붙인다.
+      baseDir === null ? undefined : { refs, dir: baseDir, urls: assets.urls }
+    ),
     patches: new Map(),
     selectedId: null,
     blockedId: null,

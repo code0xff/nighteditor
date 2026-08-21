@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
-import { useEditor } from './editor.js';
+import { countAssets, useEditor } from './editor.js';
 import { useUnsaved } from './unsaved.js';
 
 const dropped = () => new File([fixtureSource()], 'artifact.html', { type: 'text/html' });
@@ -322,6 +322,57 @@ describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
     await useEditor.getState().linkFolder();
 
     expect(useEditor.getState().source).toBe(saved);
+  });
+});
+
+describe('editor · <base href> 가 옮긴 기준으로 자원을 찾는다 (spec §5.1)', () => {
+  it('base 디렉터리 기준으로 붙일 파일을 찾는다', async () => {
+    // 문서 자리만 보면 assets/style.css 가 옆에 있는데도 style.css 가 없다고 센다.
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    await useEditor.getState().loadFolder({
+      files: new Map([
+        [
+          'index.html',
+          new File(
+            [
+              '<html><head><base href="assets/"><link rel="stylesheet" href="style.css"></head>' +
+                '<body><p>본문</p></body></html>',
+            ],
+            'index.html'
+          ),
+        ],
+        ['assets/style.css', new File(['p{color:red}'], 'style.css')],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    });
+
+    expect(useEditor.getState().assetPaths).toContain('assets/style.css');
+    expect(countAssets(useEditor.getState())).toEqual({ linked: 1, missing: 0 });
+    vi.unstubAllGlobals();
+  });
+
+  it('바깥을 가리키는 base 면 상대 참조를 없는 파일로 세지 않는다', async () => {
+    await useEditor.getState().loadFolder({
+      files: new Map([
+        [
+          'index.html',
+          new File(
+            [
+              '<html><head><base href="https://cdn.example/"><link rel="stylesheet" href="style.css"></head>' +
+                '<body><p>본문</p></body></html>',
+            ],
+            'index.html'
+          ),
+        ],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    });
+
+    expect(useEditor.getState().assetPaths).toEqual([]);
+    // 치환할 것이 없으니 프리뷰에 blob: 이 들어가지 않는다.
+    expect(useEditor.getState().previewDoc).not.toContain('blob:');
   });
 });
 

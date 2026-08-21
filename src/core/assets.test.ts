@@ -3,6 +3,7 @@ import {
   assetEdits,
   cssAssetPaths,
   dirOf,
+  documentBaseDir,
   parseAssetRefs,
   resolvePath,
   rewriteCssUrls,
@@ -113,6 +114,48 @@ describe('parseAssetRefs', () => {
 
     expect(refs[0]?.path).toBe('slides/img/logo.png');
     expect(refs[0]?.url).toBe('img/logo.png');
+  });
+});
+
+describe('documentBaseDir (spec §5.1)', () => {
+  it('<base href> 가 없으면 문서 자리가 기준이다', () => {
+    expect(documentBaseDir('<html><body><p>글</p></body></html>', 'deck')).toBe('deck');
+  });
+
+  it('디렉터리 base 는 문서 자리에 이어 붙는다', () => {
+    const source = '<html><head><base href="assets/"></head><body></body></html>';
+    expect(documentBaseDir(source, '')).toBe('assets');
+    expect(documentBaseDir(source, 'deck')).toBe('deck/assets');
+  });
+
+  it('파일이 붙은 base 는 마지막 조각을 떼어낸다 — base 는 디렉터리가 아니라 URL 이다', () => {
+    const source = '<base href="assets/sub/page.html">';
+    expect(documentBaseDir(source, '')).toBe('assets/sub');
+  });
+
+  it('상위로 올라가는 base 를 접는다', () => {
+    expect(documentBaseDir('<base href="../shared/">', 'deck')).toBe('shared');
+  });
+
+  it('뿌리 base 는 묶음의 최상단이다', () => {
+    expect(documentBaseDir('<base href="/">', 'deck')).toBe('');
+    expect(documentBaseDir('<base href="/assets/">', 'deck')).toBe('assets');
+  });
+
+  it('바깥을 가리키는 base 는 null — 상대 참조가 로컬 파일이 아니다', () => {
+    expect(documentBaseDir('<base href="https://cdn.example/">', '')).toBeNull();
+    expect(documentBaseDir('<base href="//cdn.example/">', 'deck')).toBeNull();
+  });
+
+  it('href 있는 첫 <base> 만 유효하다 — HTML 사양과 같다', () => {
+    const source = '<base target="_blank"><base href="a/"><base href="b/">';
+    expect(documentBaseDir(source, '')).toBe('a');
+  });
+
+  it('그 기준으로 참조가 풀린다', () => {
+    const source = '<base href="assets/"><link rel="stylesheet" href="style.css">';
+    const refs = parseAssetRefs(source, documentBaseDir(source, '') ?? '');
+    expect(refs.map((r) => r.path)).toEqual(['assets/style.css']);
   });
 });
 
