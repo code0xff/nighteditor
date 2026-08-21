@@ -10,14 +10,16 @@
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { IconDownloadCopy, IconSave } from '@/lib/icons';
-import { useEditor } from '@/store/editor';
+import { unsavedCount, useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
 import { useUnsaved } from '@/store/unsaved';
 
 export function UnsavedDialog() {
   const why = useUnsaved((s) => s.why);
   const reply = useUnsaved((s) => s.reply);
-  const count = useEditor((s) => s.patches.size);
+  // 패치 총수가 아니다 — 저장해도 패치는 남고(INV-1), 저장한 편집을 되돌리면 패치
+  // 없이도 파일과 다르다. 여기 적는 수는 **파일과 다른 블록 수**다 (spec §4).
+  const count = useEditor(unsavedCount);
   const busy = useEditor((s) => s.busy);
   const overwrites = useEditor((s) => Boolean(s.file?.handle));
   const { t } = useI18n();

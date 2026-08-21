@@ -69,6 +69,12 @@ export interface EditorState {
    * `unsaved` 는 언제나 이것과의 비교다. 저장 경로의 입력은 아니다 (그건 `source`, INV-1).
    */
   savedText: string;
+  /**
+   * 마지막 저장 때 파일에 들어간 패치들 — `savedText` 의 블록별 대응물.
+   * 물음의 "{count}곳" 이 지금 `patches` 와 이것의 차이를 센다 (spec §4 · `unsavedCount`).
+   * 저장 경로의 입력이 아니다 — 그건 `patches` 와 `source` 다 (INV-1).
+   */
+  savedPatches: ReadonlyMap<number, string>;
   /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
   notice: Notice | null;
 
@@ -168,6 +174,21 @@ function differsFromDisk(
   } catch {
     return true;
   }
+}
+
+/**
+ * 파일과 다른 블록 수 — 물음의 "{count}곳" (spec §4).
+ *
+ * 패치 총수로는 못 센다: 저장해도 패치는 남아(INV-1) 이미 저장한 곳까지 세고,
+ * 저장한 편집을 되돌리면 패치가 없는데도 파일과 다르다(그 자리가 1곳이다).
+ * 그래서 지금 패치를 마지막 저장 때의 패치와 블록별로 견준다 — 같은 블록의 패치가
+ * 그대로면 파일의 그 자리도 그대로라, 이 차이가 곧 결과물과 파일이 다른 자리다.
+ */
+export function unsavedCount(s: Pick<EditorState, 'patches' | 'savedPatches'>): number {
+  let count = 0;
+  for (const [id, html] of s.patches) if (s.savedPatches.get(id) !== html) count++;
+  for (const id of s.savedPatches.keys()) if (!s.patches.has(id)) count++;
+  return count;
 }
 
 /**
@@ -378,6 +399,7 @@ async function load(
       baseDir === null ? undefined : { refs, dir: baseDir, urls: assets.urls }
     ),
     patches: new Map(),
+    savedPatches: new Map(),
     selectedId: null,
     blockedId: null,
     revertQueue: [],
@@ -480,6 +502,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   doc: 0,
   unsaved: false,
   savedText: '',
+  savedPatches: new Map(),
   notice: null,
   assetRefs: [],
   assetPaths: [],
@@ -862,6 +885,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         // 있으므로, 지금 상태를 그 결과물과 다시 견준다 — 그 사이 확정된 편집은
         // 파일에 없으니 더러운 채로 남고, 아무 일도 없었으면 깨끗해진다.
         savedText: output,
+        // 방금 쓴 결과물에 들어간 패치들 — 물음의 "{count}곳" 이 지금 패치와 이것의
+        // 차이를 센다 (spec §4). 쓰는 동안 확정된 편집은 여기 없으니 다른 곳으로 남는다.
+        savedPatches: new Map(patches),
         // 핸들 없는 문서는 내려받은 사본이 곧 파일의 내용이다 (spec §5). 메모리의
         // text 를 옛것으로 두면, 폴더 연결이 reread 로 그 옛 내용을 그대로 받아
         // 저장 전 화면으로 되돌아간다 — 핸들이 있으면 디스크에서 다시 읽어 맞춘다.

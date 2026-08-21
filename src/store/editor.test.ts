@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
 import type { FolderRead } from '@/lib/fs';
-import { countAssets, useEditor } from './editor.js';
+import { countAssets, unsavedCount, useEditor } from './editor.js';
 import { useToasts } from './toasts.js';
 import { useUnsaved } from './unsaved.js';
 
@@ -1163,5 +1163,34 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (spec §4)', () => {
+  it('저장한 패치는 세지 않는다 — 패치는 저장해도 남는다 (INV-1)', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    useEditor.getState().onEdit(a?.id ?? -1, '고침 A');
+    expect(await useEditor.getState().save()).toBe(true);
+
+    useEditor.getState().onEdit(b?.id ?? -1, '고침 B');
+
+    // 패치는 둘이지만 파일과 다른 곳은 저장하지 않은 한 곳뿐이다.
+    expect(useEditor.getState().patches.size).toBe(2);
+    expect(unsavedCount(useEditor.getState())).toBe(1);
+  });
+
+  it('저장한 편집을 되돌린 자리는 패치가 없어도 한 곳으로 센다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    expect(await useEditor.getState().save()).toBe(true);
+
+    useEditor.getState().revert(target?.id ?? -1);
+
+    // 패치는 0개지만 파일에는 옛 편집이 남아 있다 — 0곳이라고 말하면 거짓말이다.
+    expect(useEditor.getState().patches.size).toBe(0);
+    expect(useEditor.getState().unsaved).toBe(true);
+    expect(unsavedCount(useEditor.getState())).toBe(1);
   });
 });
