@@ -666,6 +666,59 @@ describe('editor · 저장한 편집을 되돌린 것도 저장할 수 있다', 
   });
 });
 
+describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다', () => {
+  it('저장한 편집이 있는 블록에서 pristine 으로 나와도 패치가 살아 있다', async () => {
+    // 프리뷰의 pristine 은 "편집을 열 때의 화면과 같다" 다. 화면은 저장한 편집을
+    // 보여주고 있으므로, 패치를 지우면 다음 저장이 그 블록을 원본으로 되돌린다 —
+    // 화면에는 저장한 내용이 남은 채 파일만 옛날로 가는 분열이다.
+    const source = '<html><body><p>본문</p></body></html>';
+    const writes: string[] = [];
+    const handle = fakeHandle('deck.html', () => source, writes);
+    await useEditor.getState().adopt({ name: 'deck.html', text: source, handle });
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    await useEditor.getState().save();
+
+    // 저장한 블록에 들어갔다 그냥 나온다 — 에이전트는 화면 내용과 pristine 을 보낸다.
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값', true);
+
+    expect(useEditor.getState().patches.get(target?.id ?? -1)).toBe('고친 값');
+    expect(useEditor.getState().unsaved).toBe(false);
+    // 파일은 이미 화면과 같다 — 다음 저장이 원본을 되쓰는 일은 없어야 한다.
+    expect(await useEditor.getState().save()).toBe(false);
+    expect(writes).toHaveLength(1);
+  });
+
+  it('저장한 적 없는 편집도 들어갔다 나오면 사라지지 않는다', async () => {
+    // 옛 코드는 pristine 에서 패치를 지워, 화면에는 편집이 남은 채 저장할 것이
+    // 없다고 읽혔다 — 닫으면 묻지도 않고 편집이 사라졌다.
+    // 제목(rcdata)은 프리뷰가 아니라 호스트 필드에서 고치므로 pristine 경로가 아니다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((x) => x.locked === null && !x.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값', true);
+
+    expect(useEditor.getState().patches.get(target?.id ?? -1)).toBe('고친 값');
+    expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('pristine 으로 나온 것은 편집 순서도 바꾸지 않는다', async () => {
+    // 들어갔다 나온 것을 "가장 최근 변경" 으로 올리면 Ctrl+Z 가 엉뚱한 블록을 되돌린다.
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null && !x.rcdata);
+    useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
+    useEditor.getState().onEdit(b?.id ?? -1, 'B 수정');
+
+    useEditor.getState().onEdit(a?.id ?? -1, 'A 수정', true);
+    useEditor.getState().undoLast();
+
+    const { patches } = useEditor.getState();
+    expect(patches.has(b?.id ?? -1)).toBe(false);
+    expect(patches.get(a?.id ?? -1)).toBe('A 수정');
+  });
+});
+
 describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
   it('옛 경로가 없으면 새 폴더에 실제로 있는 꼬리 경로로 옮긴다', async () => {
     // 이름만 남기면 deck/slides/index.html 을 deck 폴더에 연결했을 때 slides/ 가

@@ -148,21 +148,33 @@ function differsFromDisk(
   }
 }
 
-/** 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다 */
+/**
+ * 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다.
+ *
+ * 아무것도 바뀌지 않았으면 `prev` 를 **그대로** 돌려준다 — 부르는 쪽이 참조 비교로
+ * "정말 아무 일도 없었다" 를 알 수 있어야 편집 순서(editOrder)를 헛되이 섞지 않는다.
+ */
 function nextPatches(
   prev: Map<number, string>,
   block: Block,
   html: string,
   pristine: boolean
 ): Map<number, string> {
-  const next = new Map(prev);
-  // 프리뷰에서 온 편집은 pristine 판정을 그대로 믿는다. 브라우저가 직렬화한 값과
-  // 소스 문자열은 <br/> → <br> 같은 정규화 차이가 있어 여기서 비교하면 안 된다.
   // 제목처럼 호스트에서 직접 고치는 평문은 sourceText 와 비교한다.
-  const unchanged = block.rcdata ? html === block.sourceText : pristine;
-  if (unchanged) next.delete(block.id);
-  else next.set(block.id, html);
-  return next;
+  if (block.rcdata) {
+    const next = new Map(prev);
+    if (html === block.sourceText) next.delete(block.id);
+    else next.set(block.id, html);
+    return next;
+  }
+  // 프리뷰의 pristine 은 "편집을 열 때의 화면과 같다"는 뜻이다. 화면은 원본에
+  // 패치를 얹은 모습이므로, 그대로 나온 것은 패치 상태도 그대로여야 한다 —
+  // 여기서 패치를 지우면 이미 확정(또는 저장)한 편집이 저장 경로에서만 사라져,
+  // 화면에는 남은 내용이 다음 저장에서 원본으로 되돌아간다 (화면과 저장본의 분열).
+  // 브라우저가 직렬화한 값과 소스 문자열은 <br/> → <br> 같은 정규화 차이가 있어
+  // 여기서 sourceInner 와 비교해 지울 수도 없다 — pristine 판정을 그대로 믿는다.
+  if (pristine) return prev;
+  return new Map(prev).set(block.id, html);
 }
 
 /** <title> 은 프리뷰에 렌더되지 않아 클릭이 닿지 않는다. 별도 필드로 편집한다 (spec §2.1) */
@@ -488,11 +500,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!block || block.locked !== null) return;
     const before = get().patches;
     const patches = nextPatches(before, block, html, pristine);
+    // 눌렀다 그냥 빠져나온 것은 아무 일도 아니다 — 패치도, 편집 순서도, unsaved 도
+    // 그대로 둔다. 여기서 뭐라도 만지면 "들어갔다 나오기" 가 상태를 바꾸는 일이 된다.
+    if (patches === before) return;
     // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
     const editOrder = get().editOrder.filter((x) => x !== id);
     if (patches.has(id)) editOrder.push(id);
-    // 눌렀다 그냥 빠져나온 것도, 고쳤다가 파일과 같은 내용으로 되돌아온 것도
-    // 저장할 것이 아니다. 결과물과 파일을 견줘야 두 경우 모두 맞게 읽힌다 (spec §5).
+    // 고쳤다가 파일과 같은 내용으로 되돌아온 것은 저장할 것이 아니다.
+    // 결과물과 파일을 견줘야 맞게 읽힌다 (spec §5).
     set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
