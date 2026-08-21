@@ -81,6 +81,10 @@ export function previewAgent(): () => void {
     const el = elementFor(editingId);
     if (el) {
       el.removeAttribute('contenteditable');
+      // 마지막 방어선 (INV-9): 아티팩트 스크립트가 DOM 을 휘저어 막대를 블록 안으로
+      // 옮겨 놨을 수 있다. 프리뷰 물건이 innerHTML 을 타고 저장본으로 새면 안 되므로
+      // 읽기 전에 블록 밖으로 되돌린다.
+      if (bar && el.contains(bar)) document.documentElement.appendChild(bar);
       // 브라우저가 직렬화한 원본과 비교한다. 소스 문자열과 비교하면
       // <br/> → <br> 같은 정규화 차이 때문에 고치지도 않은 블록에 패치가 생긴다.
       post({
@@ -315,7 +319,10 @@ export function previewAgent(): () => void {
 
     if (!bar) {
       bar = buildBar();
-      document.body.appendChild(bar);
+      // 블록 밖에 둔다. <body> 자체가 블록인 문서에서 body 에 붙이면 막대가 편집 중인
+      // 블록의 자식이 되고, 확정이 읽는 innerHTML 에 편집기 버튼이 통째로 실려
+      // 저장본에 들어간다 (INV-9). <html> 은 head·body 를 품어 블록이 될 수 없다.
+      document.documentElement.appendChild(bar);
     }
     // 막대를 누르는 사이 선택이 풀릴 수 있다. 지금 들고 있어야 그때 되살릴 것이 있다.
     saved = sel.getRangeAt(0).cloneRange();

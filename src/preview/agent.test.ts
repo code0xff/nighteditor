@@ -953,3 +953,89 @@ describe('previewAgent · 반투명 배경의 밝기 (spec §4 · 시각 표시)
     expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(true);
   });
 });
+
+describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV-9)', () => {
+  beforeEach(() => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+  });
+
+  // body 는 요소 자식 없이 텍스트만 가지면 그 자체로 블록이 된다 (spec §2).
+  // mount() 는 body **안에** 마크업을 넣으므로 여기서는 body 에 직접 마커를 붙인다.
+  function mountBodyBlock(): void {
+    document.body.innerHTML = '';
+    document.body.textContent = '가나다라마바사';
+    document.body.setAttribute(MARKER_ATTR, '0');
+    sent = [];
+    vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
+      sent.push(msg as Record<string, unknown>);
+    }) as typeof window.parent.postMessage);
+    dispose = previewAgent();
+  }
+
+  function selectBodyText(): void {
+    const node = document.body.firstChild;
+    if (!node) throw new Error('고를 글자가 없다');
+    const range = document.createRange();
+    range.setStart(node, 1);
+    range.setEnd(node, 4);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+  }
+
+  afterEach(() => {
+    // 다음 테스트의 "블록 밖 클릭" 판정이 body 마커에 걸리지 않게 지운다.
+    document.body.removeAttribute(MARKER_ATTR);
+    // body 에 남은 포커스도 내려놓는다. 남으면 다음 테스트의 focus() 가 동기로
+    // focusout 을 쏘아 방금 연 편집을 그 자리에서 확정해 버린다.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  it('<body> 자체가 블록이어도 막대가 블록 안에 들어가지 않는다', () => {
+    mountBodyBlock();
+    click(document.body);
+    selectBodyText();
+
+    const bar = document.querySelector<HTMLElement>('[data-ne-bar]');
+    expect(bar?.style.display).toBe('flex');
+    // body 에 붙이면 이 블록의 innerHTML 에 편집기 버튼이 통째로 들어간다.
+    expect(document.body.contains(bar)).toBe(false);
+  });
+
+  it('Enter 확정이 보내는 innerHTML 에 막대가 없다', () => {
+    mountBodyBlock();
+    click(document.body);
+    selectBodyText();
+
+    keydown('Enter');
+
+    const edit = sent.find((m) => m.type === 'edit');
+    expect(edit).toBeDefined();
+    expect(String(edit?.html)).toBe('가나다라마바사');
+    expect(String(edit?.html)).not.toContain('data-ne-bar');
+  });
+
+  it('막대가 블록 안으로 옮겨져 있어도 확정 전에 걷어낸다', () => {
+    // 아티팩트 스크립트는 DOM 을 재구성한다(wrapSheets 식). 막대가 블록 안으로
+    // 끌려 들어간 채 확정되면 저장본에 편집기 UI 가 실린다 — 마지막 방어선을 본다.
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    const node = el(0)!.firstChild!;
+    const range = document.createRange();
+    range.setStart(node, 1);
+    range.setEnd(node, 4);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    const bar = document.querySelector<HTMLElement>('[data-ne-bar]');
+    bar!.remove();
+    el(0)!.appendChild(bar!);
+    keydown('Enter');
+
+    const edit = sent.find((m) => m.type === 'edit');
+    expect(String(edit?.html)).not.toContain('data-ne-bar');
+    expect(String(edit?.html)).toBe('가나다라마바사');
+  });
+});
