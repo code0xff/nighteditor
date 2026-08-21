@@ -181,6 +181,28 @@ async function reread(file: OpenedFile): Promise<OpenedFile> {
   return { ...file, text: await (await file.handle.getFile()).text() };
 }
 
+/**
+ * 묶음에서 온 문서 경로를 새로 고른 폴더 기준으로 옮긴다.
+ *
+ * 옛 경로는 옛 묶음의 뿌리 기준이라 새 폴더에는 그대로 없을 수 있다. 그렇다고 이름만
+ * 남기면 `deck/slides/index.html` 을 `deck` 폴더에 연결했을 때 `slides/` 가 통째로
+ * 사라져, 문서 옆(`slides/`)의 자원을 전부 못 찾는다. 앞에서부터 한 단계씩 걷어내며
+ * 새 폴더에 실제로 있는 가장 긴 꼬리를 찾는다.
+ */
+function rebasePath(
+  path: string | undefined,
+  files: ReadonlyMap<string, Blob>
+): string | undefined {
+  if (!path || files.has(path)) return path;
+  const parts = path.split('/');
+  for (let from = 1; from < parts.length; from++) {
+    const tail = parts.slice(from).join('/');
+    if (files.has(tail)) return tail;
+  }
+  // 어디에도 없으면 이름만 남겨 뿌리 기준으로 푼다 — 못 찾은 자원은 못 찾았다고 세면 된다.
+  return parts[parts.length - 1];
+}
+
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
@@ -556,15 +578,14 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
       set({ busy: true });
 
-      // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더에 그 경로가
-      // 없으면 이름만 남겨 뿌리 기준으로 다시 푼다 — 안 그러면 제 폴더를 골라 주고도
-      // 자원을 못 찾는다.
+      // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
+      // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
       const fresh = await reread(get().file ?? file);
-      const rebased =
-        fresh.path && !read.files.has(fresh.path)
-          ? { ...fresh, path: fresh.path.split('/').pop() }
-          : fresh;
-      set(await replace(get, load(rebased, read.files, read.handles)));
+      const rebased = { ...fresh, path: rebasePath(fresh.path, read.files) };
+      // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
+      // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
+      // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
+      set(await replace(get, load(rebased, read.files)));
       const attached = countAssets(get()).linked;
       set({
         notice: read.truncated

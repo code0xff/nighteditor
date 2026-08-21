@@ -358,7 +358,21 @@ function pickerReturns(dir: unknown): void {
     Promise.resolve(dir);
 }
 
-
+/** 되쓸 수 있는 파일 핸들 흉내. 쓴 내용을 밖에서 볼 수 있다 */
+function fakeHandle(name: string, text: () => string, writes: string[] = []) {
+  return {
+    name,
+    getFile: () => Promise.resolve(new File([text()], name, { type: 'text/html' })),
+    createWritable: () =>
+      Promise.resolve({
+        write: (data: string) => {
+          writes.push(data);
+          return Promise.resolve();
+        },
+        close: () => Promise.resolve(),
+      }),
+  };
+}
 
 describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
   it('폴더의 문서를 다시 읽다 실패하면 빈 문서를 열지 않고 이유를 말한다', async () => {
@@ -462,6 +476,52 @@ describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () =
   });
 });
 
+describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', () => {
+  it('연결한 폴더의 다른 문서로 갈아타면 핸들 없이 열린다', async () => {
+    // 연결은 읽기 전용(read)이다. 그 핸들이 묶음에 남으면 갈아탄 문서의 저장이
+    // "덮어쓰기" 라면서 쓰기 권한이 없어 그제서야 실패한다.
+    const handle = fakeHandle('deck.html', () => '<html><body><p>본문</p></body></html>');
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>본문</p></body></html>',
+      handle,
+    });
+    pickerReturns(
+      fakeTree('assets', { 'other.html': '<html><body><p>다른 문서</p></body></html>' })
+    );
+
+    await useEditor.getState().linkFolder();
+    expect(useEditor.getState().bundleHandles.size).toBe(0);
+
+    await useEditor.getState().openFromBundle('other.html');
+
+    expect(useEditor.getState().file?.name).toBe('other.html');
+    expect(useEditor.getState().file?.handle).toBeNull();
+  });
+});
 
 
 
+describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
+  it('옛 경로가 없으면 새 폴더에 실제로 있는 꼬리 경로로 옮긴다', async () => {
+    // 이름만 남기면 deck/slides/index.html 을 deck 폴더에 연결했을 때 slides/ 가
+    // 사라져, 문서 옆의 자원을 전부 못 찾는다 (spec §5.1).
+    const text =
+      '<html><head><link rel="stylesheet" href="style.css"></head><body><p>본문</p></body></html>';
+    useEditor.setState({
+      file: { name: 'index.html', text, handle: null, path: 'deck/slides/index.html' },
+    });
+    pickerReturns(
+      fakeTree('deck', { slides: { 'index.html': text, 'style.css': 'p{color:red}' } })
+    );
+
+    await useEditor.getState().linkFolder();
+
+    expect(useEditor.getState().docPath).toBe('slides/index.html');
+    expect(useEditor.getState().docDir).toBe('slides');
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.assetsLinked',
+      params: { count: 1 },
+    });
+  });
+});
