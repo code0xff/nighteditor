@@ -659,10 +659,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
       // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
       // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
-      // 고른 폴더에 없는 문서의 핸들은 남길 자리가 없다 — 그 경로는 묶음의 후보가
-      // 아니라서 돌아올 길 자체가 없고, 남기면 남의 파일 경로에 걸릴 수 있다.
+      // 단, **같은 파일임을 증명한 때에만** 남긴다. 경로가 겹친다고 같은 파일은 아니다 —
+      // 기본명 폴백(rebasePath)이 고른 자리는 이름만 같은 남의 파일일 수 있고, 그 경로에
+      // 이 쓰기 핸들을 걸면 갔다 돌아올 때 그 자리에서 이 파일이 대신 열리고 저장이
+      // 남의 자리 내용을 덮는다. 증명할 수 없으면 남기지 않는 쪽이 낫다 (대원칙 3).
+      const twin = rebased.path ? read.handles.get(rebased.path) : undefined;
+      const proven =
+        rebased.handle && twin ? ((await rebased.handle.isSameEntry?.(twin)) ?? false) : false;
       const keep =
-        rebased.path && rebased.handle && read.files.has(rebased.path)
+        proven && rebased.path && rebased.handle
           ? new Map([[rebased.path, rebased.handle]])
           : undefined;
       set(await replace(get, load(rebased, read.files, keep)));

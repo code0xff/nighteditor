@@ -432,10 +432,19 @@ function pickerReturns(dir: unknown): void {
     Promise.resolve(dir);
 }
 
-/** 되쓸 수 있는 파일 핸들 흉내. 쓴 내용을 밖에서 볼 수 있다 */
-function fakeHandle(name: string, text: () => string, writes: string[] = []) {
+/**
+ * 되쓸 수 있는 파일 핸들 흉내. 쓴 내용을 밖에서 볼 수 있다.
+ * `sameEntry` 의 기본은 false — 같은 파일임은 테스트가 명시적으로 선언해야 한다.
+ */
+function fakeHandle(
+  name: string,
+  text: () => string,
+  writes: string[] = [],
+  sameEntry: () => boolean = () => false
+) {
   return {
     name,
+    isSameEntry: () => Promise.resolve(sameEntry()),
     getFile: () => Promise.resolve(new File([text()], name, { type: 'text/html' })),
     createWritable: () =>
       Promise.resolve({
@@ -608,7 +617,7 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     // 조용히 사본 내려받기로 격하된다 (spec §5.1 · 핸들 유지).
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
-    const handle = fakeHandle('index.html', () => onDisk);
+    const handle = fakeHandle('index.html', () => onDisk, [], () => true);
     // adopt(파일 열기·OS 열기)와 같은 모양 — path 가 없다.
     useEditor.setState({ file: { name: 'index.html', text, handle } });
     pickerReturns(
@@ -635,7 +644,7 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     // 저장은 조용히 사본 내려받기로 격하된다.
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
-    const handle = fakeHandle('index.html', () => onDisk);
+    const handle = fakeHandle('index.html', () => onDisk, [], () => true);
     useEditor.setState({ file: { name: 'index.html', text, handle, path: 'index.html' } });
     pickerReturns(
       fakeTree('deck', {
@@ -653,6 +662,33 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     expect(useEditor.getState().file?.handle).toBe(handle);
     // 묶음의 옛 바이트가 아니라 디스크의 지금 내용으로 돌아와야 한다.
     expect(useEditor.getState().source).toBe(onDisk);
+  });
+});
+
+describe('editor · 핸들은 같은 파일임을 증명한 자리에만 남는다 (spec §5.1)', () => {
+  it('이름만 같은 남의 index.html 경로에 쓰기 핸들을 걸지 않는다', async () => {
+    // 기본명 폴백이 고른 경로는 남의 파일일 수 있다. 핸들이 남으면 갔다 돌아올 때
+    // 그 자리에서 이 파일이 대신 열리고, 저장이 남의 자리 내용을 덮는다.
+    const mine = '<html><body><p>내 문서</p></body></html>';
+    const theirs = '<html><body><p>남의 index</p></body></html>';
+    const handle = fakeHandle('index.html', () => mine); // isSameEntry → false
+    useEditor.setState({ file: { name: 'index.html', text: mine, handle } });
+    pickerReturns(
+      fakeTree('deck', {
+        'index.html': theirs,
+        'other.html': '<html><body><p>다른 문서</p></body></html>',
+      })
+    );
+
+    await useEditor.getState().linkFolder();
+
+    expect(useEditor.getState().bundleHandles.size).toBe(0);
+
+    // 갔다 돌아오면 폴더에 실제로 담긴 그 문서가 열려야 한다 — 내 핸들의 내용이 아니라.
+    await useEditor.getState().openFromBundle('other.html');
+    await useEditor.getState().openFromBundle('index.html');
+    expect(useEditor.getState().file?.handle).toBeNull();
+    expect(useEditor.getState().source).toBe(theirs);
   });
 });
 

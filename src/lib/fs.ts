@@ -9,6 +9,8 @@ interface FileHandle {
   readonly name: string;
   getFile(): Promise<File>;
   createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void> }>;
+  /** 같은 파일을 가리키는지. 폴더 연결이 핸들을 남기기 전의 증명에 쓴다 (spec §5.1) */
+  isSameEntry?(other: FileHandle): Promise<boolean>;
 }
 
 /** 폴더 안을 훑기 위한 최소한의 모양 (lib.dom 에 아직 없다) */
