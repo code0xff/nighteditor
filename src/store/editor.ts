@@ -8,9 +8,9 @@ import {
   downloadFile,
   droppedFile,
   pickFile,
-  readDroppedFolder,
   pickFolder,
   saveFile,
+  type FolderRead,
   type OpenedFile,
   type Picked,
 } from '@/lib/fs';
@@ -59,8 +59,8 @@ export interface EditorState {
 
   openFile: () => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
-  /** 드롭한 것에 폴더가 있으면 그 안의 문서를 연다. 폴더가 없었으면 false */
-  loadDroppedFolder: (items: DataTransferItemList) => Promise<boolean>;
+  /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
+  loadFolder: (read: FolderRead | null) => Promise<boolean>;
   adopt: (file: OpenedFile) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
@@ -71,7 +71,8 @@ export interface EditorState {
   /** 마지막으로 확정한 변경을 되돌린다 (Ctrl+Z) */
   undoLast: () => void;
   drainReverts: () => void;
-  save: () => Promise<void>;
+  /** 저장했으면 true. 실패했거나 저장할 것이 없으면 false */
+  save: () => Promise<boolean>;
   downloadCopy: () => void;
   /** 폴더를 열어 외부 자원을 붙인다 (spec §5.1) */
   linkFolder: () => Promise<void>;
@@ -284,11 +285,10 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // 폴더를 놓으면 그 안의 문서를 연다. 옛 드롭 API 는 쓰기 권한을 주지 않으므로
   // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
-  loadDroppedFolder: async (items) => {
+  loadFolder: async (read) => {
+    if (!read) return false;
     set({ busy: true, notice: null });
     try {
-      const read = await readDroppedFolder(items);
-      if (!read) return false;
       set(await replace(get, openBundle(read.files)));
       if (read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
@@ -452,7 +452,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { file, source, blocks, patches } = get();
     // 고친 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
     // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
-    if (!file || patches.size === 0) return;
+    if (!file || patches.size === 0) return false;
     set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
@@ -464,6 +464,7 @@ export const useEditor = create<EditorState>((set, get) => ({
           params: { name: file.name, count: list.length },
         },
       });
+      return true;
     } catch (e) {
       set({
         notice:
@@ -471,6 +472,7 @@ export const useEditor = create<EditorState>((set, get) => ({
             ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
             : { key: 'notice.saveFailed' },
       });
+      return false;
     } finally {
       set({ busy: false });
     }

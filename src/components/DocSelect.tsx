@@ -13,11 +13,11 @@ import {
 import { IconDocument } from '@/lib/icons';
 import { useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
+import { keepEdits } from '@/store/unsaved';
 
 export function DocSelect() {
   const candidates = useEditor((s) => s.candidates);
   const docPath = useEditor((s) => s.docPath);
-  const patches = useEditor((s) => s.patches);
   const busy = useEditor((s) => s.busy);
   const openFromBundle = useEditor((s) => s.openFromBundle);
   const { t } = useI18n();
@@ -31,8 +31,9 @@ export function DocSelect() {
       disabled={busy}
       onValueChange={(path) => {
         // 문서를 바꾸면 프리뷰를 다시 그리므로 고친 내용은 사라진다. 조용히 버리지 않는다.
-        if (patches.size > 0 && !confirm(t('confirm.discard', { count: patches.size }))) return;
-        void openFromBundle(path);
+        void keepEdits({ key: 'confirm.whySwitch', params: { path } }).then((go) => {
+          if (go) void openFromBundle(path);
+        });
       }}
     >
       <SelectTrigger className="h-8 w-auto max-w-64 gap-1.5" aria-label={label} title={label}>

@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { onFileLaunch } from '@/lib/fs';
+import { onFileLaunch, readDroppedFolder } from '@/lib/fs';
 import { IconDrop, IconLinkFolder, IconLocked, IconNotice, IconUnlinked } from '@/lib/icons';
 import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { countAssets, useEditor } from '@/store/editor';
+import { keepEdits } from '@/store/unsaved';
+import { UnsavedDialog } from '@/components/UnsavedDialog';
 import { useI18n } from '@/store/locale';
 import { ChangeList } from './ChangeList';
 import { PreviewFrame } from './PreviewFrame';
@@ -19,7 +21,7 @@ export function App() {
   const blockedId = useEditor((s) => s.blockedId);
   const blocks = useEditor((s) => s.blocks);
   const loadDropped = useEditor((s) => s.loadDropped);
-  const loadDroppedFolder = useEditor((s) => s.loadDroppedFolder);
+  const loadFolder = useEditor((s) => s.loadFolder);
   const adopt = useEditor((s) => s.adopt);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
@@ -65,15 +67,18 @@ export function App() {
         const dropped = e.dataTransfer.files[0];
         const { items } = e.dataTransfer;
         if (!dropped && items.length === 0) return;
+        // 폴더 항목은 이벤트가 끝나면 사라진다. 묻기 전에 먼저 꺼내 둔다.
+        const folder = readDroppedFolder(items);
         // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
-        if (patches.size > 0 && !confirm(t('confirm.discard', { count: patches.size }))) return;
-        // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
-        void loadDroppedFolder(items).then((wasFolder) => {
-          if (!wasFolder && dropped) void loadDropped(dropped);
+        void keepEdits({ key: 'confirm.whyOpen' }).then(async (go) => {
+          if (!go) return;
+          // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
+          if (!(await loadFolder(await folder)) && dropped) void loadDropped(dropped);
         });
       }}
     >
       <Toolbar />
+      <UnsavedDialog />
 
       {alert && (
         <div className="px-3 pt-2">
@@ -96,13 +101,9 @@ export function App() {
                 disabled={busy}
                 onClick={() => {
                   // 프리뷰를 다시 그리므로 고친 내용은 사라진다. 조용히 버리지 않는다.
-                  if (
-                    patches.size > 0 &&
-                    !confirm(t('confirm.discardForAssets', { count: patches.size }))
-                  ) {
-                    return;
-                  }
-                  void linkFolder();
+                  void keepEdits({ key: 'confirm.whyAssets' }).then((go) => {
+                    if (go) void linkFolder();
+                  });
                 }}
               >
                 <IconLinkFolder />

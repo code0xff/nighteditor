@@ -40,9 +40,15 @@ const ko = {
 
   'preview.title': '프리뷰',
 
-  'confirm.discard': '저장하지 않은 변경이 {count}개 있다. 버리고 새 파일을 열까?',
-  'confirm.discardForAssets':
-    '저장하지 않은 변경이 {count}개 있다. 자원을 붙이려면 프리뷰를 다시 그려야 해서 사라진다. 계속할까?',
+  'confirm.title': '저장하지 않은 변경이 있다',
+  'confirm.body': '{count}개를 고쳤다. {why}',
+  'confirm.whyOpen': '새 파일을 열면 사라진다.',
+  'confirm.whySwitch': '{path} 로 옮기면 사라진다.',
+  'confirm.whyAssets': '자원을 붙이려면 프리뷰를 다시 그려야 해서 사라진다.',
+  'confirm.save': '저장하고 계속',
+  'confirm.saveCopy': '사본 내려받고 계속',
+  'confirm.discard': '버리고 계속',
+  'confirm.cancel': '취소',
 
   'changes.blocks': '블록',
   'changes.total': '전체 {count}',
@@ -111,9 +117,15 @@ const en: Record<MessageKey, string> = {
 
   'preview.title': 'Preview',
 
-  'confirm.discard': '{count} unsaved changes will be lost. Open another file anyway?',
-  'confirm.discardForAssets':
-    "{count} unsaved changes. Attaching assets redraws the preview, so they'll be lost. Continue?",
+  'confirm.title': 'You have unsaved changes',
+  'confirm.body': 'Unsaved edits: {count}. {why}',
+  'confirm.whyOpen': 'Opening another file loses them.',
+  'confirm.whySwitch': 'Switching to {path} loses them.',
+  'confirm.whyAssets': 'Attaching assets redraws the preview, which loses them.',
+  'confirm.save': 'Save and continue',
+  'confirm.saveCopy': 'Download a copy and continue',
+  'confirm.discard': 'Discard and continue',
+  'confirm.cancel': 'Cancel',
 
   'changes.blocks': 'Blocks',
   'changes.total': '{count} total',
