@@ -86,6 +86,15 @@ function isExternal(url: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//');
 }
 
+/** 조각 하나의 퍼센트 인코딩을 푼다. 잘못된 인코딩은 적힌 그대로 둔다 */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /** `.`·`..` 을 접고 퍼센트 인코딩을 푼 정규 경로. 뿌리는 빈 문자열이다 */
 function collapse(baseDir: string, path: string): string {
   // 절대 경로는 문서가 아니라 묶음의 뿌리를 기준으로 본다 — 폴더/zip 의 최상단이다.
@@ -93,7 +102,12 @@ function collapse(baseDir: string, path: string): string {
   const joined = fromRoot ? path.slice(1) : `${baseDir ? `${baseDir}/` : ''}${path}`;
 
   const out: string[] = [];
-  for (const segment of joined.split('/')) {
+  for (const raw of joined.split('/')) {
+    // 접기 **전에** 푼다 (spec §5.1). URL 사양은 %2e/%2e%2e 조각도 점 조각으로
+    // 접는다 — 접은 뒤에 풀면 `%2e%2e/logo.png` 가 한 단계 올라가지 못해,
+    // 브라우저는 찾는 파일을 우리만 없다고 센다. 파일 이름의 %20 이 실제 공백이
+    // 되는 것도 같은 자리다. 묶음의 키는 문서의 표기가 아니라 디스크의 이름이다.
+    const segment = decodeSegment(raw);
     if (!segment || segment === '.') continue;
     if (segment === '..') {
       out.pop();
@@ -102,13 +116,7 @@ function collapse(baseDir: string, path: string): string {
     out.push(segment);
   }
 
-  const collapsed = out.join('/');
-  // 파일 이름에 공백이 있으면 문서에는 %20 으로 적힌다. 묶음의 키는 실제 이름이다.
-  try {
-    return decodeURIComponent(collapsed);
-  } catch {
-    return collapsed;
-  }
+  return out.join('/');
 }
 
 export function resolvePath(baseDir: string, url: string): string | null {

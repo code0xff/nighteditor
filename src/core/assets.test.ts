@@ -52,6 +52,20 @@ describe('resolvePath', () => {
     expect(resolvePath('', 'my%20deck.css')).toBe('my deck.css');
   });
 
+  it('인코딩된 점 조각도 점으로 접는다 (spec §5.1)', () => {
+    // URL 사양은 %2e 조각을 점 조각으로 접는다. 접은 뒤에 풀면 deck/sub 의
+    // %2e%2e/logo.png 가 deck/sub/../logo.png 로 남아, 실제로 옆에 있는
+    // deck/logo.png 를 없다고 센다.
+    expect(resolvePath('deck/sub', '%2e%2e/logo.png')).toBe('deck/logo.png');
+    expect(resolvePath('deck/sub', '%2E%2E/logo.png')).toBe('deck/logo.png');
+    expect(resolvePath('deck/sub', '%2e/logo.png')).toBe('deck/sub/logo.png');
+  });
+
+  it('잘못된 인코딩의 조각은 적힌 그대로 두고, 나머지는 푼다', () => {
+    // 통째로 풀다 실패하면 멀쩡한 조각까지 표기 그대로 남는다 — 조각마다 따로 푼다.
+    expect(resolvePath('', '100%/my%20deck.css')).toBe('100%/my deck.css');
+  });
+
   it('뿌리 밖으로 나가려 해도 넘어가지 않는다', () => {
     expect(resolvePath('', '../../etc/passwd')).toBe('etc/passwd');
   });
