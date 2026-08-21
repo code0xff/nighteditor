@@ -1224,6 +1224,129 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
   });
 });
 
+describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼우기 예약)', () => {
+  const page = (body: string): FolderRead => ({
+    files: new Map([
+      ['index.html', new File([`<html><body><p>${body}</p></body></html>`], 'index.html')],
+    ]),
+    handles: new Map(),
+    truncated: false,
+  });
+
+  it('먼저 놓은 폴더의 훑기가 늦게 끝나도 나중에 놓은 폴더를 덮지 않는다', async () => {
+    // 예약을 훑기 뒤에 받으면, 먼저 놓았지만 늦게 훑힌 폴더가 더 새 예약을 받아
+    // 사용자의 마지막 선택(나중에 놓은 폴더)을 덮는다.
+    let releaseScan!: (read: FolderRead) => void;
+    const slowScan = new Promise<FolderRead | null>((r) => (releaseScan = r));
+    const first = useEditor.getState().openDropped(undefined, slowScan);
+
+    await useEditor.getState().openDropped(undefined, Promise.resolve(page('둘째 폴더')));
+    expect(useEditor.getState().source).toContain('둘째 폴더');
+    const installed = useReplacement.getState().installed;
+
+    releaseScan(page('첫 폴더'));
+    await first;
+
+    expect(useEditor.getState().source).toContain('둘째 폴더');
+    expect(useReplacement.getState().installed).toBe(installed);
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+
+  it('물음에 답하고 훑기를 기다리는 동안 화면이 잠긴다', async () => {
+    // 답한 뒤에도 훑기가 도는 사이 화면에는 이전 문서가 떠 있다 — 이때의 편집은
+    // 설치 순간 갈 곳이 없어, 잠그고 들어온 확정은 거절한다 (spec §4).
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    let releaseScan!: (read: FolderRead) => void;
+    const slowScan = new Promise<FolderRead | null>((r) => (releaseScan = r));
+    const opening = useEditor.getState().openDropped(undefined, slowScan);
+    await answerWith('discard');
+    // 답이 keepEdits 를 지나 잠금이 서기까지 마이크로태스크를 흘려보낸다.
+    for (let tries = 0; !useReplacement.getState().replacing && tries < 1000; tries++) {
+      await Promise.resolve();
+    }
+    expect(useReplacement.getState().replacing).toBe(true);
+
+    useEditor.getState().onEdit(target?.id ?? -1, '사라질 편집');
+    expect(useEditor.getState().patches.get(target?.id ?? -1)).toBe('고친 값');
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editWhileReplacing')).toBe(
+      true
+    );
+
+    releaseScan(page('새 폴더'));
+    await opening;
+    expect(useEditor.getState().source).toContain('새 폴더');
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+});
+
+describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 이긴다 (spec §5)', () => {
+  it('물음에 저장으로 답한 열기는 저장을 마치고 돌아와도 밀려났으면 물러난다', async () => {
+    // 옛 코드는 keepEdits 가 돌아온 **뒤에** 세대를 받아, 먼저 시작한 열기가 더 새
+    // 세대를 쥐고 나중에 시작한 드롭의 문서를 덮었다. 예약은 행동의 순간에 받고,
+    // 물음에서 돌아오면 최신인지부터 확인한다.
+    let releaseWrite: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const handle = {
+      name: 'old.html',
+      getFile: () =>
+        Promise.resolve(new File(['<p>옛 문서</p>'], 'old.html', { type: 'text/html' })),
+      createWritable: () =>
+        Promise.resolve({ write: () => writeGate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'old.html',
+      text: '<html><body><p>옛 문서</p></body></html>',
+      handle,
+    });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    // A: 열기 — 물음에 저장으로 답한다. 쓰기는 아직 멈춰 있다.
+    const adopting = useEditor.getState().adopt({
+      name: 'a.html',
+      text: '<html><body><p>A 문서</p></body></html>',
+      handle: null,
+    });
+    await answerWith('save');
+
+    // B: 저장이 도는 사이의 더 새 드롭 — 읽기는 멈춰 있다.
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((r) => (releaseRead = r));
+    const read = {
+      files: new Map<string, unknown>([
+        [
+          'index.html',
+          {
+            text: async () => {
+              await readGate;
+              return '<html><body><p>B 문서</p></body></html>';
+            },
+          },
+        ],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    } as unknown as FolderRead;
+    const opening = useEditor.getState().loadFolder(read);
+
+    // A 의 저장이 B 의 설치보다 먼저 끝난다 — 옛 코드가 지던 바로 그 순서다.
+    releaseWrite?.();
+    await adopting;
+
+    // A 는 밀려났다 — 설치하지 않고, B 의 잠금도 풀지 않는다.
+    expect(useEditor.getState().file?.name).toBe('old.html');
+    expect(useReplacement.getState().replacing).toBe(true);
+
+    releaseRead();
+    await opening;
+    expect(useEditor.getState().source).toContain('B 문서');
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+});
+
 describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (spec §4)', () => {
   it('저장한 패치는 세지 않는다 — 패치는 저장해도 남는다 (INV-1)', async () => {
     await useEditor.getState().loadDropped(dropped());

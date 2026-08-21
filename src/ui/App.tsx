@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Toaster } from '@/components/Toaster';
 import { Button } from '@/components/ui/button';
-import { onFileLaunch, readDroppedFolder, type FolderRead } from '@/lib/fs';
+import { onFileLaunch, readDroppedFolder } from '@/lib/fs';
 import { IconDrop, IconLinkFolder, IconUnlinked } from '@/lib/icons';
 import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
@@ -10,7 +10,7 @@ import { ERROR_NOTICES } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { countAssets, useEditor } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
-import { keepEdits, shortcutSave } from '@/store/unsaved';
+import { shortcutSave } from '@/store/unsaved';
 import { useToasts } from '@/store/toasts';
 import { UnsavedDialog } from '@/components/UnsavedDialog';
 import { useI18n } from '@/store/locale';
@@ -18,14 +18,10 @@ import { ChangeList } from './ChangeList';
 import { PreviewFrame } from './PreviewFrame';
 import { Toolbar } from './Toolbar';
 
-/** 폴더 훑기가 실패했다는 표식 — null(폴더가 아니었다)과 구별해야 파일 열기로 새지 않는다 */
-const scanFailed = Symbol('scan-failed');
-
 export function App() {
   const file = useEditor((s) => s.file);
   const notice = useEditor((s) => s.notice);
-  const loadDropped = useEditor((s) => s.loadDropped);
-  const loadFolder = useEditor((s) => s.loadFolder);
+  const openDropped = useEditor((s) => s.openDropped);
   const adopt = useEditor((s) => s.adopt);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
@@ -75,29 +71,11 @@ export function App() {
         const dropped = e.dataTransfer.files[0];
         const { items } = e.dataTransfer;
         if (!dropped && items.length === 0) return;
-        // 폴더 항목은 이벤트가 끝나면 사라진다. 묻기 전에 먼저 꺼내 둔다.
-        // 실패도 여기서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를 기다리지
-        // 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다(unhandled rejection).
-        // 취소했더라도 훑기가 실패한 사실은 알린다 (대원칙 3 · spec §5.1).
-        const folder: Promise<FolderRead | null | typeof scanFailed> = readDroppedFolder(
-          items
-        ).catch((err: unknown) => {
-          failedToOpen(err);
-          return scanFailed;
-        });
-        // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
-        void keepEdits({ key: 'confirm.whyOpen' })
-          .then(async (go) => {
-            if (!go) return;
-            const read = await folder;
-            // 훑다 실패한 것은 위에서 이미 알렸다. 파일 열기로 넘어가지 않는다 —
-            // 놓은 것이 폴더였을 수 있고, 폴더를 문서로 여는 것은 오류를 덧씌우는 일이다.
-            if (read === scanFailed) return;
-            // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
-            if (!(await loadFolder(read)) && dropped) await loadDropped(dropped);
-          })
-          // 물음이나 열기 자체가 죽으면 여기로 온다. 잡지 않으면 놓아도 아무 일이 없는 것처럼 보인다.
-          .catch(failedToOpen);
+        // 폴더 항목은 이벤트가 끝나면 사라진다 — 훑기는 지금 시작한다. 예약·묻기·
+        // 잠금·설치는 스토어(openDropped)가 한 규칙으로 한다 (spec §5 · 갈아 끼우기 예약).
+        // 물음이나 열기 자체가 죽으면 catch 로 온다. 잡지 않으면 놓아도 아무 일이
+        // 없는 것처럼 보인다.
+        void openDropped(dropped, readDroppedFolder(items)).catch(failedToOpen);
       }}
     >
       <Toolbar />

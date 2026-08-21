@@ -97,6 +97,14 @@ export interface EditorState {
   bundleHandles: ReadonlyMap<string, OpenedFile['handle']>;
 
   openFile: () => Promise<void>;
+  /**
+   * 드롭 한 번 — 파일이든 폴더든 (spec §5 · 갈아 끼우기 예약).
+   *
+   * 폴더 항목은 이벤트가 끝나면 사라지므로 훑기는 화면 쪽에서 이미 시작된 채로
+   * 온다. 예약은 여기서, 훑기를 **기다리기 전에** 받는다 — 늦게 받으면 먼저 놓았지만
+   * 늦게 훑힌 폴더가 더 새 예약을 받아 나중에 놓은 폴더를 덮는다.
+   */
+  openDropped: (file: File | undefined, folder: Promise<FolderRead | null>) => Promise<void>;
   loadDropped: (file: File) => Promise<void>;
   /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
   loadFolder: (read: FolderRead | null) => Promise<boolean>;
@@ -439,6 +447,9 @@ async function openBundle(
 /** 묶음은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
 class BundleEmptyError extends Error {}
 
+/** 폴더 훑기가 실패했다는 표식 — null(폴더가 아니었다)과 구별해야 파일 열기로 새지 않는다 */
+const scanFailed = Symbol('scan-failed');
+
 /**
  * 폴더에서 문서를 못 찾았을 때 — 스캔이 잘렸으면 그 사정을 함께 말한다 (spec §5.1).
  * "문서가 없다" 라고만 하면 거짓말일 수 있다 — 문서는 한도 밖에 있었을 수 있다.
@@ -478,7 +489,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   openFile: async () => {
     set({ notice: null });
-    let mine: Replacement | null = null;
+    // 예약은 사용자 행동의 순간에 — 대화상자·물음·저장을 기다리기 전에 (spec §5).
+    const mine = reserveReplacement();
     try {
       // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
@@ -487,29 +499,66 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      mine = reserveReplacement();
+      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
+      if (!mine.current()) return;
       await replace(get, set, mine, openPicked(picked));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       // 밀려난 흐름의 실패는 남(최신 흐름)의 화면에 대한 말이 된다 — 알리지 않는다.
-      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
+      if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      mine?.release();
+      mine.release();
     }
   },
 
   // OS 가 열어준 파일(PWA file_handlers)을 받는다.
   // load 가 파서 청크를 받아오므로 여기도 실패할 수 있다 — 조용히 굳지 않게 감싼다 (ADR-008).
   adopt: async (file) => {
-    // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
-    // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
-    if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
     const mine = reserveReplacement();
-    set({ notice: null });
     try {
+      // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
+      // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다 (spec §5).
+      if (!mine.current()) return;
+      set({ notice: null });
       await replace(get, set, mine, load(file));
     } catch (e) {
       if (mine.current()) set({ notice: openFailedNotice(e) });
+    } finally {
+      mine.release();
+    }
+  },
+
+  openDropped: async (file, folder) => {
+    // 예약은 놓은 순간에 — 훑기·물음·저장을 기다리기 전에 (spec §5 · 갈아 끼우기 예약).
+    const mine = reserveReplacement();
+    set({ notice: null });
+    // 훑기 실패는 만들어진 자리에서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를
+    // 기다리지 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다 (unhandled
+    // rejection). 취소했더라도 훑기가 실패한 사실은 알린다 (대원칙 3 · spec §5.1).
+    const scanned: Promise<FolderRead | null | typeof scanFailed> = folder.catch((e: unknown) => {
+      get().failedToOpen(e);
+      return scanFailed;
+    });
+    try {
+      // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 이 드롭은 밀려났다.
+      if (!mine.current()) return;
+      // 답한 순간부터 잠근다 — 훑기가 끝나기를 기다리는 사이의 편집도 새 상태가
+      // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
+      mine.engage();
+      const read = await scanned;
+      // 훑다 실패한 것은 위에서 이미 알렸다. 파일 열기로 넘어가지 않는다 —
+      // 놓은 것이 폴더였을 수 있고, 폴더를 문서로 여는 것은 오류를 덧씌우는 일이다.
+      if (read === scanFailed) return;
+      // 훑기를 기다리는 사이도 마찬가지다 — 밀려났으면 설치도 알림도 남의 몫이다.
+      if (!mine.current()) return;
+      // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
+      // 아래 둘은 제 예약을 새로 받아 이어 간다 — 방금 확인한 최신 자리를 물려받는
+      // 셈이라, 이 사이에는 기다림이 없어 끼어들 틈도 없다.
+      if (!(await get().loadFolder(read)) && file) await get().loadDropped(file);
     } finally {
       mine.release();
     }
@@ -689,23 +738,25 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
     set({ notice: null });
+    // 예약은 사용자 행동의 순간에 — 대화상자·훑기·물음을 기다리기 전에 (spec §5).
+    const mine = reserveReplacement();
     // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
     let read: FolderRead | null = null;
-    let mine: Replacement | null = null;
     try {
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-      mine = reserveReplacement();
+      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
+      if (!mine.current()) return;
       const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
       if (next && read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
     } catch (e) {
-      if (mine === null || mine.current()) set({ notice: folderFailedNotice(e, read) });
+      if (mine.current()) set({ notice: folderFailedNotice(e, read) });
     } finally {
-      mine?.release();
+      mine.release();
     }
   },
 
@@ -724,13 +775,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
 
     set({ notice: null });
-    let mine: Replacement | null = null;
+    // 예약은 사용자 행동의 순간에 — 대화상자·훑기·물음을 기다리기 전에 (spec §5).
+    const mine = reserveReplacement();
     try {
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
-      mine = reserveReplacement();
+      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
+      if (!mine.current()) return;
 
       const loading = async (): Promise<Partial<EditorState>> => {
         // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
@@ -774,9 +827,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         });
       }
     } catch (e) {
-      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
+      if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      mine?.release();
+      mine.release();
     }
   },
 
@@ -791,15 +844,17 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!bundle || path === docPath) return;
 
     set({ notice: null });
-    let mine: Replacement | null = null;
+    // 예약은 사용자 행동의 순간에 — 물음·저장을 기다리기 전에 (spec §5).
+    const mine = reserveReplacement();
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
-      mine = reserveReplacement();
+      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
+      if (!mine.current()) return;
       await replace(get, set, mine, openBundle(bundle, path, get().bundleHandles));
     } catch (e) {
-      if (mine === null || mine.current()) set({ notice: openFailedNotice(e) });
+      if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
-      mine?.release();
+      mine.release();
     }
   },
 
