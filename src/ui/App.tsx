@@ -26,7 +26,7 @@ export function App() {
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const undoLast = useEditor((s) => s.undoLast);
-  const patches = useEditor((s) => s.patches);
+  const unsaved = useEditor((s) => s.unsaved);
   const busy = useEditor((s) => s.busy);
   const linkFolder = useEditor((s) => s.linkFolder);
   // 참조는 있는데 못 붙인 자원. 조용히 깨진 채로 두지 않는다 (대원칙 3 · spec §5.1).
@@ -35,7 +35,9 @@ export function App() {
   const show = useToasts((s) => s.show);
   const { t } = useI18n();
   // 저장 전 편집은 메모리에만 있다. 탭을 닫기 전에 브라우저가 되묻게 한다.
-  useEffect(() => onBeforeUnload(() => patches.size > 0), [patches]);
+  // 기준은 패치 개수가 아니다 — 저장해도 패치는 남아서(INV-1), 그걸로 물으면
+  // 이미 저장한 사람까지 나갈 때마다 붙잡는다. 파일과 다른가(unsaved)로만 묻는다.
+  useEffect(() => onBeforeUnload(() => unsaved), [unsaved]);
   const [dragging, setDragging] = useState(false);
 
   // 설치된 PWA 를 OS 에서 "이 앱으로 열기" 했을 때 파일이 여기로 들어온다.
