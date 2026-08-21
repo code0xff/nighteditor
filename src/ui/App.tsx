@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Toaster } from '@/components/Toaster';
 import { Button } from '@/components/ui/button';
 import { onFileLaunch, readDroppedFolder } from '@/lib/fs';
-import { IconDrop, IconLinkFolder, IconLocked, IconNotice, IconUnlinked } from '@/lib/icons';
+import { IconDrop, IconLinkFolder, IconUnlinked } from '@/lib/icons';
 import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
-import { lockNotice } from '@/lib/messages';
+import { ERROR_NOTICES } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { countAssets, useEditor } from '@/store/editor';
 import { keepEdits } from '@/store/unsaved';
+import { useToasts } from '@/store/toasts';
 import { UnsavedDialog } from '@/components/UnsavedDialog';
 import { useI18n } from '@/store/locale';
 import { ChangeList } from './ChangeList';
@@ -18,8 +20,6 @@ import { Toolbar } from './Toolbar';
 export function App() {
   const file = useEditor((s) => s.file);
   const notice = useEditor((s) => s.notice);
-  const blockedId = useEditor((s) => s.blockedId);
-  const blocks = useEditor((s) => s.blocks);
   const loadDropped = useEditor((s) => s.loadDropped);
   const loadFolder = useEditor((s) => s.loadFolder);
   const adopt = useEditor((s) => s.adopt);
@@ -32,7 +32,8 @@ export function App() {
   // 참조는 있는데 못 붙인 자원. 조용히 깨진 채로 두지 않는다 (대원칙 3 · spec §5.1).
   const missing = useEditor((s) => countAssets(s).missing);
   const failedToOpen = useEditor((s) => s.failedToOpen);
-  const { t, tn } = useI18n();
+  const show = useToasts((s) => s.show);
+  const { t } = useI18n();
   // 저장 전 편집은 메모리에만 있다. 탭을 닫기 전에 브라우저가 되묻게 한다.
   useEffect(() => onBeforeUnload(() => patches.size > 0), [patches]);
   const [dragging, setDragging] = useState(false);
@@ -46,13 +47,10 @@ export function App() {
     [save, downloadCopy, undoLast]
   );
 
-  const blocked = blocks.find((b) => b.id === blockedId);
-  const NoticeIcon = notice ? IconNotice : IconLocked;
-  const alert = notice
-    ? tn(notice)
-    : blocked?.locked
-      ? t('app.blocked', { reason: lockNotice(blocked.locked) })
-      : null;
+  // 알림은 오른쪽 위로 띄운다. 배너로 두면 뜰 때마다 읽던 자리가 아래로 밀린다.
+  useEffect(() => {
+    if (notice) show(notice, ERROR_NOTICES.has(notice.key) ? 'error' : 'info');
+  }, [notice, show]);
 
   return (
     <div
@@ -84,14 +82,7 @@ export function App() {
       <Toolbar />
       <UnsavedDialog />
 
-      {alert && (
-        <div className="px-3 pt-2">
-          <Alert>
-            <NoticeIcon className="h-3.5 w-3.5" />
-            <AlertDescription>{alert}</AlertDescription>
-          </Alert>
-        </div>
-      )}
+      <Toaster />
 
       {file && missing > 0 && (
         <div className="px-3 pt-2">

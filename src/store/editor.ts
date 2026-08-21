@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { applyPatches, PatchError } from '@/core/patch';
 import { applyLiveLocks } from '@/core/verify';
 import type { Block, LockReason } from '@/core/types';
-import { patchNotice, type Notice } from '@/lib/messages';
+import { lockNotice, patchNotice, type Notice } from '@/lib/messages';
+import { useToasts } from './toasts';
 import {
   canPickFolder,
   downloadFile,
@@ -411,7 +412,17 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false }),
 
-  onBlocked: (id) => set({ blockedId: id, selectedId: null }),
+  // 잠긴 블록을 누르면 이유를 말한다 (대원칙 3). 누를 때마다 뜨는 것이라 여기서 띄운다 —
+  // 화면 쪽에서 blockedId 변화를 보면 같은 블록을 다시 눌렀을 때 아무 일도 일어나지 않는다.
+  onBlocked: (id) => {
+    const block = get().blocks.find((b) => b.id === id);
+    if (block?.locked) {
+      useToasts
+        .getState()
+        .show({ key: 'app.blocked', params: { reason: lockNotice(block.locked) } }, 'locked');
+    }
+    set({ blockedId: id, selectedId: null });
+  },
   select: (id) => set({ selectedId: id, blockedId: null }),
 
   // 패치만 지우면 프리뷰에는 고친 내용이 그대로 남는다. 그 블록을 다시 눌렀다

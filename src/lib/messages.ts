@@ -43,6 +43,15 @@ const ko = {
   'toolbar.noOverwriteSupport': '이 브라우저는 덮어쓰기를 지원하지 않아요',
 
   'preview.title': '프리뷰',
+  'toast.dismiss': '알림 닫기',
+
+  'format.bold': '굵게',
+  'format.italic': '기울임',
+  'format.underline': '밑줄',
+  'format.smaller': '작게',
+  'format.bigger': '크게',
+  'format.color': '글자 색',
+  'format.clear': '서식 지우기',
 
   'confirm.title': '저장하지 않은 변경이 있어요',
   'confirm.body': '{count}곳을 고쳤어요. {why}',
@@ -124,6 +133,15 @@ const en: Record<MessageKey, string> = {
   'toolbar.noOverwriteSupport': "This browser can't overwrite files",
 
   'preview.title': 'Preview',
+  'toast.dismiss': 'Dismiss',
+
+  'format.bold': 'Bold',
+  'format.italic': 'Italic',
+  'format.underline': 'Underline',
+  'format.smaller': 'Smaller',
+  'format.bigger': 'Bigger',
+  'format.color': 'Text color',
+  'format.clear': 'Clear formatting',
 
   'confirm.title': 'You have unsaved changes',
   'confirm.body': 'Unsaved edits: {count}. {why}',
@@ -232,6 +250,33 @@ function fill(template: string, locale: Locale, params: Params): string {
     return typeof value === 'object' ? translate(locale, value.key, value.params) : String(value);
   });
 }
+
+/** 프리뷰 안 서식 막대에 붙는 문구 — 호스트가 모아서 건넨다 (ADR-007) */
+export const FORMAT_LABELS = [
+  'format.bold',
+  'format.italic',
+  'format.underline',
+  'format.smaller',
+  'format.bigger',
+  'format.color',
+  'format.clear',
+] as const satisfies readonly MessageKey[];
+
+/**
+ * 스스로 사라지면 안 되는 알림.
+ *
+ * 저장 실패가 3초 만에 사라지면 못 본 사람은 저장된 줄 안다. 잘된 일은 흘려보내도 되지만
+ * 안 된 일은 사람이 직접 닫아야 한다 (대원칙 3).
+ */
+export const ERROR_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
+  'notice.openFailed',
+  'notice.openFailedDetail',
+  'notice.saveFailed',
+  'notice.saveRejected',
+  'notice.folderUnsupported',
+  'notice.bundleNoDocument',
+  'notice.assetsNotFound',
+]);
 
 /** 사전에 없는 키는 감추지 않고 키 그대로 보여준다 — 조용히 비는 것보다 낫다 (대원칙 3) */
 export function translate(locale: Locale, key: MessageKey, params?: Params): string {

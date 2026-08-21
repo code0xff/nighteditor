@@ -17,6 +17,7 @@ import {
   FileCode2,
   Unplug,
   Info,
+  X,
   Languages,
   LoaderCircle,
   Lock,
@@ -53,6 +54,8 @@ export const IconRevertAll = RotateCcw;
 /** 상태 — 잠금(대원칙 3)과 안내는 다른 그림을 쓴다 */
 export const IconLocked = Lock;
 export const IconNotice = Info;
+/** 알림 닫기 */
+export const IconClose = X;
 /** 자원을 못 붙였다 — 참조는 있는데 파일이 없다 */
 export const IconUnlinked = Unplug;
 export const IconLinkFolder = FolderSearch;
