@@ -89,8 +89,10 @@ function findEocd(bytes: Uint8Array): number {
         : centralAt + 46 <= at && dv.getUint32(centralAt, true) === CENTRAL_SIGNATURE;
     if (dirValid) return at;
   }
-  // 진짜 목차는 없었다. zip64 꼴 후보가 있었으면 그쪽 사정(미지원)으로 말한다.
-  if (zip64At >= 0) return zip64At;
+  // 진짜 목차는 없었다. zip64 꼴 후보가 있었으면 그쪽 사정(미지원)으로 말한다 —
+  // 여기서 바로 던져야 이 함수의 반환이 언제나 "검증된 EOCD" 로 남는다. 후보의
+  // offset 을 돌려주면 부르는 쪽이 표식 칸을 다시 봐 주기를 믿는 수밖에 없다.
+  if (zip64At >= 0) throw new ZipError('zip64', {}, 'zip64 is not supported');
   throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }
 
@@ -107,12 +109,10 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
   const dv = view(bytes);
   const eocd = findEocd(bytes);
 
+  // findEocd 가 돌려준 EOCD 는 검증을 마친 것이다 — zip64 표식(0xFF..)이 실린
+  // 후보는 저쪽에서 이미 zip64 사유로 던졌으므로 여기 값은 그대로 믿는다.
   const count = dv.getUint16(eocd + 10, true);
   const centralAt = dv.getUint32(eocd + 16, true);
-  // zip64 는 이 칸들을 전부 0xFF.. 로 채우고 실제 값을 따로 둔다. 지원하지 않는다.
-  if (count === 0xffff || centralAt === 0xffffffff) {
-    throw new ZipError('zip64', {}, 'zip64 is not supported');
-  }
 
   const entries: ZipEntry[] = [];
   let at = centralAt;
