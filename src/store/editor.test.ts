@@ -793,6 +793,36 @@ describe('editor · 핸들은 같은 파일임을 증명한 자리에만 남는�
     expect(useEditor.getState().file?.handle).toBeNull();
     expect(useEditor.getState().source).toBe(theirs);
   });
+
+  it('증명 못 한 문서는 묶음의 일원이 아니다 — 저장이 폴더의 다른 문서를 갈아 끼우지 않는다', async () => {
+    // 옛 코드는 핸들만 안 남기고 docPath 는 겹친 경로로 잡았다. 그러면 저장이 그
+    // 경로의 묶음 내용을 이 문서의 결과물로 바꿔치기하고, 목록에서 폴더의 진짜
+    // index.html 을 여는 길은 "이미 열려 있다" 며 조용히 막혔다 (spec §5.1).
+    const mine = '<html><body><p>내 문서</p></body></html>';
+    const theirs = '<html><body><p>남의 index</p></body></html>';
+    const writes: string[] = [];
+    const handle = fakeHandle('index.html', () => mine, writes); // isSameEntry → false
+    useEditor.setState({ file: { name: 'index.html', text: mine, handle } });
+    pickerReturns(
+      fakeTree('deck', {
+        'index.html': theirs,
+        'other.html': '<html><body><p>다른 문서</p></body></html>',
+      })
+    );
+
+    await useEditor.getState().linkFolder();
+    expect(useEditor.getState().docPath).toBe('');
+
+    // 내 문서를 고쳐 저장한다 — 결과물은 내 파일(핸들)로 가고, 묶음은 그대로여야 한다.
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    expect(await useEditor.getState().save()).toBe(true);
+    expect(writes[0]).toContain('고친 값');
+
+    // 겹친 경로의 문서는 지금 문서가 아니므로 목록에서 열 수 있고, 폴더의 내용이 나와야 한다.
+    await useEditor.getState().openFromBundle('index.html');
+    expect(useEditor.getState().source).toBe(theirs);
+  });
 });
 
 describe('editor · 저장하는 사이의 편집', () => {
@@ -1022,8 +1052,10 @@ describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
 
     await useEditor.getState().linkFolder();
 
-    expect(useEditor.getState().docPath).toBe('slides/index.html');
+    // 되찾은 자리는 자원을 찾는 기준(docDir)으로만 쓴다. 같은 파일임을 증명하지
+    // 못했으므로 묶음 경로(docPath)로는 삼지 않는다 (spec §5.1).
     expect(useEditor.getState().docDir).toBe('slides');
+    expect(useEditor.getState().docPath).toBe('');
     expect(useEditor.getState().notice).toEqual({
       key: 'notice.assetsLinked',
       params: { count: 1 },

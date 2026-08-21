@@ -284,7 +284,15 @@ function openFailedNotice(e: unknown): Notice {
 async function load(
   file: OpenedFile,
   files?: ReadonlyMap<string, Blob>,
-  handles?: ReadonlyMap<string, OpenedFile['handle']>
+  handles?: ReadonlyMap<string, OpenedFile['handle']>,
+  /**
+   * 이 파일이 묶음의 그 경로 **그 자체**인가. 폴더 연결의 자리 되찾기(rebasePath)는
+   * 증명 없는 추측이라, 같은 파일임을 증명하지 못하면 false 로 온다 — 그때 경로는
+   * 자원을 찾는 기준(docDir)으로만 쓰고 묶음 경로(docPath)로는 삼지 않는다. 삼으면
+   * 저장이 그 경로의 묶음 내용을 이 문서의 결과물로 갈아 끼워 폴더의 **다른** 문서를
+   * 바꿔치기하고, 목록에서 그 문서를 여는 길도 "이미 열려 있다" 며 막힌다 (spec §5.1).
+   */
+  member = true
 ): Promise<Partial<EditorState>> {
   const [
     { parseBlocks },
@@ -297,7 +305,7 @@ async function load(
     import('@/core/assets'),
     import('@/lib/assets'),
   ]);
-  const docPath = file.path ?? '';
+  const docPath = member ? (file.path ?? '') : '';
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
   // 문서가 <base href> 로 기준을 옮겨 두면 상대 참조는 문서 자리가 아니라 거기서
@@ -716,7 +724,10 @@ export const useEditor = create<EditorState>((set, get) => ({
         proven && rebased.path && rebased.handle
           ? new Map([[rebased.path, rebased.handle]])
           : undefined;
-      set(await replace(get, load(rebased, read.files, keep)));
+      // 증명 못 한 문서는 묶음의 일원도 아니다 — 되찾은 자리는 자원을 찾는 기준으로만
+      // 쓴다. 묶음 경로로 삼으면 저장이 그 경로의 묶음 내용을 이 문서의 결과물로
+      // 갈아 끼워, 폴더의 **다른** 문서를 바꿔치기한다 (spec §5.1).
+      set(await replace(get, load(rebased, read.files, keep, proven)));
       const attached = countAssets(get()).linked;
       set({
         notice: read.truncated
