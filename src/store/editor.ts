@@ -553,6 +553,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
       const picked = await pickFile();
       if (!picked) return;
+      // 대화상자가 열려 있는 사이에도 더 새 흐름(드롭·OS 열기)은 시작된다. 밀려난
+      // 채 물으면 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면 밀려난
+      // 흐름이 save() 를 불러 사용자의 마지막 선택이 사라진다 — 묻기 전에 물러난다 (spec §5).
+      if (!mine.current()) return;
       // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
@@ -865,6 +869,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
+      // 대화상자에서 돌아오면 묻기 전에 최신인지부터 — 밀려난 물음은 최신 흐름의
+      // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다 (spec §5).
+      if (!mine.current()) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
@@ -900,6 +907,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
+      // 대화상자에서 돌아오면 묻기 전에 최신인지부터 — 밀려난 물음은 최신 흐름의
+      // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다 (spec §5).
+      if (!mine.current()) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;

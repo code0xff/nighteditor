@@ -1676,3 +1676,103 @@ describe('editor · 저장이 도는 동안의 저장 (spec §5)', () => {
     expect(useEditor.getState().unsaved).toBe(true);
   });
 });
+
+describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 물러난다 (spec §5)', () => {
+  /** 물음이 뜨기를 기다리기만 한다 — 답은 테스트가 직접 고른다 */
+  async function promptShown(): Promise<void> {
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('물음이 뜨지 않았다');
+      await Promise.resolve();
+    }
+  }
+
+  /** "안 물었다" 를 보이려면 조건 없이 흘려보내야 한다 — 매크로태스크까지 기다린다 */
+  async function settle(turns = 20): Promise<void> {
+    for (let i = 0; i < turns; i++) await new Promise((r) => setTimeout(r, 0));
+  }
+
+  it('늦게 닫힌 열기 대화상자가 새 드롭의 물음을 취소하지 않는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    // 대화상자는 열린 채 멈춰 있다 — 사용자가 고르는 데는 시간이 걸린다.
+    let finishPick!: (handles: unknown[]) => void;
+    (window as unknown as { showOpenFilePicker: unknown }).showOpenFilePicker = () =>
+      new Promise((resolve) => (finishPick = resolve));
+    const opening = useEditor.getState().openFile();
+
+    // 그 사이 다른 파일을 놓는다 — 이것이 마지막 선택이고, 편집이 있어 물음이 뜬다.
+    const droppedFlow = useEditor.getState().openDropped(
+      new File(['<html><body><p>마지막-선택-문서</p></body></html>'], 'b.html', {
+        type: 'text/html',
+      }),
+      Promise.resolve(null)
+    );
+    await promptShown();
+
+    // 이제야 대화상자가 닫힌다. 밀려난 흐름이 keepEdits 로 들어가면 그 물음이
+    // 드롭의 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다.
+    finishPick([
+      {
+        name: 'old.html',
+        getFile: () =>
+          Promise.resolve(new File(['<p>옛 파일</p>'], 'old.html', { type: 'text/html' })),
+      },
+    ]);
+    await settle();
+
+    // 드롭의 물음이 그대로 떠 있고, 버리기로 답하면 드롭 문서가 선다.
+    expect(useUnsaved.getState().why).not.toBeNull();
+    useUnsaved.getState().reply('discard');
+    await droppedFlow;
+    await opening;
+    expect(useEditor.getState().source).toContain('마지막-선택-문서');
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+
+  it('늦게 닫힌 폴더 열기 대화상자는 새 문서의 편집을 두고 묻지 않는다', async () => {
+    let finishPick!: (dir: unknown) => void;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      new Promise((resolve) => (finishPick = resolve));
+    const opening = useEditor.getState().openFolder();
+
+    // 대화상자가 열린 사이 다른 파일을 놓고 고친다 — 이 편집은 최신 흐름의 것이다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    finishPick(fakeTree('deck', { 'index.html': '<html><body><p>폴더 문서</p></body></html>' }));
+    await settle();
+
+    // 밀려난 흐름은 묻지 않는다 — 물음 자체가 최신 흐름의 편집을 볼모로 잡는 일이다.
+    expect(useUnsaved.getState().why).toBeNull();
+    await opening;
+    expect(useEditor.getState().source).toBe(fixtureSource());
+    expect(useEditor.getState().patches.size).toBe(1);
+  });
+
+  it('늦게 닫힌 폴더 연결 대화상자도 같다 — 밀려났으면 묻지 않는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+
+    let finishPick!: (dir: unknown) => void;
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      new Promise((resolve) => (finishPick = resolve));
+    const linking = useEditor.getState().linkFolder();
+
+    // 그 사이 다른 파일을 놓고 고친다 — 연결하려던 문서는 이미 화면에 없다.
+    await useEditor
+      .getState()
+      .loadDropped(new File(['<html><body><p>마지막-선택-문서</p></body></html>'], 'b.html'));
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    finishPick(fakeTree('assets', { 'logo.png': 'PNG' }));
+    await settle();
+
+    expect(useUnsaved.getState().why).toBeNull();
+    await linking;
+    expect(useEditor.getState().source).toContain('마지막-선택-문서');
+    expect(useEditor.getState().patches.size).toBe(1);
+  });
+});
