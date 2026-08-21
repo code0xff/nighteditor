@@ -15,7 +15,7 @@ import {
   type OpenedFile,
   type Picked,
 } from '@/lib/fs';
-import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/assets';
+import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/bundle';
 import { keepEdits } from './unsaved';
 import type { AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
@@ -214,10 +214,11 @@ async function load(
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
   const refs = parseAssetRefs(file.text, docDir);
-  const assets = files ? await buildAssets(files) : EMPTY_BUNDLE;
-
   // 속성 · 문서에 박힌 <style> · 붙인 스타일시트가 부르는 것까지 한자리에 모은다.
   const inStyle = styleTexts(file.text).flatMap((css) => cssAssetPaths(css, docDir));
+  const assets = files
+    ? await buildAssets(files, [...refs.map((r) => r.path), ...inStyle])
+    : EMPTY_BUNDLE;
   const assetPaths = [...new Set([...refs.map((r) => r.path), ...inStyle, ...assets.missing])];
 
   return {
@@ -280,12 +281,17 @@ async function openBundle(
   const entry = path ? files.get(path) : undefined;
   if (!path || !entry) throw new BundleEmptyError();
 
+  // 열기 대화상자로 고른 폴더에서만 핸들이 온다. 없으면 사본 내려받기로 간다.
+  const handle = handles?.get(path) ?? null;
+  // 묶음에 담긴 것은 **열었을 때의** 바이트다. 저장한 뒤 다른 문서로 갔다 돌아오면
+  // 그 옛 바이트를 다시 읽어, 저장한 내용을 화면에서 지우고 나중에 덮어쓴다.
+  const fresh = await reread({ name: '', text: '', handle });
+
   const next = await load(
     {
       name: path.split('/').pop() ?? path,
-      text: await entry.text(),
-      // 열기 대화상자로 고른 폴더에서만 핸들이 온다. 없으면 사본 내려받기로 간다.
-      handle: handles?.get(path) ?? null,
+      text: handle ? fresh.text : await entry.text(),
+      handle,
       path,
     },
     files,
@@ -328,13 +334,16 @@ export const useEditor = create<EditorState>((set, get) => ({
   bundleHandles: new Map(),
 
   openFile: async () => {
-    set({ busy: true, notice: null });
+    set({ notice: null });
     try {
       // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
       const picked = await pickFile();
       if (!picked) return;
+      // 묻는 동안에는 busy 를 세우지 않는다. 세우면 대화상자의 "저장하고 계속하기" 가
+      // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      set({ busy: true });
       set(await replace(get, openPicked(picked)));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
@@ -403,11 +412,15 @@ export const useEditor = create<EditorState>((set, get) => ({
   onEdit: (id, html, pristine = false) => {
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
-    const patches = nextPatches(get().patches, block, html, pristine);
+    const before = get().patches;
+    const patches = nextPatches(before, block, html, pristine);
     // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
     const editOrder = get().editOrder.filter((x) => x !== id);
     if (patches.has(id)) editOrder.push(id);
-    set({ patches, editOrder, unsaved: true });
+    // 눌렀다 그냥 빠져나온 것은 고친 것이 아니다. 그것까지 "저장 안 함" 으로 세면
+    // 아무것도 안 고치고도 되묻고, 저장을 골라도 쓸 것이 없어 그대로 멈춘다.
+    const changed = patches.get(id) !== before.get(id);
+    set({ patches, editOrder, unsaved: get().unsaved || changed });
   },
 
   failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false }),
@@ -501,12 +514,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ notice: { key: 'notice.folderUnsupported' } });
       return;
     }
-    set({ busy: true, notice: null });
+    set({ notice: null });
     try {
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       const read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      set({ busy: true });
       set(await replace(get, openBundle(read.files, undefined, read.handles)));
       if (read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
@@ -532,14 +546,23 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
 
-    set({ busy: true, notice: null });
+    set({ notice: null });
     try {
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
+      set({ busy: true });
 
-      set(await replace(get, load(await reread(get().file ?? file), read.files)));
+      // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더에 그 경로가
+      // 없으면 이름만 남겨 뿌리 기준으로 다시 푼다 — 안 그러면 제 폴더를 골라 주고도
+      // 자원을 못 찾는다.
+      const fresh = await reread(get().file ?? file);
+      const rebased =
+        fresh.path && !read.files.has(fresh.path)
+          ? { ...fresh, path: fresh.path.split('/').pop() }
+          : fresh;
+      set(await replace(get, load(rebased, read.files, read.handles)));
       const attached = countAssets(get()).linked;
       set({
         notice: read.truncated
@@ -565,9 +588,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { bundle, docPath } = get();
     if (!bundle || path === docPath) return;
 
-    set({ busy: true, notice: null });
+    set({ notice: null });
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
+      set({ busy: true });
       set(await replace(get, openBundle(bundle, path, get().bundleHandles)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });

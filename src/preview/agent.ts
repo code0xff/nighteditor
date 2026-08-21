@@ -35,6 +35,7 @@ export function previewAgent(): () => void {
   let composing = false;
   /** 짚어둔 표시를 지울 시각. 연달아 고르면 앞의 것을 취소한다 */
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  let revealed: HTMLElement | null = null;
   /** 서식 막대와, 막대를 누르는 사이에 지켜 둘 선택 범위 */
   let bar: HTMLElement | null = null;
   let saved: Range | null = null;
@@ -44,6 +45,14 @@ export function previewAgent(): () => void {
 
   const elementFor = (id: number): HTMLElement | null =>
     document.querySelector<HTMLElement>('[' + MARKER + '="' + id + '"]');
+
+  /** 짚어둔 표시를 지운다 */
+  const clearReveal = (): void => {
+    if (revealTimer !== null) clearTimeout(revealTimer);
+    revealTimer = null;
+    revealed?.removeAttribute(REVEALED);
+    revealed = null;
+  };
 
   /** 이벤트 대상에서 위로 올라가며 마커가 붙은 조상을 찾는다 */
   const blockOf = (target: EventTarget | null): HTMLElement | null => {
@@ -159,12 +168,18 @@ export function previewAgent(): () => void {
     if (editingId === null) return;
     const el = elementFor(editingId);
     if (!el) return;
+    // 명령을 걸기 **전에** 이미 그 값을 쓰던 자리를 기억해 둔다. 원래 문서에 같은 값이
+    // 있었다면, 그것까지 바꾸면 고르지도 않은 글자의 크기가 달라진다.
+    const isBig = (node: HTMLElement): boolean =>
+      node.style.fontSize === 'xxx-large' || node.style.fontSize === '-webkit-xxx-large';
+    const before = new Set(
+      [...el.querySelectorAll<HTMLElement>('[style*="font-size"]')].filter(isBig)
+    );
+
     format('fontSize', '7');
+
     for (const node of el.querySelectorAll<HTMLElement>('[style*="font-size"]')) {
-      // 방금 명령이 만든 것만 고른다 — 원래 문서가 쓰던 크기는 건드리지 않는다.
-      if (node.style.fontSize === 'xxx-large' || node.style.fontSize === '-webkit-xxx-large') {
-        node.style.fontSize = times;
-      }
+      if (isBig(node) && !before.has(node)) node.style.fontSize = times;
     }
     commitLater();
   };
@@ -245,6 +260,8 @@ export function previewAgent(): () => void {
       bar = buildBar();
       document.body.appendChild(bar);
     }
+    // 막대를 누르는 사이 선택이 풀릴 수 있다. 지금 들고 있어야 그때 되살릴 것이 있다.
+    saved = sel.getRangeAt(0).cloneRange();
     const rect = sel.getRangeAt(0).getBoundingClientRect();
     bar.style.display = 'flex';
     // 막대를 그린 뒤라야 크기를 안다. 문서 좌표로 옮겨 스크롤해도 따라가게 한다.
@@ -425,12 +442,11 @@ export function previewAgent(): () => void {
         // 그 자리로 데려가는 것까지가 우리 몫이고, 무엇을 보여줄지는 아티팩트가 정한다.
         el.scrollIntoView({ block: 'center', inline: 'nearest' });
         // 스크롤만 하면 어디가 그 블록인지 알 수 없다. 잠깐 짚었다가 지운다.
+        // 앞서 짚어둔 것을 먼저 지운다 — 타이머만 갈아 끼우면 그 표시가 영영 남는다.
+        clearReveal();
         el.setAttribute(REVEALED, '');
-        if (revealTimer !== null) clearTimeout(revealTimer);
-        revealTimer = setTimeout(() => {
-          el.removeAttribute(REVEALED);
-          revealTimer = null;
-        }, 1200);
+        revealed = el;
+        revealTimer = setTimeout(clearReveal, 1200);
       }
     } else if (msg.type === 'revert' && typeof msg.id === 'number') {
       const el = elementFor(msg.id);
@@ -487,7 +503,7 @@ export function previewAgent(): () => void {
   if (document.readyState === 'complete') setTimeout(scan, 0);
 
   return () => {
-    if (revealTimer !== null) clearTimeout(revealTimer);
+    clearReveal();
     bar?.remove();
     bar = null;
     for (const { target, type, fn } of bound) target.removeEventListener(type, fn);

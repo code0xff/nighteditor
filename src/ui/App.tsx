@@ -94,12 +94,9 @@ export function App() {
                 variant="outline"
                 size="sm"
                 disabled={busy}
-                onClick={() => {
-                  // 프리뷰를 다시 그리므로 고친 내용은 사라진다. 조용히 버리지 않는다.
-                  void keepEdits({ key: 'confirm.whyAssets' }).then((go) => {
-                    if (go) void linkFolder();
-                  });
-                }}
+                // 묻는 것은 linkFolder 가 한다. 여기서 먼저 물으면 두 번 묻게 되고,
+                // 저장을 고르면 그 사이 제스처가 만료돼 폴더 대화상자가 거절될 수 있다.
+                onClick={() => void linkFolder()}
               >
                 <IconLinkFolder />
                 {busy ? t('assets.linking') : t('assets.link')}

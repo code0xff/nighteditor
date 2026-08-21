@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
 import { useEditor } from './editor.js';
+import { useUnsaved } from './unsaved.js';
 
 const dropped = () => new File([fixtureSource()], 'artifact.html', { type: 'text/html' });
 
@@ -270,5 +271,42 @@ describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
     await useEditor.getState().linkFolder();
 
     expect(useEditor.getState().source).toBe(saved);
+  });
+});
+
+describe('editor · 리뷰가 짚은 자리', () => {
+  it('묻는 동안에는 busy 가 아니다 — 대화상자의 저장 버튼이 눌려야 한다', async () => {
+    // busy 면 "저장하고 계속하기" 가 비활성이라 남는 선택지가 버리기와 취소뿐이 된다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      Promise.resolve({
+        name: 'deck',
+        entries: () => ({
+          [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true }) }),
+        }),
+      });
+
+    const asking = useEditor.getState().linkFolder();
+    for (let tries = 0; useUnsaved.getState().why === null && tries < 1000; tries++) {
+      await Promise.resolve();
+    }
+    const busyWhileAsking = useEditor.getState().busy;
+    useUnsaved.getState().reply('cancel');
+    await asking;
+
+    expect(busyWhileAsking).toBe(false);
+  });
+
+  it('눌렀다 그냥 빠져나온 것은 고친 것이 아니다', async () => {
+    // 그것까지 저장할 것으로 세면 아무것도 안 고치고도 되묻는다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+
+    useEditor.getState().onEdit(target?.id ?? -1, target?.sourceInner ?? '', true);
+
+    expect(useEditor.getState().patches.size).toBe(0);
+    expect(useEditor.getState().unsaved).toBe(false);
   });
 });

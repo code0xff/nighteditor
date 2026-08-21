@@ -106,6 +106,9 @@ export function ChangeList() {
                     tabIndex={0}
                     onClick={() => reveal(id)}
                     onKeyDown={(e) => {
+                      // 안쪽 되돌리기 버튼에서 올라온 키는 그 버튼의 것이다.
+                      // 가로채면 키보드로는 되돌릴 수가 없다.
+                      if (e.target !== e.currentTarget) return;
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         reveal(id);

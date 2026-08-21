@@ -6,6 +6,7 @@
  */
 import { readZip, ZipError } from '@/core/zip';
 import { mimeOf } from './assets';
+import { FOLDER_LIMITS } from './fs';
 
 /** 그대로 담김(0) 과 deflate(8) 만 쓰인다. 그 밖은 실무에서 거의 없다 */
 const STORED = 0;
@@ -18,11 +19,25 @@ async function inflate(data: Uint8Array): Promise<Blob> {
   return new Response(stream).blob();
 }
 
-/** zip 을 경로 → 파일 묶음으로 푼다 */
+/**
+ * zip 을 경로 → 파일 묶음으로 푼다.
+ *
+ * 푸는 데도 폴더와 같은 한도를 둔다. 압축은 작아도 풀면 얼마든지 커질 수 있어서,
+ * 한도 없이 풀면 파일 몇 개짜리 zip 하나로 탭이 굳는다. 크기는 **풀기 전에** 본다 —
+ * 다 풀어 놓고 재면 이미 늦다.
+ */
 export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
   const files = new Map<string, Blob>();
+  let bytes = 0;
 
   for (const entry of readZip(new Uint8Array(await zip.arrayBuffer()))) {
+    if (files.size >= FOLDER_LIMITS.files) {
+      throw new ZipError(`파일이 너무 많다 (${FOLDER_LIMITS.files}개까지)`);
+    }
+    bytes += entry.size;
+    if (bytes > FOLDER_LIMITS.bytes) {
+      throw new ZipError('풀면 너무 커진다');
+    }
     const type = mimeOf(entry.name);
     if (entry.method === STORED) {
       files.set(entry.name, new Blob([entry.data as BlobPart], { type }));

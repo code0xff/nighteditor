@@ -5,6 +5,7 @@
  * 이름표일 뿐, 어디로도 올라가지 않는다.
  */
 import { cssAssetPaths, dirOf, rewriteCssUrls } from '@/core/assets';
+import type { AssetBundle } from './bundle';
 
 /** 확장자로 유추한 형식 */
 const MIME: Record<string, string> = {
@@ -41,22 +42,6 @@ export function mimeOf(path: string): string {
   return MIME[ext] ?? 'application/octet-stream';
 }
 
-export interface AssetBundle {
-  /** 자원 경로 → blob URL */
-  urls: ReadonlyMap<string, string>;
-  /**
-   * 붙인 스타일시트가 부르는데 묶음에 없던 것.
-   *
-   * 문서의 속성만 봐서는 알 수 없다 — CSS 안의 글꼴과 배경은 그 파일을 열어봐야 나온다.
-   * 못 붙인 것을 세는 자리(§5.1)에서 이걸 함께 센다.
-   */
-  missing: readonly string[];
-  /** 다 쓰면 반드시 부른다. 안 부르면 blob 이 탭을 닫을 때까지 메모리에 남는다 */
-  dispose: () => void;
-}
-
-export const EMPTY_BUNDLE: AssetBundle = { urls: new Map(), missing: [], dispose: () => {} };
-
 function isCss(path: string): boolean {
   return path.toLowerCase().endsWith('.css');
 }
@@ -67,7 +52,11 @@ function isCss(path: string): boolean {
  * CSS 는 두 번째 차례에 만든다. 그 안의 `url()` 을 다른 자원의 blob URL 로 바꿔야
  * 하는데, 그러려면 그 자원들의 URL 이 먼저 있어야 한다.
  */
-export async function buildAssets(files: ReadonlyMap<string, Blob>): Promise<AssetBundle> {
+export async function buildAssets(
+  files: ReadonlyMap<string, Blob>,
+  /** 문서가 실제로 부르는 경로. 여기서 닿는 스타일시트만 훑는다 */
+  reachable?: readonly string[]
+): Promise<AssetBundle> {
   const urls = new Map<string, string>();
   const made: string[] = [];
   const add = (path: string, blob: Blob): void => {
@@ -80,7 +69,11 @@ export async function buildAssets(files: ReadonlyMap<string, Blob>): Promise<Ass
     if (!isCss(path)) add(path, blob.type ? blob : new Blob([blob], { type: mimeOf(path) }));
   }
 
+  // 못 붙인 것은 **이 문서가 부르는** 스타일시트에서만 센다. 폴더에 굴러다니는 남의
+  // 스타일시트가 부르는 글꼴까지 세면, 이 문서와 아무 상관 없는 파일을 찾으라고 조른다.
+  const wanted = reachable ? new Set(reachable) : null;
   const missing = new Set<string>();
+
   for (const [path, blob] of files) {
     if (!isCss(path)) continue;
     // 스타일시트는 자기가 놓인 자리를 기준으로 자기 안의 경로를 푼다.
@@ -88,6 +81,7 @@ export async function buildAssets(files: ReadonlyMap<string, Blob>): Promise<Ass
     const css = rewriteCssUrls(text, dirOf(path), (p) => urls.get(p));
     add(path, new Blob([css], { type: 'text/css' }));
 
+    if (wanted && !wanted.has(path)) continue;
     for (const want of cssAssetPaths(text, dirOf(path))) {
       if (!files.has(want)) missing.add(want);
     }
