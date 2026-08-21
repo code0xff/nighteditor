@@ -61,3 +61,49 @@ describe('unzip', () => {
     expect(pickDocument(withMore.keys())).toBe('deck/index.html');
   });
 });
+
+describe('unzip · 조작된 크기 (spec §6)', () => {
+  /** 진짜 zip 의 목차(중앙 디렉터리)에서 한 항목의 "풀었을 때 크기" 만 바꿔치기한다 */
+  function forgeSize(bytes: Uint8Array, name: string, size: number): Uint8Array {
+    const out = bytes.slice();
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    let eocd = -1;
+    for (let at = out.length - 22; at >= 0; at--) {
+      if (dv.getUint32(at, true) === 0x06054b50) {
+        eocd = at;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('EOCD 가 없다');
+    const count = dv.getUint16(eocd + 10, true);
+    let at = dv.getUint32(eocd + 16, true);
+    const decoder = new TextDecoder();
+    for (let i = 0; i < count; i++) {
+      const nameLength = dv.getUint16(at + 28, true);
+      const extraLength = dv.getUint16(at + 30, true);
+      const commentLength = dv.getUint16(at + 32, true);
+      const entryName = decoder.decode(out.subarray(at + 46, at + 46 + nameLength));
+      if (entryName === name) {
+        dv.setUint32(at + 24, size, true);
+        return out;
+      }
+      at += 46 + nameLength + extraLength + commentLength;
+    }
+    throw new Error(`목차에 없다: ${name}`);
+  }
+
+  it('목차에 작게 적어 두고 크게 풀리는 항목은 거부한다', async () => {
+    // 목차의 크기만 믿으면 zip 폭탄이 한도 검사를 통과한다. 실제로 나온 바이트로 잡는다.
+    const forged = forgeSize(fixtureBundle(), 'deck/index.html', 3);
+
+    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toThrow(
+      '목차의 크기와 실제 크기가 다르다'
+    );
+  });
+
+  it('목차에 크게 적힌 항목은 풀기 전에 거른다', async () => {
+    const forged = forgeSize(fixtureBundle(), 'deck/index.html', 65 * 1024 * 1024);
+
+    await expect(unzip(new Blob([forged as BlobPart]))).rejects.toThrow('풀면 너무 커진다');
+  });
+});
