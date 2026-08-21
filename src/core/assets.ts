@@ -160,12 +160,15 @@ export function documentBaseDir(source: string, docDir: string): string | null {
   if (isExternal(trimmed)) return null;
 
   const { path } = splitSuffix(trimmed);
-  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나면 그 자체가 자리고,
-  // 아니면 마지막 조각은 파일 이름이라 떼어낸다 (URL 해석 규칙과 같다).
-  const dirPart = path.endsWith('/')
-    ? path.slice(0, -1) || '/'
-    : dirOf(path) || (path.startsWith('/') ? '/' : '');
-  return collapse(docDir, dirPart);
+  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나거나 마지막 조각이 `.`·`..` 이면
+  // 그 자체가 자리 표시고, 아니면 마지막 조각은 파일 이름이다 (URL 해석 규칙과 같다).
+  // 파일 이름도 **끝까지 푼 뒤에** 떼어낸다 (spec §5.1) — 풀기 전에 떼면
+  // `..`·`foo/..` 의 마지막 조각이 접히는 대신 잘려 나가, deck/sub 의 `..` 가
+  // deck 이 아니라 deck/sub 로 남는다.
+  const last = decodeSegment(path.split('/').pop() ?? '');
+  const marksDir = path.endsWith('/') || last === '.' || last === '..';
+  const resolved = collapse(docDir, path);
+  return marksDir ? resolved : dirOf(resolved);
 }
 
 /**

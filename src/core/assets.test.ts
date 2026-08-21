@@ -151,6 +151,15 @@ describe('documentBaseDir (spec §5.1)', () => {
     expect(documentBaseDir('<base href="../shared/">', 'deck')).toBe('shared');
   });
 
+  it('마지막 조각이 점 조각이면 자리 표시다 — 파일 이름으로 떼지 않는다 (spec §5.1)', () => {
+    // 풀기 전에 마지막 조각을 떼면 deck/sub 의 `..` 가 deck 이 아니라
+    // deck/sub 로 남아, 상대 자원을 전부 엉뚱한 자리에서 찾는다.
+    expect(documentBaseDir('<base href="..">', 'deck/sub')).toBe('deck');
+    expect(documentBaseDir('<base href=".">', 'deck/sub')).toBe('deck/sub');
+    expect(documentBaseDir('<base href="foo/..">', 'deck/sub')).toBe('deck/sub');
+    expect(documentBaseDir('<base href="%2e%2e">', 'deck/sub')).toBe('deck');
+  });
+
   it('뿌리 base 는 묶음의 최상단이다', () => {
     expect(documentBaseDir('<base href="/">', 'deck')).toBe('');
     expect(documentBaseDir('<base href="/assets/">', 'deck')).toBe('assets');
