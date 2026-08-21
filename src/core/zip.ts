@@ -57,6 +57,86 @@ function view(bytes: Uint8Array): DataView {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
+/** 이름이 UTF-8 로 적혔다는 범용 플래그 (bit 11) */
+const UTF8_NAME_FLAG = 0x0800;
+/** Info-ZIP Unicode Path 부가 필드 */
+const UNICODE_PATH_ID = 0x7075;
+
+/**
+ * CP437 코드 페이지 — UTF-8 표시가 없는 zip 의 이름 인코딩. 0x20–0x7E 는 ASCII 와
+ * 같다. 손으로 만든 표는 틀리기 쉽지만 CP437 은 확장이 없는 고정 표라 상수로 둔다.
+ */
+const CP437 =
+  '\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼' +
+  ' !"#$%&\'()*+,-./0123456789:;<=>?' +
+  '@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_' +
+  '`abcdefghijklmnopqrstuvwxyz{|}~⌂' +
+  'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒ' +
+  'áíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐' +
+  '└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀' +
+  'αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00a0';
+
+/** IEEE CRC-32 — Unicode Path 필드가 표준 이름과 같은 판인지 확인하는 데만 쓴다 */
+function crc32(bytes: Uint8Array): number {
+  let crc = ~0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return ~crc >>> 0;
+}
+
+/**
+ * Unicode Path 부가 필드의 이름. 없거나 믿을 수 없으면 null.
+ *
+ * CRC 가 표준 이름과 맞을 때만 믿는다 — 이름만 바뀌고 필드는 옛것으로 남은 zip 이
+ * 있어, 무조건 믿으면 지금 이름 대신 옛 이름이 묶음의 키가 된다.
+ */
+function unicodePathName(extra: Uint8Array, nameBytes: Uint8Array): string | null {
+  const dv = view(extra);
+  let at = 0;
+  while (at + 4 <= extra.length) {
+    const id = dv.getUint16(at, true);
+    const end = at + 4 + dv.getUint16(at + 2, true);
+    // 잘린 부가 필드는 더 읽지 않는다 — 없는 바이트를 지어내지 않는다.
+    if (end > extra.length) return null;
+    if (id === UNICODE_PATH_ID) {
+      const size = end - (at + 4);
+      if (size >= 5 && extra[at + 4] === 1 && dv.getUint32(at + 5, true) === crc32(nameBytes)) {
+        return new TextDecoder().decode(extra.subarray(at + 9, end));
+      }
+      return null;
+    }
+    at = end;
+  }
+  return null;
+}
+
+/**
+ * 항목 이름을 플래그대로 읽는다 (spec §5.1).
+ *
+ * UTF-8 표시(bit 11) 없이 무조건 UTF-8 로 풀면 옛 zip 의 비 ASCII 이름이 U+FFFD 로
+ * 깨져 묶음의 키가 어긋난다 — 문서 후보도 상대 자원도 그 키로 찾으므로, 멀쩡한
+ * zip 에서 문서가 안 잡히거나 자원이 없다고 세게 된다.
+ */
+function decodeName(nameBytes: Uint8Array, flags: number, extra: Uint8Array): string {
+  if (flags & UTF8_NAME_FLAG) return new TextDecoder().decode(nameBytes);
+  const unicode = unicodePathName(extra, nameBytes);
+  if (unicode !== null) return unicode;
+  // 표시가 없어도 요즘 zip 은 UTF-8 이름을 그대로 담는다 — macOS 의 zip 은 한글
+  // 이름에도 bit 11 을 세우지 않는다. 엄격한 UTF-8 로 풀리면 그것이 이름이다:
+  // ASCII 는 두 해석이 같고, CP437 로 적힌 비 ASCII 이름이 우연히 올바른 UTF-8
+  // 열이 되는 일은 사실상 없다 (0x80–0xBF 가 홀로 오면 UTF-8 이 아니다).
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(nameBytes);
+  } catch {
+    // 올바른 UTF-8 이 아니다 — 옛 zip 의 CP437 이름이다.
+  }
+  let out = '';
+  for (const byte of nameBytes) out += CP437[byte] as string;
+  return out;
+}
+
 function findEocd(bytes: Uint8Array): number {
   const dv = view(bytes);
   const from = Math.max(0, bytes.length - EOCD_MAX_BACK);
@@ -143,7 +223,12 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
     if (recordEnd > eocd) {
       throw new ZipError('badCentral', {}, 'central record overruns the EOCD');
     }
-    const name = new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLength));
+    const nameStart = at + 46;
+    const name = decodeName(
+      bytes.subarray(nameStart, nameStart + nameLength),
+      flags,
+      bytes.subarray(nameStart + nameLength, nameStart + nameLength + extraLength)
+    );
     at = recordEnd;
 
     // 암호화된 항목은 풀 수 없다. 반쯤 읽어 깨진 파일을 붙이느니 말하고 멈춘다.

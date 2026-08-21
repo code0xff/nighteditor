@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { crc32 } from 'node:zlib';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -206,6 +207,71 @@ describe('readZip · 픽스처 회귀', () => {
     dv.setUint16(centralAt + 28, 0xffff, true); // 이름 길이를 부풀린다
 
     expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badCentral' }));
+  });
+
+  /** 이름이 `want` 인 중앙 레코드의 위치. 픽스처엔 부가 필드가 없어 이름은 ASCII 그대로다 */
+  function centralRecordOf(zip: Uint8Array, want: string): number {
+    const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+    let at = dv.getUint32(zip.length - 22 + 16, true);
+    for (;;) {
+      const nameLength = dv.getUint16(at + 28, true);
+      const name = new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLength));
+      if (name === want) return at;
+      at += 46 + nameLength + dv.getUint16(at + 30, true) + dv.getUint16(at + 32, true);
+    }
+  }
+
+  it('UTF-8 표시가 없는 이름은 CP437 로 읽는다', () => {
+    // 픽스처의 이름은 전부 플래그 0(UTF-8 표시 없음)으로 적혀 있다. 이름에 0x82 를
+    // 심으면 CP437 로는 é, 무조건 UTF-8 로 풀면 U+FFFD 다 — 키가 깨지면 문서 후보도
+    // 상대 자원도 그 이름으로는 안 잡힌다.
+    const zip = new Uint8Array(fixtureBundle());
+    const at = centralRecordOf(zip, 'deck/index.html');
+    zip[at + 46 + 'deck/'.length] = 0x82; // 'index' 의 i 자리
+
+    const names = readZip(zip).map((e) => e.name);
+
+    expect(names).toContain('deck/éndex.html');
+  });
+
+  /** 유니코드 경로 부가 필드(0x7075)를 한 항목에 끼워 넣은 픽스처 변형 */
+  function withUnicodePath(utf8Name: string, crcOk: boolean): Uint8Array {
+    const zip = new Uint8Array(fixtureBundle());
+    const dv = new DataView(zip.buffer);
+    const at = centralRecordOf(zip, 'deck/index.html');
+    const nameLength = dv.getUint16(at + 28, true);
+    const nameBytes = zip.subarray(at + 46, at + 46 + nameLength);
+    const encoded = new TextEncoder().encode(utf8Name);
+    const field = new Uint8Array(4 + 5 + encoded.length);
+    const fdv = new DataView(field.buffer);
+    fdv.setUint16(0, 0x7075, true);
+    fdv.setUint16(2, 5 + encoded.length, true);
+    field[4] = 1; // 필드 버전
+    fdv.setUint32(5, crcOk ? crc32(nameBytes) : 0xdeadbeef, true);
+    field.set(encoded, 9);
+
+    const insertAt = at + 46 + nameLength + dv.getUint16(at + 30, true);
+    const out = new Uint8Array(zip.length + field.length);
+    out.set(zip.subarray(0, insertAt));
+    out.set(field, insertAt);
+    out.set(zip.subarray(insertAt), insertAt + field.length);
+    new DataView(out.buffer).setUint16(at + 30, dv.getUint16(at + 30, true) + field.length, true);
+    return out;
+  }
+
+  it('유니코드 경로 부가 필드의 CRC 가 표준 이름과 맞으면 그쪽 이름을 쓴다', () => {
+    const names = readZip(withUnicodePath('deck/실제이름.html', true)).map((e) => e.name);
+
+    expect(names).toContain('deck/실제이름.html');
+    expect(names).not.toContain('deck/index.html');
+  });
+
+  it('CRC 가 어긋난 유니코드 경로 필드는 옛것이다 — 표준 이름을 쓴다', () => {
+    // 이름만 바뀌고 필드는 갱신되지 않은 zip 이 있다. 무조건 믿으면 옛 이름이 키가 된다.
+    const names = readZip(withUnicodePath('deck/옛이름.html', false)).map((e) => e.name);
+
+    expect(names).toContain('deck/index.html');
+    expect(names).not.toContain('deck/옛이름.html');
   });
 
   it('파일 수 한도를 목차를 읽는 동안 센다', () => {
