@@ -174,12 +174,11 @@ function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
  */
 async function reread(file: OpenedFile): Promise<OpenedFile> {
   if (!file.handle) return file;
-  try {
-    return { ...file, text: await (await file.handle.getFile()).text() };
-  } catch {
-    // 못 읽으면 들고 있던 것으로 간다 — 여기서 멈추면 자원도 못 붙인다.
-    return file;
-  }
+  // 실패를 삼키지 않는다 (대원칙 3). 들고 있던 바이트로 계속 가면 묶음에서는 빈
+  // 자리 표시가 그대로 열려 문서가 빈 화면이 되고, 폴더 연결에서는 옛 원본으로 다시
+  // 그려 놓고 나중에 저장할 때 디스크의 새 내용을 옛 것으로 덮어쓴다.
+  // 던지면 부르는 쪽의 catch 가 이유를 알림으로 돌리고, 보던 화면은 그대로 남는다.
+  return { ...file, text: await (await file.handle.getFile()).text() };
 }
 
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
@@ -353,9 +352,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
-  // OS 가 열어준 파일(PWA file_handlers)을 그대로 받는다.
+  // OS 가 열어준 파일(PWA file_handlers)을 받는다.
   // load 가 파서 청크를 받아오므로 여기도 실패할 수 있다 — 조용히 굳지 않게 감싼다 (ADR-008).
   adopt: async (file) => {
+    // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
+    // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
+    if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
     set({ busy: true, notice: null });
     try {
       set(await replace(get, load(file)));

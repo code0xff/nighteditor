@@ -8,6 +8,7 @@ const dropped = () => new File([fixtureSource()], 'artifact.html', { type: 'text
 
 beforeEach(() => {
   // notice 까지 지운다. 남겨두면 앞 테스트의 알림이 다음 단정으로 새어 나간다.
+  // unsaved 도 지운다 — 남으면 다음 테스트의 adopt 가 있지도 않은 편집을 두고 물으며 멈춘다.
   useEditor.setState({
     file: null,
     source: '',
@@ -17,7 +18,9 @@ beforeEach(() => {
     editOrder: [],
     revertQueue: [],
     notice: null,
+    unsaved: false,
   });
+  useUnsaved.setState({ why: null, answer: null });
 });
 
 describe('editor · 파일 열기 (동적 import 경로)', () => {
@@ -310,3 +313,155 @@ describe('editor · 리뷰가 짚은 자리', () => {
     expect(useEditor.getState().unsaved).toBe(false);
   });
 });
+
+/** 대화상자가 뜨기를 기다렸다가 대신 답한다 — 사람이 버튼을 누르는 자리다 */
+async function answerWith(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
+  for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+    if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+    await Promise.resolve();
+  }
+  useUnsaved.getState().reply(choice);
+}
+
+/** 안이 문자열이면 파일, 객체면 하위 폴더인 showDirectoryPicker 폴더 흉내 */
+type Tree = { [name: string]: string | Tree };
+function fakeTree(name: string, tree: Tree): unknown {
+  const entries = Object.entries(tree).map(([entryName, value]) => [
+    entryName,
+    typeof value === 'string'
+      ? {
+          name: entryName,
+          getFile: () => Promise.resolve(new File([value], entryName, { type: 'text/html' })),
+        }
+      : fakeTree(entryName, value),
+  ]);
+  return {
+    name,
+    entries: () => ({
+      [Symbol.asyncIterator]: () => {
+        let at = 0;
+        return {
+          next: () =>
+            Promise.resolve(
+              at < entries.length
+                ? { value: entries[at++], done: false }
+                : { value: undefined, done: true }
+            ),
+        };
+      },
+    }),
+  };
+}
+
+function pickerReturns(dir: unknown): void {
+  (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+    Promise.resolve(dir);
+}
+
+
+
+describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
+  it('폴더의 문서를 다시 읽다 실패하면 빈 문서를 열지 않고 이유를 말한다', async () => {
+    // 옛 코드는 실패를 삼키고 빈 자리 표시로 계속 가서, 고른 문서가 빈 화면으로 열렸다.
+    let reads = 0;
+    const handle = {
+      name: 'index.html',
+      getFile: () => {
+        reads++;
+        return reads === 1
+          ? Promise.resolve(new File(['<p>본문</p>'], 'index.html', { type: 'text/html' }))
+          : Promise.reject(new Error('디스크에서 사라졌다'));
+      },
+    };
+    pickerReturns({
+      name: 'deck',
+      entries: () => ({
+        [Symbol.asyncIterator]: () => {
+          let given = false;
+          return {
+            next: () => {
+              if (given) return Promise.resolve({ value: undefined, done: true });
+              given = true;
+              return Promise.resolve({ value: ['index.html', handle], done: false });
+            },
+          };
+        },
+      }),
+    });
+
+    await useEditor.getState().openFolder();
+
+    expect(useEditor.getState().file).toBeNull();
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.openFailedDetail',
+      params: { detail: '디스크에서 사라졌다' },
+    });
+    expect(useEditor.getState().busy).toBe(false);
+  });
+
+  it('폴더 연결에서 다시 읽다 실패하면 옛 바이트로 다시 그리지 않는다', async () => {
+    // 옛 바이트로 그리면 저장한 편집이 화면에서 사라지고, 그 뒤에 저장하면
+    // 디스크의 새 내용을 옛 내용으로 덮어쓴다.
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.reject(new Error('디스크에서 사라졌다')),
+      createWritable: () =>
+        Promise.resolve({ write: () => Promise.resolve(), close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>열었을 때의 내용</p></body></html>',
+      handle,
+    });
+    pickerReturns(fakeTree('assets', {}));
+
+    await useEditor.getState().linkFolder();
+
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.openFailedDetail',
+      params: { detail: '디스크에서 사라졌다' },
+    });
+    // 보던 화면은 그대로 살아 있어야 한다.
+    expect(useEditor.getState().source).toContain('열었을 때의 내용');
+    expect(useEditor.getState().busy).toBe(false);
+  });
+});
+
+describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () => {
+  it('고치던 것이 있으면 대화상자를 띄우고, 취소하면 지금 문서에 머문다', async () => {
+    // launchQueue 로 들어와도 다른 파일 열기다. 조용히 갈아타면 편집이 사라진다 (spec §4).
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const adopting = useEditor
+      .getState()
+      .adopt({ name: 'another.html', text: '<p>다른 파일</p>', handle: null });
+    await answerWith('cancel');
+    await adopting;
+
+    expect(useEditor.getState().file?.name).toBe('artifact.html');
+    expect(useEditor.getState().patches.size).toBe(1);
+  });
+
+  it('버리기를 고르면 새 파일로 갈아탄다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const adopting = useEditor.getState().adopt({
+      name: 'another.html',
+      text: '<html><body><p>다른 파일</p></body></html>',
+      handle: null,
+    });
+    await answerWith('discard');
+    await adopting;
+
+    expect(useEditor.getState().file?.name).toBe('another.html');
+    expect(useEditor.getState().patches.size).toBe(0);
+  });
+});
+
+
+
+
