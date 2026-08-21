@@ -119,7 +119,12 @@ export interface EditorState {
   openFolder: () => Promise<void>;
   /** 여는 도중의 실패를 알림으로 돌린다 — 화면 쪽에서 잡은 오류가 들어온다 */
   failedToOpen: (e: unknown) => void;
-  adopt: (file: OpenedFile) => Promise<void>;
+  /**
+   * OS 가 열어준 파일(PWA file_handlers)을 받는다. 읽기가 끝나기를 기다리지 않고
+   * 프라미스째 받는다 — 예약을 읽기 **전에** 잡아야, 읽는 사이 사용자가 연 더 새
+   * 흐름을 이 흐름이 밀어내지 않는다 (spec §5 · 갈아 끼우기 예약).
+   */
+  adopt: (file: OpenedFile | Promise<OpenedFile>) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
@@ -471,6 +476,9 @@ class BundleEmptyError extends Error {}
 /** 폴더 훑기가 실패했다는 표식 — null(폴더가 아니었다)과 구별해야 파일 열기로 새지 않는다 */
 const scanFailed = Symbol('scan-failed');
 
+/** OS 가 건넨 파일의 읽기가 실패했다는 표식 — 실패는 만들어진 자리에서 이미 알렸다 */
+const readFailed = Symbol('read-failed');
+
 /**
  * 폴더에서 문서를 못 찾았을 때 — 스캔이 잘렸으면 그 사정을 함께 말한다 (spec §5.1).
  * "문서가 없다" 라고만 하면 거짓말일 수 있다 — 문서는 한도 밖에 있었을 수 있다.
@@ -535,15 +543,36 @@ export const useEditor = create<EditorState>((set, get) => ({
   // OS 가 열어준 파일(PWA file_handlers)을 받는다.
   // load 가 파서 청크를 받아오므로 여기도 실패할 수 있다 — 조용히 굳지 않게 감싼다 (ADR-008).
   adopt: async (file) => {
+    // 예약은 OS 가 파일을 건넨 순간에 — 읽기·물음·저장을 기다리기 전에 (spec §5).
+    // 읽기가 끝난 뒤에 예약하면, 읽는 사이 사용자가 연 더 새 흐름을 이 흐름이
+    // 밀어내 사용자의 마지막 선택이 조용히 버려진다.
     const mine = reserveReplacement();
+    // 읽기 실패는 만들어진 자리에서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를
+    // 기다리지 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다 (unhandled
+    // rejection). 밀려난 흐름의 실패는 알리지 않는다 — 남(최신 흐름)의 화면에 대한
+    // 말이 된다 (spec §5 · 갈아 끼우기 예약).
+    const reading: Promise<OpenedFile | typeof readFailed> = Promise.resolve(file).catch(
+      (e: unknown) => {
+        if (mine.current()) get().failedToOpen(e);
+        return readFailed;
+      }
+    );
     try {
       // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
       // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다 (spec §5).
       if (!mine.current()) return;
+      // 답한 순간부터 잠근다 — 읽기가 끝나기를 기다리는 사이의 편집도 새 상태가
+      // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
+      mine.engage();
+      const opened = await reading;
+      // 읽다 실패한 것은 위에서 이미 알렸다. 여기서 또 알리면 두 번 뜬다.
+      if (opened === readFailed) return;
+      // 읽기를 기다리는 사이도 마찬가지다 — 밀려났으면 설치도 알림도 남의 몫이다.
+      if (!mine.current()) return;
       set({ notice: null });
-      await replace(get, set, mine, load(file));
+      await replace(get, set, mine, load(opened));
     } catch (e) {
       if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {

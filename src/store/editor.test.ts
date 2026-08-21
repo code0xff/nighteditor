@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
-import type { FolderRead } from '@/lib/fs';
+import type { FolderRead, OpenedFile } from '@/lib/fs';
 import { countAssets, unsavedCount, useEditor } from './editor.js';
 import { useReplacement } from './replacement.js';
 import { useToasts } from './toasts.js';
@@ -1538,5 +1538,52 @@ describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는�
     expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editBeforeScan')).toBe(
       true
     );
+  });
+});
+
+describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 끼우기 예약)', () => {
+  it('OS 파일을 읽는 사이 사용자가 연 파일이 이긴다', async () => {
+    // 읽기가 끝난 뒤에 예약하면, 읽는 사이 사용자가 연 더 새 흐름을 OS 흐름이
+    // 밀어내 사용자의 마지막 선택이 조용히 버려진다.
+    let finishRead!: (file: OpenedFile) => void;
+    const reading = new Promise<OpenedFile>((resolve) => (finishRead = resolve));
+    const adopting = useEditor.getState().adopt(reading);
+
+    // 읽는 사이 사용자가 다른 파일을 놓는다 — 이것이 마지막 선택이다.
+    await useEditor.getState().loadDropped(dropped());
+    finishRead({
+      name: 'slow.html',
+      text: '<html><body><p>OS 파일</p></body></html>',
+      handle: null,
+    });
+    await adopting;
+
+    expect(useEditor.getState().file?.name).toBe('artifact.html');
+    // 밀려난 흐름은 잠금도 건드리지 않는다 — 최신 흐름의 화면이 잠긴 채 남으면 안 된다.
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+
+  it('읽기가 실패하면 알린다 — 프라미스로 받아도 조용히 굳지 않는다', async () => {
+    await useEditor.getState().adopt(Promise.reject(new Error('디스크에서 사라졌다')));
+
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.openFailedDetail',
+      params: { detail: '디스크에서 사라졌다' },
+    });
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+
+  it('밀려난 OS 흐름의 읽기 실패는 알리지 않는다', async () => {
+    // 남(최신 흐름)이 멀쩡히 세운 문서 위에 "못 열었다" 가 뜬다 (spec §5).
+    let failRead!: (e: Error) => void;
+    const reading = new Promise<OpenedFile>((_, reject) => (failRead = reject));
+    const adopting = useEditor.getState().adopt(reading);
+
+    await useEditor.getState().loadDropped(dropped());
+    failRead(new Error('사라진 파일'));
+    await adopting;
+
+    expect(useEditor.getState().file?.name).toBe('artifact.html');
+    expect(useEditor.getState().notice).toBeNull();
   });
 });

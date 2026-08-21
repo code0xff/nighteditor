@@ -205,12 +205,14 @@ export async function fromHandle(handle: FileHandle): Promise<OpenedFile> {
  * 파일 선택 대화상자를 거치지 않고도 핸들이 오므로 덮어쓰기 저장이 그대로 된다.
  * 지원하지 않는 환경에서는 아무 일도 하지 않는다.
  */
-export function onFileLaunch(handler: (file: OpenedFile) => void): void {
+export function onFileLaunch(handler: (file: Promise<OpenedFile>) => void): void {
   const queue = (window as unknown as { launchQueue?: LaunchQueue }).launchQueue;
   if (!queue) return;
   queue.setConsumer((params) => {
     const handle = params.files[0];
-    if (handle) void fromHandle(handle).then(handler);
+    // 읽기를 기다리지 않고 프라미스째 건넨다 — 받는 쪽이 갈아 끼우기 예약을 읽기
+    // **전에** 잡아야, 읽는 사이 사용자가 연 더 새 흐름이 밀려나지 않는다 (spec §5).
+    if (handle) handler(fromHandle(handle));
   });
 }
 
