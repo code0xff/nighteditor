@@ -127,11 +127,7 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
     if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
 
     if (entries.length >= maxFiles) {
-      throw new ZipError(
-        'tooManyFiles',
-        { limit: maxFiles },
-        `too many files (limit ${maxFiles})`
-      );
+      throw new ZipError('tooManyFiles', { limit: maxFiles }, `too many files (limit ${maxFiles})`);
     }
 
     // 조작된 목차는 localAt 을 버퍼 밖에 둘 수 있다. 경계를 먼저 보지 않으면

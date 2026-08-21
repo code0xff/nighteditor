@@ -668,7 +668,12 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     // 조용히 사본 내려받기로 격하된다 (spec §5.1 · 핸들 유지).
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
-    const handle = fakeHandle('index.html', () => onDisk, [], () => true);
+    const handle = fakeHandle(
+      'index.html',
+      () => onDisk,
+      [],
+      () => true
+    );
     // adopt(파일 열기·OS 열기)와 같은 모양 — path 가 없다.
     useEditor.setState({ file: { name: 'index.html', text, handle } });
     pickerReturns(
@@ -695,7 +700,12 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     // 저장은 조용히 사본 내려받기로 격하된다.
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
-    const handle = fakeHandle('index.html', () => onDisk, [], () => true);
+    const handle = fakeHandle(
+      'index.html',
+      () => onDisk,
+      [],
+      () => true
+    );
     useEditor.setState({ file: { name: 'index.html', text, handle, path: 'index.html' } });
     pickerReturns(
       fakeTree('deck', {

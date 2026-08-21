@@ -154,7 +154,9 @@ export function documentBaseDir(source: string, docDir: string): string | null {
   const { path } = splitSuffix(trimmed);
   // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나면 그 자체가 자리고,
   // 아니면 마지막 조각은 파일 이름이라 떼어낸다 (URL 해석 규칙과 같다).
-  const dirPart = path.endsWith('/') ? path.slice(0, -1) || '/' : dirOf(path) || (path.startsWith('/') ? '/' : '');
+  const dirPart = path.endsWith('/')
+    ? path.slice(0, -1) || '/'
+    : dirOf(path) || (path.startsWith('/') ? '/' : '');
   return collapse(docDir, dirPart);
 }
 
