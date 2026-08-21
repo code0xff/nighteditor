@@ -1,15 +1,15 @@
 import { Brand } from '@/components/Brand';
 import { DocSelect } from '@/components/DocSelect';
 import { LangSelect } from '@/components/LangSelect';
+import { OpenButton } from '@/components/OpenButton';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { canOverwrite, canPickFolder } from '@/lib/fs';
-import { IconDownloadCopy, IconOpen, IconOpenFolder, IconSave } from '@/lib/icons';
+import { canOverwrite } from '@/lib/fs';
+import { IconDownloadCopy, IconSave } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
 import { titleBlock, useEditor } from '@/store/editor';
-import { keepEdits } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
 
 export function Toolbar() {
@@ -17,18 +17,10 @@ export function Toolbar() {
   const blocks = useEditor((s) => s.blocks);
   const patches = useEditor((s) => s.patches);
   const busy = useEditor((s) => s.busy);
-  const openFile = useEditor((s) => s.openFile);
-  const openFolder = useEditor((s) => s.openFolder);
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const { t } = useI18n();
-
-  // 열기는 지금 편집을 덮어쓴다. 조용히 버리지 않는다 (spec §4).
-  const open = async (what: 'file' | 'folder') => {
-    if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-    await (what === 'file' ? openFile() : openFolder());
-  };
 
   const title = titleBlock(blocks);
   const titleValue = (title && patches.get(title.id)) ?? title?.sourceText ?? '';
@@ -37,23 +29,7 @@ export function Toolbar() {
     <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur">
       <Brand />
 
-      <Button variant="outline" size="sm" onClick={() => void open('file')} disabled={busy}>
-        <IconOpen />
-        {t('toolbar.open')}
-      </Button>
-
-      {canPickFolder() && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void open('folder')}
-          disabled={busy}
-          title={t('toolbar.openFolder')}
-        >
-          <IconOpenFolder />
-          {t('toolbar.openFolder')}
-        </Button>
-      )}
+      <OpenButton />
 
       {file && (
         <>

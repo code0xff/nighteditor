@@ -29,8 +29,10 @@ const ko = {
   'app.emptyHint': '글자를 눌러 고치면, 저장할 때 고친 부분만 바뀌어요',
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
 
-  'toolbar.open': '열기',
+  'toolbar.openFile': '파일 열기',
+  'toolbar.openFileHint': 'HTML 파일 하나, 또는 zip 을 엽니다',
   'toolbar.openFolder': '폴더 열기',
+  'toolbar.openFolderHint': '폴더를 통째로 열어 옆 파일까지 함께 읽어요',
   'toolbar.title': '제목',
   'toolbar.document': '문서가 {count}개예요. 열 문서를 고르세요',
   'toolbar.save': '저장',
@@ -107,8 +109,10 @@ const en: Record<MessageKey, string> = {
   'app.emptyHint': 'Click any text to edit it. Saving changes only what you edited.',
   'app.blocked': "You can't edit this one · {reason}",
 
-  'toolbar.open': 'Open',
+  'toolbar.openFile': 'Open a file',
+  'toolbar.openFileHint': 'Opens one HTML file, or a zip',
   'toolbar.openFolder': 'Open a folder',
+  'toolbar.openFolderHint': 'Opens a whole folder, reading the files next to it too',
   'toolbar.title': 'Title',
   'toolbar.document': '{count} documents in here. Pick one to open',
   'toolbar.save': 'Save',
