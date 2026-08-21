@@ -576,6 +576,34 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     expect(useEditor.getState().file?.handle).toBeNull();
   });
 
+  it('파일 하나로 연 문서도 제 폴더를 연결하면 핸들이 산다 — 이름이 곧 경로다', async () => {
+    // 파일 열기로 연 문서에는 묶음 경로가 없다. 그대로 두면 keep 이 비어, 폴더를
+    // 연결하고 다른 문서로 갔다 돌아올 때 핸들 없이 열린다 — 덮어쓰기라던 저장이
+    // 조용히 사본 내려받기로 격하된다 (spec §5.1 · 핸들 유지).
+    const text = '<html><body><p>본문</p></body></html>';
+    const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
+    const handle = fakeHandle('index.html', () => onDisk);
+    // adopt(파일 열기·OS 열기)와 같은 모양 — path 가 없다.
+    useEditor.setState({ file: { name: 'index.html', text, handle } });
+    pickerReturns(
+      fakeTree('deck', {
+        'index.html': text,
+        'other.html': '<html><body><p>다른 문서</p></body></html>',
+      })
+    );
+
+    await useEditor.getState().linkFolder();
+    expect(useEditor.getState().docPath).toBe('index.html');
+    expect(useEditor.getState().bundleHandles.get('index.html')).toBe(handle);
+
+    await useEditor.getState().openFromBundle('other.html');
+    await useEditor.getState().openFromBundle('index.html');
+
+    expect(useEditor.getState().file?.handle).toBe(handle);
+    // 묶음의 옛 바이트가 아니라 디스크의 지금 내용으로 돌아와야 한다.
+    expect(useEditor.getState().source).toBe(onDisk);
+  });
+
   it('지금 문서의 쓰기 핸들만은 남긴다 — 갔다 돌아와도 덮어쓰기가 산다 (spec §5.1)', async () => {
     // 핸들을 다 버리면 돌아온 문서가 연결할 때 읽어 둔 옛 바이트로 열리고,
     // 저장은 조용히 사본 내려받기로 격하된다.

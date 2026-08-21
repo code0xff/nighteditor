@@ -648,16 +648,23 @@ export const useEditor = create<EditorState>((set, get) => ({
 
       // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
       // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
+      // 파일 하나로 연 문서에는 묶음 경로가 아예 없다 — 그때는 이름이 곧 경로다
+      // (OpenedFile.path 의 규칙 그대로). 경로 없이 두면 아래 keep 이 비어, 다른
+      // 문서로 갔다 돌아올 때 핸들을 잃는다.
       const fresh = await reread(get().file ?? file);
-      const rebased = { ...fresh, path: rebasePath(fresh.path, read.files) };
+      const rebased = { ...fresh, path: rebasePath(fresh.path ?? fresh.name, read.files) };
       // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
       // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
       // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
       // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
       // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
       // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
+      // 고른 폴더에 없는 문서의 핸들은 남길 자리가 없다 — 그 경로는 묶음의 후보가
+      // 아니라서 돌아올 길 자체가 없고, 남기면 남의 파일 경로에 걸릴 수 있다.
       const keep =
-        rebased.path && rebased.handle ? new Map([[rebased.path, rebased.handle]]) : undefined;
+        rebased.path && rebased.handle && read.files.has(rebased.path)
+          ? new Map([[rebased.path, rebased.handle]])
+          : undefined;
       set(await replace(get, load(rebased, read.files, keep)));
       const attached = countAssets(get()).linked;
       set({
