@@ -983,7 +983,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   save: async () => {
-    const { file, source, blocks, patches, unsaved } = get();
+    const { file, source, blocks, patches, unsaved, saving } = get();
     // 파일과 다른 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
     // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
     //
@@ -991,7 +991,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 파일에는 옛 편집이 남아 있다 — 그때 여기서 false 로 나가면 "저장하고 계속하기" 가
     // 쓸 것이 없다며 멈춰, 대화상자에서 빠져나갈 길이 취소와 버리기뿐이 된다.
     // 패치 0개의 저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다.
-    if (!file || !unsaved) return false;
+    //
+    // 저장이 파일을 쓰는 동안의 저장은 시작하지 않는다 (spec §5). 쓰는 사이 편집하면
+    // unsaved 가 다시 서서 Ctrl+S 가 여기까지 오는데, 겹쳐 돌면 두 저장이 서로 다른
+    // 스냅샷을 나란히 쓰다 끝나는 순서에 따라 옛 결과물이 디스크에서 이긴다.
+    // 잃는 것은 없다 — 도는 저장이 끝나면 그 편집은 저장 안 된 것으로 남는다.
+    if (!file || !unsaved || saving) return false;
     // 쓰는 동안 다른 문서로 갈아탈 수 있다. 뒤늦게 도착한 결과가 새 문서의 상태에
     // 옛 결과물을 적지 않도록, 시작하기 전에 지금 문서의 세대를 받아 둔다 (spec §5).
     const mine = claimDocument();

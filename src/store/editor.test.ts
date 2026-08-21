@@ -1634,3 +1634,45 @@ describe('editor · 블록 안의 자원과 양방향 경계 (ADR-011)', () => {
     expect(sent?.html).not.toContain('img/logo.png');
   });
 });
+
+describe('editor · 저장이 도는 동안의 저장 (spec §5)', () => {
+  it('겹쳐 시작하지 않는다 — 옛 스냅샷이 디스크에서 이기지 못하게', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    if (!a || !b) throw new Error('편집 가능한 블록이 둘 필요하다');
+    useEditor.getState().onEdit(a.id, '첫 편집');
+
+    // 파일 쓰기를 붙잡아 두는 핸들 — 첫 저장이 쓰는 동안이라는 상황을 만든다.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const writes: string[] = [];
+    const handle = {
+      createWritable: () =>
+        Promise.resolve({
+          write: async (text: string) => {
+            writes.push(text);
+            await gate;
+          },
+          close: () => Promise.resolve(),
+        }),
+    } as unknown as NonNullable<OpenedFile['handle']>;
+    const file = useEditor.getState().file;
+    if (!file) throw new Error('파일이 열려 있어야 한다');
+    useEditor.setState({ file: { ...file, handle } });
+
+    const first = useEditor.getState().save();
+    // 쓰는 사이의 편집은 허용된다 (spec §4) — unsaved 가 다시 서서 Ctrl+S 가
+    // 조기 반환을 지나 여기까지 온다.
+    useEditor.getState().onEdit(b.id, '쓰는 동안의 편집');
+
+    // 겹친 저장은 시작하지 않는다 — 다른 스냅샷 둘이 나란히 쓰이면 끝나는 순서에
+    // 따라 옛 결과물이 디스크에서 이긴다.
+    await expect(useEditor.getState().save()).resolves.toBe(false);
+
+    release();
+    await expect(first).resolves.toBe(true);
+    expect(writes).toHaveLength(1);
+    // 쓰는 동안의 편집은 잃지 않는다 — 저장 안 된 것으로 남아 다시 저장하면 된다.
+    expect(useEditor.getState().unsaved).toBe(true);
+  });
+});
