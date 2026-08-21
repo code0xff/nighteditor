@@ -716,6 +716,13 @@ export const useEditor = create<EditorState>((set, get) => ({
         // 있으므로, 지금 상태를 그 결과물과 다시 견준다 — 그 사이 확정된 편집은
         // 파일에 없으니 더러운 채로 남고, 아무 일도 없었으면 깨끗해진다.
         savedText: output,
+        // 묶음에서 온 문서면 묶음의 바이트도 결과물로 갈아 끼운다. 열 때의 바이트를
+        // 그대로 두면 다른 문서로 갔다 돌아올 때 그 옛 바이트가 다시 열려, 내려받기로
+        // 저장한 편집이 화면에서 조용히 사라진다 — 핸들이 있으면 디스크에서 다시
+        // 읽어(reread) 맞추지만, 내려받기 저장은 이 묶음이 유일한 원천이다.
+        bundle: s.bundle?.has(s.docPath)
+          ? new Map(s.bundle).set(s.docPath, new Blob([output], { type: 'text/html' }))
+          : s.bundle,
         unsaved: differsFromDisk({ ...s, savedText: output }),
         notice: {
           key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
