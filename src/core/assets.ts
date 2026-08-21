@@ -254,7 +254,12 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
       i = end;
       continue;
     }
-    if (css.slice(i, i + 4).toLowerCase() === 'url(') {
+    // 토큰 경계 뒤의 url( 만 함수다. 식별자 한가운데서도 바꾸면 `--icon: myurl(x)`
+    // 같은 남의 함수 이름이 잘려 `myurl(blob:...)` 이 된다 — 자원이 아닌 값을 바꾸는 셈이다.
+    if (
+      css.slice(i, i + 4).toLowerCase() === 'url(' &&
+      !/[-\w\u0080-\uffff]/.test(css[i - 1] ?? '')
+    ) {
       const token = readUrl(css, i + 4);
       const path = token ? resolvePath(baseDir, token.raw) : null;
       const url = path === null ? undefined : resolve(path);

@@ -166,6 +166,21 @@ describe('rewriteCssUrls', () => {
 
     expect(rewriteCssUrls(css, '', () => undefined)).toBe(css);
   });
+
+  it('식별자 한가운데의 url( 은 함수 이름의 일부라 바꾸지 않는다', () => {
+    // `--icon: myurl(x)` 를 바꾸면 자원이 아닌 남의 함수가 `myurl(blob:...)` 이 된다.
+    const css = ':root{--icon: myurl(icon.png)}a{background:url(icon.png)}';
+
+    expect(rewriteCssUrls(css, '', fake)).toBe(
+      ':root{--icon: myurl(icon.png)}a{background:url(blob:icon.png)}'
+    );
+  });
+
+  it('여는 괄호·쉼표·공백 같은 토큰 경계 뒤의 url( 은 바꾼다', () => {
+    expect(rewriteCssUrls('a{background:red url(bg.png),url(bg.png)}', '', fake)).toBe(
+      'a{background:red url(blob:bg.png),url(blob:bg.png)}'
+    );
+  });
 });
 
 describe('styleEdits', () => {
@@ -263,5 +278,10 @@ describe('cssAssetPaths', () => {
 
   it('바깥 URL 은 세지 않는다', () => {
     expect(cssAssetPaths('a{background:url(https://cdn.example.com/x.png)}', '')).toEqual([]);
+  });
+
+  it('남의 함수 이름에 붙은 url( 은 세지 않는다', () => {
+    // 세면 이 문서와 상관없는 파일을 찾으라고 조른다.
+    expect(cssAssetPaths(':root{--icon: myurl(icon.png)}', '')).toEqual([]);
   });
 });
