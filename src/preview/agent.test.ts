@@ -1199,3 +1199,43 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     ]);
   });
 });
+
+describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', () => {
+  beforeEach(() => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+  });
+
+  afterEach(() => {
+    document.body.removeAttribute(MARKER_ATTR);
+    document.body.removeAttribute('style');
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  });
+
+  it('글자가 <body> 바로 아래 있고 색이 body 에 걸려 있어도 색이 나온다', () => {
+    // 자손만 훑으면(querySelectorAll('*')) body 를 건너뛰어 색 칸이 하나도 없다.
+    document.body.innerHTML = '';
+    document.body.textContent = '가나다라마바사';
+    document.body.setAttribute(MARKER_ATTR, '0');
+    document.body.style.color = 'rgb(12, 34, 56)';
+    sent = [];
+    vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
+      sent.push(msg as Record<string, unknown>);
+    }) as typeof window.parent.postMessage);
+    dispose = previewAgent();
+    fromHost({ type: 'locked', ids: [] });
+
+    click(document.body);
+    const node = document.body.firstChild!;
+    const range = document.createRange();
+    range.setStart(node, 1);
+    range.setEnd(node, 4);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    const dots = [...document.querySelectorAll<HTMLElement>('[data-ne-bar] button')].filter(
+      (b) => b.style.borderRadius === '50%'
+    );
+    expect(dots.map((d) => d.style.backgroundColor)).toContain('rgb(12, 34, 56)');
+  });
+});

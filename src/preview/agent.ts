@@ -336,7 +336,11 @@ export function previewAgent(): () => void {
    */
   const paletteOf = (): string[] => {
     const used = new Map<string, number>();
-    for (const el of document.body?.querySelectorAll<HTMLElement>('*') ?? []) {
+    // body 자신부터 훑는다 — 글자가 <body> 바로 아래에 있고 색이 body 에 걸린 문서에서
+    // querySelectorAll('*') 은 body 를 건너뛰어 색이 하나도 안 나온다 (spec §4.1).
+    const body = document.body;
+    const scope: HTMLElement[] = body ? [body, ...body.querySelectorAll<HTMLElement>('*')] : [];
+    for (const el of scope) {
       const text = [...el.childNodes].some(
         (node) => node.nodeType === 3 && (node.nodeValue ?? '').trim().length > 0
       );
