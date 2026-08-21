@@ -60,6 +60,9 @@ function view(bytes: Uint8Array): DataView {
 function findEocd(bytes: Uint8Array): number {
   const dv = view(bytes);
   const from = Math.max(0, bytes.length - EOCD_MAX_BACK);
+  // 뒤에서 처음 만난 zip64 꼴 후보. 진짜 목차를 찾으면 버리고, 못 찾으면 이것으로
+  // zip64 미지원을 말한다 — "zip 이 아니다" 는 거짓말이 되기 때문이다.
+  let zip64At = -1;
   for (let at = bytes.length - 22; at >= from; at--) {
     if (dv.getUint32(at, true) !== EOCD_SIGNATURE) continue;
     // 시그니처만으로는 모자란다 — zip 주석 안에 같은 네 바이트가 우연히(또는 일부러)
@@ -69,9 +72,13 @@ function findEocd(bytes: Uint8Array): number {
     if (at + 22 + dv.getUint16(at + 20, true) !== bytes.length) continue;
     const count = dv.getUint16(at + 10, true);
     const centralAt = dv.getUint32(at + 16, true);
-    // zip64 는 이 칸들을 0xFF.. 로 채운다. 여기서 지나치면 "zip 이 아니다" 로 잘못
-    // 말하게 되므로 통과시켜 readZip 이 zip64 미지원이라고 말하게 둔다.
-    if (count === 0xffff || centralAt === 0xffffffff) return at;
+    // zip64 는 이 칸들을 0xFF.. 로 채운다. 그러나 주석 끝의 가짜 EOCD 도 같은 값을
+    // 실을 수 있다 — 여기서 바로 돌아가면 멀쩡한 zip 이 zip64 미지원으로 거절된다.
+    // 받아 두고 더 앞의 진짜 EOCD 를 마저 찾는다 (spec §6 · zip64 흉내 레코드).
+    if (count === 0xffff || centralAt === 0xffffffff) {
+      if (zip64At < 0) zip64At = at;
+      continue;
+    }
     // 주석 끝머리에 실린 22바이트짜리 가짜 EOCD 는 위 검사도 통과한다 — 제 주석 길이를
     // 0 으로 적으면 끝에 닿는다. 목차 칸이 실제 목차를 가리키는지까지 확인해야
     // 멀쩡한 zip 이 (개수 0짜리 가짜를 믿고) 빈 묶음으로 열리지 않는다.
@@ -82,6 +89,8 @@ function findEocd(bytes: Uint8Array): number {
         : centralAt + 46 <= at && dv.getUint32(centralAt, true) === CENTRAL_SIGNATURE;
     if (dirValid) return at;
   }
+  // 진짜 목차는 없었다. zip64 꼴 후보가 있었으면 그쪽 사정(미지원)으로 말한다.
+  if (zip64At >= 0) return zip64At;
   throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }
 

@@ -110,6 +110,35 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
+  it('주석 끝의 zip64 흉내 레코드에 속지 않는다 — 진짜 목차로 연다', () => {
+    // zip64 칸(0xFF..)을 실은 가짜는 끝-정렬 검사를 통과하고, 즉시 믿으면 멀쩡한
+    // zip 이 "zip64 미지원" 으로 거절된다. 받아 두고 더 앞의 진짜 EOCD 를 찾아야 한다.
+    const zip = fixtureBundle();
+    const fake = new Uint8Array(22);
+    const fakeView = new DataView(fake.buffer);
+    fakeView.setUint32(0, 0x06054b50, true);
+    fakeView.setUint16(10, 0xffff, true); // 항목 수를 zip64 표식으로
+    const withComment = new Uint8Array(zip.length + fake.length);
+    withComment.set(zip);
+    withComment.set(fake, zip.length);
+    new DataView(withComment.buffer).setUint16(zip.length - 2, fake.length, true);
+
+    const names = readZip(withComment).map((e) => e.name);
+
+    expect(names).toContain('deck/index.html');
+  });
+
+  it('진짜 목차가 없는 zip64 꼴은 미지원 사유로 멈춘다 — zip 이 아니라고 하지 않는다', () => {
+    // zip64 는 이 칸들을 0xFF.. 로 채우고 실제 값을 따로 둔다. 읽지는 못해도
+    // 사유는 정확해야 한다 (대원칙 3).
+    const eocd = new Uint8Array(22);
+    const dv = new DataView(eocd.buffer);
+    dv.setUint32(0, 0x06054b50, true);
+    dv.setUint16(10, 0xffff, true);
+
+    expect(() => readZip(eocd)).toThrow(expect.objectContaining({ code: 'zip64' }));
+  });
+
   it('목차가 버퍼 밖의 로컬 헤더를 가리키면 우리 진단으로 멈춘다', () => {
     // DataView 의 RangeError 가 먼저 터지면 언어팩 진단 대신 브라우저 원문이 나간다.
     const zip = new Uint8Array(fixtureBundle());
