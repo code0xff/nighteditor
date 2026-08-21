@@ -838,6 +838,72 @@ describe('editor · 저장하는 사이의 편집', () => {
   });
 });
 
+describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5)', () => {
+  it('쓰는 동안 다른 문서를 열면 뒤늦게 끝난 저장이 새 문서의 상태에 적히지 않는다', async () => {
+    // 옛 코드는 저장 완료 콜백에 문서 확인이 없어, 옛 결과물이 새 문서의
+    // savedText·file.text 에 들어가고 알림까지 "저장했다" 고 떴다.
+    let releaseWrite: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const oldText = '<html><body><p>옛 문서</p></body></html>';
+    const newText = '<html><body><p>새 문서</p></body></html>';
+    const handle = {
+      name: 'old.html',
+      getFile: () => Promise.resolve(new File([oldText], 'old.html', { type: 'text/html' })),
+      createWritable: () => Promise.resolve({ write: () => gate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({ name: 'old.html', text: oldText, handle });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const saving = useEditor.getState().save();
+    // 파일을 쓰는 사이에 다른 문서로 갈아탄다 — 고치던 것은 버리기로 답한다.
+    const adopting = useEditor.getState().adopt({ name: 'new.html', text: newText, handle: null });
+    await answerWith('discard');
+    await adopting;
+    releaseWrite?.();
+    expect(await saving).toBe(false);
+
+    const s = useEditor.getState();
+    expect(s.file?.name).toBe('new.html');
+    // 새 문서의 저장본·내용은 새 문서의 것 그대로여야 한다.
+    expect(s.savedText).toBe(newText);
+    expect(s.file?.text).toBe(newText);
+    expect(s.unsaved).toBe(false);
+    // 이전 문서의 "저장했다" 가 새 문서 위에 뜨지 않는다.
+    expect(s.notice).toBeNull();
+    expect(s.busy).toBe(false);
+  });
+
+  it('갈아탄 뒤 도착한 저장 실패도 새 문서에 알리지 않는다', async () => {
+    // 이름도 없는 실패 알림은 지금 문서의 일로 읽힌다 — 멀쩡한 새 문서를 두고 헤매게 한다.
+    let failWrite: ((e: Error) => void) | undefined;
+    const gate = new Promise<void>((_, reject) => (failWrite = reject));
+    const oldText = '<html><body><p>옛 문서</p></body></html>';
+    const handle = {
+      name: 'old.html',
+      getFile: () => Promise.resolve(new File([oldText], 'old.html', { type: 'text/html' })),
+      createWritable: () => Promise.resolve({ write: () => gate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({ name: 'old.html', text: oldText, handle });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const saving = useEditor.getState().save();
+    const adopting = useEditor.getState().adopt({
+      name: 'new.html',
+      text: '<html><body><p>새 문서</p></body></html>',
+      handle: null,
+    });
+    await answerWith('discard');
+    await adopting;
+    failWrite?.(new Error('디스크가 가득 찼다'));
+    expect(await saving).toBe(false);
+
+    expect(useEditor.getState().notice).toBeNull();
+    expect(useEditor.getState().busy).toBe(false);
+  });
+});
+
 describe('editor · 저장한 편집을 되돌린 것도 저장할 수 있다', () => {
   it('패치가 0개여도 원본 그대로를 되써서 파일을 화면과 같게 만든다', async () => {
     // 패치 개수로 막으면 "저장하고 계속하기" 가 false 로 끝나, 대화상자에서

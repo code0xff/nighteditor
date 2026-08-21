@@ -52,6 +52,11 @@ export interface EditorState {
    */
   replacing: boolean;
   /**
+   * 지금 문서의 표. 문서를 갈아 끼울 때마다(replace) 새 값이 된다 — 값 자체에는
+   * 뜻이 없고, 받아 둔 표와 **다르다**는 사실만 뜻이 있다. `claim` 이 읽는다.
+   */
+  doc: number;
+  /**
    * 아직 파일에 없는 편집이 있다 — 지금 만들 결과물이 `savedText` 와 다르다 (spec §5).
    *
    * `patches` 로는 어느 방향으로도 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1)
@@ -113,6 +118,15 @@ export interface EditorState {
   /** 변경 목록에서 고른 블록을 프리뷰에서 보여준다 */
   reveal: (id: number) => void;
   drainReveal: () => void;
+  /**
+   * "이 결과가 지금 문서의 것인가" 를 한 자리에서 판정한다 (spec §5).
+   *
+   * 갈아 끼우기와 저장이 서로 다른 시간축에서 돌아, 뒤늦게 끝난 비동기가 **다음
+   * 문서의 상태**에 이전 문서의 결과를 적을 수 있다. 비동기를 시작하기 전에 부르면
+   * 확인 함수를 돌려준다 — 그 사이 문서가 갈아 끼워졌으면 false 고, 그때의 결과는
+   * 이전 문서의 것이라 버린다. 저장만이 아니라 뒤늦게 끝나는 어떤 비동기도 이것을 쓴다.
+   */
+  claim: () => () => boolean;
   /** 저장했으면 true. 실패했거나 저장할 것이 없으면 false */
   save: () => Promise<boolean>;
   downloadCopy: () => void;
@@ -203,7 +217,9 @@ async function replace(
 ): Promise<Partial<EditorState>> {
   const next = await loading;
   get().assets.dispose();
-  return next;
+  // 새 상태에는 새 표를 박는다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
+  // 저장 등)는 claim 의 판정에 걸려 버려진다 (spec §5).
+  return { ...next, doc: get().doc + 1 };
 }
 
 function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
@@ -418,6 +434,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   scanned: false,
   busy: false,
   replacing: false,
+  doc: 0,
   unsaved: false,
   savedText: '',
   notice: null,
@@ -737,6 +754,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
+  // 판정을 이 한 자리에 모은다 — 흩어 두면 비동기마다 제각기 다른 기준을 만든다.
+  claim: () => {
+    const doc = get().doc;
+    return () => get().doc === doc;
+  },
+
   save: async () => {
     const { file, source, blocks, patches, unsaved } = get();
     // 파일과 다른 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
@@ -747,11 +770,17 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 쓸 것이 없다며 멈춰, 대화상자에서 빠져나갈 길이 취소와 버리기뿐이 된다.
     // 패치 0개의 저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다.
     if (!file || !unsaved) return false;
+    // 쓰는 동안 다른 문서로 갈아탈 수 있다. 뒤늦게 도착한 결과가 새 문서의 상태에
+    // 옛 결과물을 적지 않도록, 시작하기 전에 지금 문서의 표를 받아 둔다 (spec §5).
+    const mine = get().claim();
     set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
       const how = await saveFile(file, output);
+      // 갈아탄 뒤 도착한 결과는 이전 문서의 것이다. 파일에는 이미 썼고 그것은 그
+      // 파일의 몫이라 잃는 것이 없다 — 새 문서에 적을 것은 아무것도 없다.
+      if (!mine()) return false;
       set((s) => ({
         // 파일은 이제 방금 쓴 결과물을 들고 있다. 쓰는 동안에도 프리뷰는 편집할 수
         // 있으므로, 지금 상태를 그 결과물과 다시 견준다 — 그 사이 확정된 편집은
@@ -776,15 +805,21 @@ export const useEditor = create<EditorState>((set, get) => ({
       }));
       return true;
     } catch (e) {
-      set({
-        notice:
-          e instanceof PatchError
-            ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
-            : { key: 'notice.saveFailed' },
-      });
+      // 실패도 이전 문서의 것이면 알리지 않는다 — 파일 이름도 없는 실패 알림은
+      // 지금 문서의 일로 읽혀, 멀쩡한 새 문서를 두고 사용자를 헤매게 한다.
+      if (mine()) {
+        set({
+          notice:
+            e instanceof PatchError
+              ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
+              : { key: 'notice.saveFailed' },
+        });
+      }
       return false;
     } finally {
-      set({ busy: false });
+      // busy 도 마찬가지다 — 갈아탄 뒤라면 그 busy 는 새 흐름의 것이라 여기서 끄면
+      // 문서를 여는 중인데 화면이 풀린다. 새 흐름의 finally 가 제 몫을 끈다.
+      if (mine()) set({ busy: false });
     }
   },
 }));
