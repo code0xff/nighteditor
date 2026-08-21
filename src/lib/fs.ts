@@ -118,9 +118,16 @@ export function canPickFolder(): boolean {
   return typeof (window as unknown as PickerWindow).showDirectoryPicker === 'function';
 }
 
-async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<void> {
-  const depth = prefix ? prefix.split('/').length : 0;
-
+/**
+ * @param depth 고른 폴더를 0층으로 센 현재 층. 접두사에서 되세면 드롭 쪽과 셈이
+ *   어긋난다 — 드롭 경로는 뿌리 이름을 담지만 그 이름은 깊이가 아니다 (spec §5.1)
+ */
+async function walk(
+  dir: DirectoryHandle,
+  prefix: string,
+  depth: number,
+  into: Walk
+): Promise<void> {
   for await (const [name, handle] of dir.entries()) {
     // 예산은 거르기 **전에** 쓴다. 거르는 데도 걷는 값은 들어서, 지나친 항목을 안
     // 세면 숨김 항목만 수천 개인 폴더에서 순회가 한도를 비켜 가 끝나지 않는다 (spec §5.1).
@@ -130,11 +137,12 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
 
     const path = prefix ? `${prefix}/${name}` : name;
     if (isDirectory(handle)) {
-      if (depth + 1 >= FOLDER_LIMITS.depth) {
+      // 여덟째 층(depth)까지는 들어간다. >= 로 재면 한도 층이 통째로 잘린다.
+      if (depth + 1 > FOLDER_LIMITS.depth) {
         into.truncated = true;
         continue;
       }
-      await walk(handle, path, into);
+      await walk(handle, path, depth + 1, into);
       continue;
     }
     keep(into, path, await handle.getFile(), handle);
@@ -177,7 +185,7 @@ export async function pickFolder(
   try {
     const dir = await show(startIn ? { mode, startIn } : { mode });
     const read = emptyWalk();
-    await walk(dir, '', read);
+    await walk(dir, '', 0, read);
     return done(read);
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') return null;
@@ -265,7 +273,7 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
   if (roots.length === 0) return null;
 
   const read = emptyWalk();
-  for (const root of roots) await walkEntry(root, root.name, read);
+  for (const root of roots) await walkEntry(root, root.name, 0, read);
   return done(read);
 }
 
@@ -278,8 +286,17 @@ function fileOf(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => entry.file(resolve, reject));
 }
 
-async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Walk): Promise<void> {
-  const depth = prefix.split('/').length;
+/**
+ * @param depth 놓은 폴더를 0층으로 센 현재 층 — 위의 walk 와 같은 잣대다 (spec §5.1).
+ *   접두사에는 뿌리 이름이 들어 있어 되세면 안 된다 — 같은 폴더를 고르면 되는데
+ *   놓으면 한 층 일찍 잘린다
+ */
+async function walkEntry(
+  dir: FileSystemDirectoryEntry,
+  prefix: string,
+  depth: number,
+  into: Walk
+): Promise<void> {
   const reader = dir.createReader();
 
   for (;;) {
@@ -293,11 +310,12 @@ async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Wa
 
       const path = `${prefix}/${entry.name}`;
       if (entry.isDirectory) {
-        if (depth + 1 >= FOLDER_LIMITS.depth) {
+        // 여덟째 층(depth)까지는 들어간다. >= 로 재면 한도 층이 통째로 잘린다.
+        if (depth + 1 > FOLDER_LIMITS.depth) {
           into.truncated = true;
           continue;
         }
-        await walkEntry(entry as FileSystemDirectoryEntry, path, into);
+        await walkEntry(entry as FileSystemDirectoryEntry, path, depth + 1, into);
         continue;
       }
       keep(into, path, await fileOf(entry as FileSystemFileEntry));

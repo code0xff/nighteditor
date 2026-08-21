@@ -187,3 +187,79 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.handles.size).toBe(0);
   });
 });
+
+describe('폴더 깊이 한도 (spec §5.1)', () => {
+  /** 뿌리 아래에 폴더를 levels 층 겹치고 가장 안쪽에 파일 하나를 둔다 */
+  function nestedDrop(levels: number): FileSystemEntry {
+    let entry: FileSystemEntry = fileEntry('deep.css', 1);
+    for (let i = levels; i >= 1; i--) entry = dirEntry(`d${i}`, [entry]);
+    return dirEntry('deck', [entry]);
+  }
+
+  function pickerFile(name: string): unknown {
+    return { name, getFile: () => Promise.resolve(fakeFile(name, 1)) };
+  }
+
+  function pickerDir(name: string, children: [string, unknown][]): unknown {
+    return {
+      name,
+      entries: () => ({
+        [Symbol.asyncIterator]: () => {
+          let at = 0;
+          return {
+            next: () =>
+              Promise.resolve(
+                at < children.length
+                  ? { value: children[at++], done: false }
+                  : { value: undefined, done: true }
+              ),
+          };
+        },
+      }),
+    };
+  }
+
+  function nestedPick(levels: number): unknown {
+    let entry: [string, unknown] = ['deep.css', pickerFile('deep.css')];
+    for (let i = levels; i >= 1; i--) entry = [`d${i}`, pickerDir(`d${i}`, [entry])];
+    return pickerDir('deck', [entry]);
+  }
+
+  const deepPath = (prefix: string): string =>
+    [
+      ...(prefix ? [prefix] : []),
+      ...Array.from({ length: FOLDER_LIMITS.depth }, (_, i) => `d${i + 1}`),
+      'deep.css',
+    ].join('/');
+
+  it('여덟째 층(depth)의 파일까지 담는다 — 드롭', async () => {
+    // `>=` 로 재면 한도 층이 통째로 잘려, depth: 8 이 사실상 7 이었다.
+    const read = await readDroppedFolder(drop(nestedDrop(FOLDER_LIMITS.depth)));
+
+    expect([...(read?.files.keys() ?? [])]).toEqual([deepPath('deck')]);
+    expect(read?.truncated).toBe(false);
+  });
+
+  it('아홉째 층은 담지 않고 잘렸다고 적는다 — 드롭', async () => {
+    const read = await readDroppedFolder(drop(nestedDrop(FOLDER_LIMITS.depth + 1)));
+
+    expect(read?.files.size).toBe(0);
+    expect(read?.truncated).toBe(true);
+  });
+
+  it('고른 폴더도 같은 층에서 잘린다 — 드롭 경로의 뿌리 이름은 깊이가 아니다', async () => {
+    // 드롭 쪽은 접두사가 뿌리 이름으로 시작하고 대화상자 쪽은 빈 접두사로 시작했다.
+    // 접두사에서 깊이를 되세면 같은 폴더가 고르면 되는데 놓으면 잘렸다 (spec §5.1).
+    const w = window as unknown as { showDirectoryPicker: unknown };
+
+    w.showDirectoryPicker = () => Promise.resolve(nestedPick(FOLDER_LIMITS.depth));
+    const fits = await pickFolder();
+    expect([...(fits?.files.keys() ?? [])]).toEqual([deepPath('')]);
+    expect(fits?.truncated).toBe(false);
+
+    w.showDirectoryPicker = () => Promise.resolve(nestedPick(FOLDER_LIMITS.depth + 1));
+    const over = await pickFolder();
+    expect(over?.files.size).toBe(0);
+    expect(over?.truncated).toBe(true);
+  });
+});
