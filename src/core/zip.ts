@@ -63,6 +63,8 @@ function findEocd(bytes: Uint8Array): number {
   // 뒤에서 처음 만난 zip64 꼴 후보. 진짜 목차를 찾으면 버리고, 못 찾으면 이것으로
   // zip64 미지원을 말한다 — "zip 이 아니다" 는 거짓말이 되기 때문이다.
   let zip64At = -1;
+  // 뒤에서 처음 만난 "빈 zip" 꼴 후보. 진짜 목차를 찾으면 버린다 — 아래 참조.
+  let emptyAt = -1;
   for (let at = bytes.length - 22; at >= from; at--) {
     if (dv.getUint32(at, true) !== EOCD_SIGNATURE) continue;
     // 시그니처만으로는 모자란다 — zip 주석 안에 같은 네 바이트가 우연히(또는 일부러)
@@ -80,18 +82,23 @@ function findEocd(bytes: Uint8Array): number {
       continue;
     }
     // 주석 끝머리에 실린 22바이트짜리 가짜 EOCD 는 위 검사도 통과한다 — 제 주석 길이를
-    // 0 으로 적으면 끝에 닿는다. 목차 칸이 실제 목차를 가리키는지까지 확인해야
-    // 멀쩡한 zip 이 (개수 0짜리 가짜를 믿고) 빈 묶음으로 열리지 않는다.
-    // 빈 zip 의 목차는 크기 0 이라 EOCD 자리에서 시작한다.
-    const dirValid =
-      count === 0
-        ? centralAt === at
-        : centralAt + 46 <= at && dv.getUint32(centralAt, true) === CENTRAL_SIGNATURE;
-    if (dirValid) return at;
+    // 0 으로 적으면 끝에 닿는다. 빈 zip 의 목차는 크기 0 이라 EOCD 자리에서
+    // 시작하는데, 가짜도 제 위치를 목차 칸에 적으면 똑같은 꼴이 된다 — 그 자리에서는
+    // 진짜와 가려낼 수 없다. 그래서 바로 믿지 않고 받아만 두고 더 앞을 마저 찾는다:
+    // 실제 목차가 달린 EOCD 가 앞에 있으면 그쪽이 진짜고(가짜를 믿으면 멀쩡한 zip 이
+    // 빈 묶음으로 열린다), 끝까지 없으면 이 후보가 빈 zip 그 자체다.
+    if (count === 0) {
+      if (centralAt === at && emptyAt < 0) emptyAt = at;
+      continue;
+    }
+    // 목차 칸이 실제 목차를 가리키는지까지 확인해야 주석 바이트를 목차로 읽지 않는다.
+    if (centralAt + 46 <= at && dv.getUint32(centralAt, true) === CENTRAL_SIGNATURE) return at;
   }
-  // 진짜 목차는 없었다. zip64 꼴 후보가 있었으면 그쪽 사정(미지원)으로 말한다 —
-  // 여기서 바로 던져야 이 함수의 반환이 언제나 "검증된 EOCD" 로 남는다. 후보의
-  // offset 을 돌려주면 부르는 쪽이 표식 칸을 다시 봐 주기를 믿는 수밖에 없다.
+  // 실제 목차가 달린 EOCD 는 없었다. 빈 zip 후보가 있었으면 그것이 진짜다.
+  if (emptyAt >= 0) return emptyAt;
+  // zip64 꼴 후보가 있었으면 그쪽 사정(미지원)으로 말한다 — 여기서 바로 던져야
+  // 이 함수의 반환이 언제나 "검증된 EOCD" 로 남는다. 후보의 offset 을 돌려주면
+  // 부르는 쪽이 표식 칸을 다시 봐 주기를 믿는 수밖에 없다.
   if (zip64At >= 0) throw new ZipError('zip64', {}, 'zip64 is not supported');
   throw new ZipError('notZip', {}, 'not a zip, or the end is cut off');
 }

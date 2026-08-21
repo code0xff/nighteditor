@@ -110,6 +110,33 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
+  it('제 위치를 목차 칸에 적은 가짜 "빈 zip" EOCD 에도 속지 않는다', () => {
+    // 빈 zip 의 목차는 크기 0 이라 EOCD 자리에서 시작한다. 가짜도 제 위치를 목차
+    // 칸에 적으면 같은 꼴이 된다 — 그 자리만 보고 믿으면 멀쩡한 zip 이 빈 묶음으로
+    // 열린다. 더 앞의 실제 목차가 달린 EOCD 가 이겨야 한다.
+    const zip = fixtureBundle();
+    const fake = new Uint8Array(22);
+    const fakeView = new DataView(fake.buffer);
+    fakeView.setUint32(0, 0x06054b50, true);
+    fakeView.setUint32(16, zip.length, true); // 목차 위치 = 가짜 레코드 제 위치
+    const withComment = new Uint8Array(zip.length + fake.length);
+    withComment.set(zip);
+    withComment.set(fake, zip.length);
+    new DataView(withComment.buffer).setUint16(zip.length - 2, fake.length, true);
+
+    const names = readZip(withComment).map((e) => e.name);
+
+    expect(names).toContain('deck/index.html');
+  });
+
+  it('진짜 빈 zip 은 빈 목록으로 열린다 — 문서가 없다는 사정은 부르는 쪽이 말한다', () => {
+    // 빈 zip 은 EOCD 하나가 전부다. 이것까지 거절하면 "zip 이 아니다" 가 거짓말이 된다.
+    const empty = new Uint8Array(22);
+    new DataView(empty.buffer).setUint32(0, 0x06054b50, true);
+
+    expect(readZip(empty)).toEqual([]);
+  });
+
   it('주석 끝의 zip64 흉내 레코드에 속지 않는다 — 진짜 목차로 연다', () => {
     // zip64 칸(0xFF..)을 실은 가짜는 끝-정렬 검사를 통과하고, 즉시 믿으면 멀쩡한
     // zip 이 "zip64 미지원" 으로 거절된다. 받아 두고 더 앞의 진짜 EOCD 를 찾아야 한다.
