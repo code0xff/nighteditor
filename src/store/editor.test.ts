@@ -1587,3 +1587,50 @@ describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 
     expect(useEditor.getState().notice).toBeNull();
   });
 });
+
+describe('editor · 블록 안의 자원과 양방향 경계 (ADR-011)', () => {
+  /** 자원 참조가 편집 가능한 블록 안에 든 묶음 */
+  async function openWithInlineAsset() {
+    const files = new Map<string, File>([
+      [
+        'index.html',
+        new File(['<p>설명 <span>사진 <img src="img/logo.png"></span></p>'], 'index.html', {
+          type: 'text/html',
+        }),
+      ],
+      ['img/logo.png', new File(['PNG'], 'logo.png', { type: 'image/png' })],
+    ]);
+    await useEditor.getState().loadFolder({ files, handles: new Map(), truncated: false });
+    const blobUrl = useEditor.getState().assets.urls.get('img/logo.png');
+    if (!blobUrl) throw new Error('blob URL 이 만들어졌어야 한다');
+    const block = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
+    if (!block) throw new Error('편집 가능한 블록이 필요하다');
+    return { blobUrl, block };
+  }
+
+  it('프리뷰에서 돌아온 blob URL 은 원문 표기로 되돌아간 뒤에야 패치가 된다 (INV-9)', async () => {
+    const { blobUrl, block } = await openWithInlineAsset();
+
+    // 프리뷰가 보내는 innerHTML 그대로 — 블록 안의 src 는 blob 표기다.
+    useEditor.getState().onEdit(block.id, `고친 설명 <span>사진 <img src="${blobUrl}"></span>`);
+
+    // 패치에도, 저장 결과물에도 blob 이 없다 — 탭을 닫으면 죽는 주소다.
+    expect(useEditor.getState().patches.get(block.id)).toBe(
+      '고친 설명 <span>사진 <img src="img/logo.png"></span>'
+    );
+  });
+
+  it('되돌리기가 프리뷰로 보내는 조각은 blob 치환을 단 채로 간다', async () => {
+    const { blobUrl, block } = await openWithInlineAsset();
+    useEditor.getState().onEdit(block.id, '고친 설명');
+
+    useEditor.getState().revert(block.id);
+
+    // 원문(sourceInner)을 그대로 보내면 프리뷰의 치환이 풀려 그림이 앱 주소에서
+    // 404 로 깨진다 — 나가는 길도 경계를 지나야 한다.
+    const sent = useEditor.getState().revertQueue.at(-1);
+    expect(sent?.id).toBe(block.id);
+    expect(sent?.html).toContain(`src="${blobUrl}"`);
+    expect(sent?.html).not.toContain('img/logo.png');
+  });
+});

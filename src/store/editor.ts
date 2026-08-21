@@ -25,7 +25,7 @@ import {
   type Replacement,
 } from './replacement';
 import { keepEdits } from './unsaved';
-import type { AssetRef } from '@/core/assets';
+import type { AssetBoundary, AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
 
 export interface EditorState {
@@ -88,6 +88,13 @@ export interface EditorState {
   assetPaths: string[];
   /** 붙인 자원. 파일을 바꿔 열면 이전 것을 반드시 놓아준다 */
   assets: AssetBundle;
+  /**
+   * 프리뷰와 저장 사이의 양방향 경계 (ADR-011). 자원 치환은 블록 안에서도 일어나므로,
+   * 프리뷰에서 돌아온 편집은 여기서 원문 표기로 되돌린 뒤에야 패치가 되고(INV-9),
+   * 되돌리기로 프리뷰에 밀어 넣는 원본 조각은 여기서 치환한 뒤에 나간다.
+   * null 이면 치환된 자원이 없다 — 양방향 모두 원문 그대로다.
+   */
+  boundary: AssetBoundary | null;
   /** 묶음 안에서 문서가 놓인 디렉터리. 폴더·zip 으로 열었을 때만 루트가 아니다 */
   docDir: string;
   /** 지금 연 문서의 묶음 안 경로. 묶음이 아니면 빈 문자열 */
@@ -232,6 +239,17 @@ export function titleBlock(blocks: readonly Block[]): Block | undefined {
 }
 
 /**
+ * 되돌리기로 프리뷰에 보낼 블록 내용 (ADR-011).
+ *
+ * 원본 조각(`sourceInner`)을 그대로 보내면 프리뷰의 자원 치환이 풀려, 되돌린 블록의
+ * 참조가 앱 주소 기준으로 풀리며 그림만 깨진다 — 경계로 치환한 뒤에 내보낸다.
+ */
+function previewInner(s: Pick<EditorState, 'boundary'>, block: Block | undefined): string {
+  if (!block) return '';
+  return s.boundary?.toPreview(block.sourceInner, block.innerStart) ?? block.sourceInner;
+}
+
+/**
  * 문서를 바꾸는 일을 새로 시작하면 안 되는 동안 — 저장 중이거나 갈아 끼우는 중 (ADR-010).
  *
  * 열기·문서 고르기·폴더 연결·저장 버튼이 전부 이 하나를 본다. 화면마다 두 표시를
@@ -352,7 +370,15 @@ async function load(
   const [
     { parseBlocks },
     { buildPreviewDocument },
-    { cssAssetPaths, dirOf, documentBaseDir, parseAssetRefs, styleTexts },
+    {
+      assetBoundary,
+      assetSwaps,
+      cssAssetPaths,
+      dirOf,
+      documentBaseDir,
+      parseAssetRefs,
+      styleTexts,
+    },
     { buildAssets },
   ] = await Promise.all([
     import('@/core/parse'),
@@ -376,6 +402,12 @@ async function load(
       ? await buildAssets(files, [...refs.map((r) => r.path), ...inStyle])
       : EMPTY_BUNDLE;
   const assetPaths = [...new Set([...refs.map((r) => r.path), ...inStyle, ...assets.missing])];
+  // 프리뷰 문서와 양방향 경계가 **같은 치환 목록**을 쓴다 (ADR-011) — 따로 계산하면
+  // 나갈 때의 표기와 되돌릴 표기가 어긋나는 짝이 생긴다. base 가 바깥을 가리키면
+  // 치환할 것이 없다 — <style> 의 url() 까지 문서 기준이라, 문서 자리 기준으로
+  // 바꾸면 틀린 자원을 붙인다.
+  const swaps =
+    baseDir === null ? [] : assetSwaps(file.text, refs, baseDir, (p) => assets.urls.get(p));
 
   return {
     file,
@@ -390,13 +422,8 @@ async function load(
     bundle: files ?? null,
     candidates: files ? candidatesOf(files) : [],
     bundleHandles: handles ?? new Map(),
-    previewDoc: buildPreviewDocument(
-      file.text,
-      blocks,
-      // base 가 바깥을 가리키면 치환할 것이 없다 — <style> 의 url() 까지 문서 기준이라
-      // 문서 자리 기준으로 바꾸면 틀린 자원을 붙인다.
-      baseDir === null ? undefined : { refs, dir: baseDir, urls: assets.urls }
-    ),
+    boundary: swaps.length > 0 ? assetBoundary(swaps) : null,
+    previewDoc: buildPreviewDocument(file.text, blocks, swaps),
     patches: new Map(),
     savedPatches: new Map(),
     selectedId: null,
@@ -510,6 +537,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   assetRefs: [],
   assetPaths: [],
   assets: EMPTY_BUNDLE,
+  boundary: null,
   docDir: '',
   docPath: '',
   bundle: null,
@@ -668,7 +696,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       ...get().revertQueue,
       ...dropped.map((id) => ({
         id,
-        html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
+        html: previewInner(
+          get(),
+          blocks.find((b) => b.id === id)
+        ),
       })),
     ];
     if (dropped.length > 0) {
@@ -694,8 +725,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
+    // 프리뷰에서 돌아온 내용은 경계를 지나 원문 표기로 돌아온다 (ADR-011 · INV-9) —
+    // 블록 안에 치환된 자원이 있으면 innerHTML 에 blob URL 이 실려 있고, 그대로
+    // 패치가 되면 탭을 닫는 순간 죽는 주소가 파일에 박힌다. 제목(rcdata)은 호스트
+    // 입력 칸에서 오지만, 경계는 제 blob 표기만 만지므로 함께 지나도 그대로다.
+    const restored = get().boundary?.fromPreview(html) ?? html;
     const before = get().patches;
-    const patches = nextPatches(before, block, html, pristine);
+    const patches = nextPatches(before, block, restored, pristine);
     // 눌렀다 그냥 빠져나온 것은 아무 일도 아니다 — 패치도, 편집 순서도, unsaved 도
     // 그대로 둔다. 여기서 뭐라도 만지면 "들어갔다 나오기" 가 상태를 바꾸는 일이 된다.
     if (patches === before) return;
@@ -744,7 +780,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       patches: next,
       editOrder: get().editOrder.filter((x) => x !== id),
-      revertQueue: [...revertQueue, { id, html: block?.sourceInner ?? '' }],
+      // 소스 내용은 경계로 치환해 내보낸다 (ADR-011) — 원문 그대로 보내면 프리뷰의
+      // blob 치환이 풀려 되돌린 블록의 그림만 깨진다.
+      revertQueue: [...revertQueue, { id, html: previewInner(get(), block) }],
       // 되돌리기도 파일과 달라질 수 있는 일이다 — 이미 저장한 내용을 되돌린 것일 수
       // 있다. 반대로 저장한 적 없는 편집을 되돌렸으면 파일과 같아져 잃을 것이 없다.
       unsaved: differsFromDisk({ ...get(), patches: next }),
@@ -757,7 +795,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     const { patches, blocks, revertQueue } = get();
     const restored = [...patches.keys()].map((id) => ({
       id,
-      html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
+      // revert 와 같은 이유 — 프리뷰로 나가는 소스 내용은 경계로 치환한다 (ADR-011).
+      html: previewInner(
+        get(),
+        blocks.find((b) => b.id === id)
+      ),
     }));
     set({
       patches: new Map(),

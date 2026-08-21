@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseAssetRefs } from './core/assets.js';
+import { assetBoundary, assetSwaps, parseAssetRefs } from './core/assets.js';
 import { parseBlocks } from './core/parse.js';
 import { applyPatches } from './core/patch.js';
 import { applyLiveLocks } from './core/verify.js';
@@ -109,7 +109,11 @@ describe('전체 파이프라인 · 외부 자원 (spec §5.1)', () => {
   it('프리뷰에서만 자원 경로를 blob URL 로 바꾼다', () => {
     const blocks = parseBlocks(multi);
     const refs = parseAssetRefs(multi, '');
-    const doc = buildPreviewDocument(multi, blocks, { refs, dir: '', urls });
+    const doc = buildPreviewDocument(
+      multi,
+      blocks,
+      assetSwaps(multi, refs, '', (p) => urls.get(p))
+    );
 
     expect(doc).toContain('href="blob:css"');
     expect(doc).toContain('src="blob:logo"');
@@ -134,7 +138,12 @@ describe('전체 파이프라인 · 외부 자원 (spec §5.1)', () => {
   it('자원이 없어도 문서는 그대로 열린다', () => {
     const blocks = parseBlocks(multi);
     const refs = parseAssetRefs(multi, '');
-    const doc = buildPreviewDocument(multi, blocks, { refs, dir: '', urls: new Map() });
+    // 못 붙인 참조는 치환 목록에 들지 않는다 — 문서는 그대로다.
+    const doc = buildPreviewDocument(
+      multi,
+      blocks,
+      assetSwaps(multi, refs, '', () => undefined)
+    );
 
     // 없는 자원을 있는 척 바꾸지 않는다. 화면만 다르고 편집은 그대로 된다.
     expect(doc).toContain('href="deck.css"');
@@ -145,5 +154,55 @@ describe('전체 파이프라인 · 외부 자원 (spec §5.1)', () => {
     const refs = parseAssetRefs(multi, 'slides');
 
     expect(refs.map((r) => r.path)).toEqual(['slides/deck.css', 'slides/img/logo.png']);
+  });
+});
+
+describe('전체 파이프라인 · 블록 안의 자원 (INV-9 · ADR-011)', () => {
+  // 자원 참조가 **편집 가능한 블록 안**에 있는 문서 — 치환이 편집 범위 안쪽에서
+  // 일어나, 경계 없이는 프리뷰의 blob URL 이 innerHTML 을 타고 저장본으로 샌다.
+  const doc =
+    '<html><body>\n<p>설명 <span>사진 <img src="logo.png"></span></p>\n' +
+    '<h1>제목</h1>\n</body></html>';
+  const urls = new Map([['logo.png', 'blob:logo']]);
+  const swaps = () => assetSwaps(doc, parseAssetRefs(doc), '', (p) => urls.get(p));
+
+  it('블록을 고쳐도 저장본에는 blob 이 없고 원문 표기가 남는다', () => {
+    const blocks = parseBlocks(doc);
+    const sent = mountPreview(buildPreviewDocument(doc, blocks, swaps()));
+    const target = blocks.find((b) => b.tag === 'p');
+    if (!target) throw new Error('p 없음');
+
+    const el = document.querySelector<HTMLElement>(`[${MARKER_ATTR}="${target.id}"]`);
+    // 프리뷰의 블록 안에는 blob URL 이 붙어 있다 — 편집 결과에도 그대로 실려 온다.
+    expect(el?.querySelector('img')?.getAttribute('src')).toBe('blob:logo');
+
+    el?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el!.innerHTML = '고친 설명 <span>사진 <img src="blob:logo"></span>';
+    document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+
+    const edit = sent.find((m): m is Extract<FromPreview, { type: 'edit' }> => m.type === 'edit');
+    expect(edit?.html).toContain('blob:'); // 프리뷰가 보내는 것은 프리뷰 표기다
+
+    // 호스트는 경계로 되돌린 뒤에야 패치로 삼는다 (ADR-011).
+    const restored = assetBoundary(swaps()).fromPreview(edit!.html);
+    const out = applyPatches(doc, blocks, [{ id: edit!.id, newInnerHtml: restored }]);
+
+    expect(out).not.toContain('blob:');
+    expect(out).toContain('src="logo.png"');
+    expect(changedLines(doc, out)).toBe(1);
+  });
+
+  it('되돌리기로 나가는 소스 조각은 blob 을 단 채로 가고, 되돌아오면 원문과 같다', () => {
+    const blocks = parseBlocks(doc);
+    const target = blocks.find((b) => b.tag === 'p');
+    if (!target) throw new Error('p 없음');
+    const boundary = assetBoundary(swaps());
+
+    const outgoing = boundary.toPreview(target.sourceInner, target.innerStart);
+
+    // 원문 그대로 보내면 프리뷰의 치환이 풀려 되돌린 블록의 그림만 깨진다.
+    expect(outgoing).toContain('src="blob:logo"');
+    // 왕복은 바이트 단위로 같다 (대원칙 1·2).
+    expect(boundary.fromPreview(outgoing)).toBe(target.sourceInner);
   });
 });
