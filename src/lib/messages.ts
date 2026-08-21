@@ -30,6 +30,7 @@ const ko = {
   'app.emptyHint': '글자를 눌러 고치면, 저장할 때 고친 부분만 바뀌어요',
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
   'app.editWhileReplacing': '다른 문서를 여는 중이라 이 편집은 반영되지 않았어요',
+  'app.saveWhileReplacing': '다른 문서를 여는 중이라 지금은 저장할 수 없어요',
 
   'toolbar.openFile': '파일 열기',
   'toolbar.openFileHint': 'HTML 파일 하나, 또는 zip 을 엽니다',
@@ -134,6 +135,7 @@ const en: Record<MessageKey, string> = {
   'app.emptyHint': 'Click any text to edit it. Saving changes only what you edited.',
   'app.blocked': "You can't edit this one · {reason}",
   'app.editWhileReplacing': "Another document is being opened, so this edit wasn't applied",
+  'app.saveWhileReplacing': "Another document is being opened, so saving isn't possible right now",
 
   'toolbar.openFile': 'Open a file',
   'toolbar.openFileHint': 'Opens one HTML file, or a zip',

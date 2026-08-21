@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditor } from './editor.js';
+import { useReplacement } from './replacement.js';
+import { useToasts } from './toasts.js';
 import { keepEdits, shortcutSave, useUnsaved } from './unsaved.js';
 
 /**
@@ -25,6 +27,8 @@ function edited(extra: Record<string, unknown> = {}): void {
 beforeEach(() => {
   useUnsaved.setState({ why: null, answer: null });
   useEditor.setState({ patches: new Map(), file: null, unsaved: false, saving: false });
+  useReplacement.setState({ replacing: false });
+  useToasts.getState().clear();
 });
 
 describe('keepEdits', () => {
@@ -115,6 +119,21 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     shortcutSave();
 
     expect(save).toHaveBeenCalledOnce();
+  });
+
+  it('갈아 끼우는 동안의 Ctrl+S 는 거절하고 알린다 — 이전 문서를 쓰는 일이다', () => {
+    // 버리기로 답한 편집이 아직 화면에 떠 있다. 여기서 저장하면 방금 버린 내용이
+    // 파일에 적힌다 — 저장 버튼은 잠겨 있고, 단축키도 같은 기준을 따라야 한다.
+    const save = vi.fn().mockResolvedValue(true);
+    useEditor.setState({ save, unsaved: true });
+    useReplacement.setState({ replacing: true });
+
+    shortcutSave();
+
+    expect(save).not.toHaveBeenCalled();
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.saveWhileReplacing')).toBe(
+      true
+    );
   });
 
   it('물음이 떠 있으면 "저장하고 계속" 으로 흘러 하려던 일이 이어진다', async () => {

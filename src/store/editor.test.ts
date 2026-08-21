@@ -1332,6 +1332,72 @@ describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼
   });
 });
 
+describe('editor · 물음에 저장으로 답한 순간부터 잠긴다 (spec §4)', () => {
+  it('저장이 파일을 쓰는 사이의 편집도 거절하고 알린다', async () => {
+    // 이 저장은 갈아 끼우기의 일부다 — 이어질 설치가 상태를 통째로 갈아, 쓰는 사이에
+    // 받은 편집은 조용히 사라질 자리다. 홀로 도는 저장(편집이 살아남는 쪽)과 다르다.
+    let releaseWrite: (() => void) | undefined;
+    const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const handle = {
+      name: 'old.html',
+      getFile: () =>
+        Promise.resolve(new File(['<p>옛 문서</p>'], 'old.html', { type: 'text/html' })),
+      createWritable: () =>
+        Promise.resolve({ write: () => writeGate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'old.html',
+      text: '<html><body><p>하나</p><p>둘</p></body></html>',
+      handle,
+    });
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null && !x.rcdata);
+    useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
+
+    const adopting = useEditor.getState().adopt({
+      name: 'new.html',
+      text: '<html><body><p>새 문서</p></body></html>',
+      handle: null,
+    });
+    await answerWith('save');
+    for (let tries = 0; !useReplacement.getState().replacing && tries < 1000; tries++) {
+      await Promise.resolve();
+    }
+    // 답한 순간부터 잠겨 있다 — 쓰기는 아직 끝나지 않았다.
+    expect(useReplacement.getState().replacing).toBe(true);
+
+    useEditor.getState().onEdit(b?.id ?? -1, '사라질 편집');
+    expect(useEditor.getState().patches.has(b?.id ?? -1)).toBe(false);
+    expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editWhileReplacing')).toBe(
+      true
+    );
+
+    releaseWrite?.();
+    await adopting;
+    expect(useEditor.getState().file?.name).toBe('new.html');
+    expect(useReplacement.getState().replacing).toBe(false);
+  });
+});
+
+describe('editor · 밀려난 드롭의 훑기 실패는 알리지 않는다 (spec §5)', () => {
+  it('남이 세운 문서 위에 "못 열었다" 를 띄우지 않는다', async () => {
+    // 취소한 경우의 실패 알림(대원칙 3)은 그대로다 — 취소는 예약을 새로 만들지
+    // 않으므로, 알리지 않는 것은 더 새 흐름에 밀려난 드롭의 실패뿐이다.
+    let failScan!: (e: Error) => void;
+    const slowScan = new Promise<FolderRead | null>((_, reject) => (failScan = reject));
+    const first = useEditor.getState().openDropped(undefined, slowScan);
+
+    await useEditor
+      .getState()
+      .loadDropped(new File(['<html><body><p>둘째</p></body></html>'], 'b.html'));
+    expect(useEditor.getState().source).toContain('둘째');
+
+    failScan(new Error('접근 거부'));
+    await first;
+
+    expect(useEditor.getState().notice).toBeNull();
+  });
+});
+
 describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 이긴다 (spec §5)', () => {
   it('물음에 저장으로 답한 열기는 저장을 마치고 돌아와도 밀려났으면 물러난다', async () => {
     // 옛 코드는 keepEdits 가 돌아온 **뒤에** 세대를 받아, 먼저 시작한 열기가 더 새

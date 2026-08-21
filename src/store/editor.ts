@@ -498,7 +498,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (!picked) return;
       // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
       await replace(get, set, mine, openPicked(picked));
@@ -518,7 +518,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
       // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다 (spec §5).
       if (!mine.current()) return;
       set({ notice: null });
@@ -537,13 +537,16 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 훑기 실패는 만들어진 자리에서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를
     // 기다리지 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다 (unhandled
     // rejection). 취소했더라도 훑기가 실패한 사실은 알린다 (대원칙 3 · spec §5.1).
+    // 단, 밀려난 드롭의 실패는 알리지 않는다 — 남(최신 흐름)이 멀쩡히 세운 문서
+    // 위에 "못 열었다" 가 뜬다 (spec §5 · 갈아 끼우기 예약). 취소는 예약을 새로
+    // 만들지 않으므로, 취소한 경우의 알림은 그대로 살아 있다.
     const scanned: Promise<FolderRead | null | typeof scanFailed> = folder.catch((e: unknown) => {
-      get().failedToOpen(e);
+      if (mine.current()) get().failedToOpen(e);
       return scanFailed;
     });
     try {
       // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 이 드롭은 밀려났다.
       if (!mine.current()) return;
       // 답한 순간부터 잠근다 — 훑기가 끝나기를 기다리는 사이의 편집도 새 상태가
@@ -618,8 +621,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   onEdit: (id, html, pristine = false) => {
-    // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다. 받아 두었다가
-    // 버리면 조용히 사라지는 것이라, 받지 않고 그 사실을 알린다 (대원칙 3 · spec §4).
+    // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다 (spec §4).
     // 제목 칸과 프리뷰는 이 동안 잠겨 있어, 여기 오는 것은 이미 열려 있던 블록의
     // 확정(blur·IME 마무리)뿐이다. 저장 중(saving)과 다르다 — 그 편집은 살아남는다.
     if (useReplacement.getState().replacing) {
@@ -664,7 +666,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   revert: (id) => {
     // 갈아 끼우는 동안의 되돌리기는 이전 문서를 고치는 일이다 — 바뀐 패치도, 프리뷰로
     // 보낼 되돌림도 설치 순간 갈 곳이 없다. 버튼은 잠겨 있지만 단축키(Ctrl+Z)는
-    // 언제든 눌리므로, 편집 확정과 같은 자리에서 거절하고 알린다 (spec §4 · 대원칙 3).
+    // 언제든 눌린다 (spec §4).
     if (useReplacement.getState().replacing) {
       useToasts.getState().show({ key: 'app.editWhileReplacing' }, 'error');
       return;
@@ -758,7 +760,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
       const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
@@ -793,7 +795,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
-      if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
+      if (!(await keepEdits({ key: 'confirm.whyAssets' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
 
@@ -859,7 +861,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 예약은 사용자 행동의 순간에 — 물음·저장을 기다리기 전에 (spec §5).
     const mine = reserveReplacement();
     try {
-      if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
+      if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }, mine))) return;
       // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
       // 물음에 저장으로 답했으면 묶음이 방금 그 결과물로 갈렸다 (내려받기 저장은

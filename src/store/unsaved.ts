@@ -11,6 +11,8 @@
 import { create } from 'zustand';
 import type { Notice } from '@/lib/messages';
 import { useEditor } from './editor';
+import { useReplacement, type Replacement } from './replacement';
+import { useToasts } from './toasts';
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
@@ -49,15 +51,22 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
  * 저장한 줄 알았던 편집이 사라진다.
  *
  * @param why 무엇 때문에 사라지는지 — 물음에 그대로 들어간다
+ * @param mine 이 물음이 딸린 갈아 끼우기 예약. 저장으로 답하면 **그 순간** 잠근다
+ *   (spec §4) — 저장이 파일을 쓰는 사이의 편집도 이어질 설치 순간 갈 곳이 없다.
+ *   여기서 잠그지 않으면 그 사이의 편집이 받아졌다가 설치에 조용히 쓸려 나간다.
+ *   홀로 도는 저장과 다르다 — 그쪽 편집은 살아남으므로 잠그지 않는다.
  */
-export async function keepEdits(why: Notice): Promise<boolean> {
+export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolean> {
   const { unsaved, save } = useEditor.getState();
   // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
   if (!unsaved) return true;
 
   const choice = await useUnsaved.getState().ask(why);
   if (choice === 'cancel') return false;
-  if (choice === 'save') return save();
+  if (choice === 'save') {
+    mine?.engage();
+    return save();
+  }
   return true;
 }
 
@@ -73,6 +82,15 @@ export async function keepEdits(why: Notice): Promise<boolean> {
 export function shortcutSave(): void {
   const { why, reply } = useUnsaved.getState();
   if (why === null) {
+    // 갈아 끼우는 동안의 저장은 아직 화면에 떠 있는 **이전** 문서를 쓰는 일이다 —
+    // 버리기로 답한 편집이 파일에 적힐 수 있다. 저장 버튼은 잠겨 있지만 단축키는
+    // 언제든 눌리므로, 되돌리기(Ctrl+Z)와 같은 자리에서 거절하고 알린다 (spec §4).
+    // 물음이 떠 있을 때의 "저장하고 계속" 은 다르다 — 그 저장은 갈아 끼우기의
+    // 일부라 막지 않는다.
+    if (useReplacement.getState().replacing) {
+      useToasts.getState().show({ key: 'app.saveWhileReplacing' }, 'error');
+      return;
+    }
     void useEditor.getState().save();
     return;
   }
