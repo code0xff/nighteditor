@@ -13,7 +13,6 @@ import {
 import { IconDocument } from '@/lib/icons';
 import { useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
-import { keepEdits } from '@/store/unsaved';
 
 export function DocSelect() {
   const candidates = useEditor((s) => s.candidates);
@@ -29,12 +28,9 @@ export function DocSelect() {
     <Select
       value={docPath}
       disabled={busy}
-      onValueChange={(path) => {
-        // 문서를 바꾸면 프리뷰를 다시 그리므로 고친 내용은 사라진다. 조용히 버리지 않는다.
-        void keepEdits({ key: 'confirm.whySwitch', params: { path } }).then((go) => {
-          if (go) void openFromBundle(path);
-        });
-      }}
+      // 문서를 바꾸면 프리뷰를 다시 그리므로 고친 내용은 사라진다.
+      // 조용히 버리지 않는다 — 묻는 것은 스토어가 한다.
+      onValueChange={(path) => void openFromBundle(path)}
     >
       <SelectTrigger className="h-8 w-auto max-w-64 gap-1.5" aria-label={label} title={label}>
         <IconDocument className="h-3.5 w-3.5 shrink-0 opacity-70" />

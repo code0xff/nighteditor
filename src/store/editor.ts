@@ -15,6 +15,7 @@ import {
   type Picked,
 } from '@/lib/fs';
 import { EMPTY_BUNDLE, type AssetBundle } from '@/lib/assets';
+import { keepEdits } from './unsaved';
 import type { AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
 
@@ -38,11 +39,25 @@ export interface EditorState {
   editOrder: number[];
   scanned: boolean;
   busy: boolean;
+  /**
+   * 아직 파일에 없는 편집이 있다.
+   *
+   * `patches` 로는 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1) 패치 목록이
+   * 그대로 남는다. 그걸 "저장 안 함" 으로 읽으면 저장한 뒤에도 계속 되묻는다.
+   */
+  unsaved: boolean;
   /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
   notice: Notice | null;
 
   /** 문서가 참조하는 외부 자원 (spec §5.1) */
   assetRefs: AssetRef[];
+  /**
+   * 세는 대상이 되는 자원 경로 전부.
+   *
+   * 문서의 속성만으로는 모자란다 — `<style>` 과 붙인 스타일시트 안의 `url()` 도
+   * 못 붙으면 화면이 깨진다. 참조가 아니라 **파일** 단위로 센다.
+   */
+  assetPaths: string[];
   /** 붙인 자원. 파일을 바꿔 열면 이전 것을 반드시 놓아준다 */
   assets: AssetBundle;
   /** 묶음 안에서 문서가 놓인 디렉터리. 폴더·zip 으로 열었을 때만 루트가 아니다 */
@@ -65,6 +80,8 @@ export interface EditorState {
   loadFolder: (read: FolderRead | null) => Promise<boolean>;
   /** 폴더를 골라 그 안의 문서를 연다 (spec §5.1) */
   openFolder: () => Promise<void>;
+  /** 여는 도중의 실패를 알림으로 돌린다 — 화면 쪽에서 잡은 오류가 들어온다 */
+  failedToOpen: (e: unknown) => void;
   adopt: (file: OpenedFile) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
@@ -88,14 +105,14 @@ export interface EditorState {
  * 붙인 자원과 못 붙인 자원의 수. 같은 파일을 여러 번 참조해도 하나로 센다 —
  * 사용자가 세는 단위는 참조가 아니라 파일이다.
  */
-export function countAssets(state: Pick<EditorState, 'assetRefs' | 'assets'>): {
+export function countAssets(state: Pick<EditorState, 'assetPaths' | 'assets'>): {
   linked: number;
   missing: number;
 } {
   const linked = new Set<string>();
   const missing = new Set<string>();
-  for (const ref of state.assetRefs) {
-    (state.assets.urls.has(ref.path) ? linked : missing).add(ref.path);
+  for (const path of state.assetPaths) {
+    (state.assets.urls.has(path) ? linked : missing).add(path);
   }
   return { linked: linked.size, missing: missing.size };
 }
@@ -142,6 +159,23 @@ function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
   return documentCandidates(files.keys());
 }
 
+/**
+ * 프리뷰를 다시 그리기 전에 파일을 **디스크에서 다시 읽는다**.
+ *
+ * 저장해도 `source` 는 열었을 때의 문자열 그대로다 (INV-1). 그 상태로 다시 그리면
+ * 이미 저장한 편집이 화면에서 사라지고, 그 뒤에 저장하면 디스크의 내용을 옛 내용으로
+ * 덮어써 **저장했던 것이 없어진다.** 핸들이 있으면 지금 파일에서 다시 읽어 맞춘다.
+ */
+async function reread(file: OpenedFile): Promise<OpenedFile> {
+  if (!file.handle) return file;
+  try {
+    return { ...file, text: await (await file.handle.getFile()).text() };
+  } catch {
+    // 못 읽으면 들고 있던 것으로 간다 — 여기서 멈추면 자원도 못 붙인다.
+    return file;
+  }
+}
+
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
@@ -159,23 +193,33 @@ async function load(
   files?: ReadonlyMap<string, Blob>,
   handles?: ReadonlyMap<string, OpenedFile['handle']>
 ): Promise<Partial<EditorState>> {
-  const [{ parseBlocks }, { buildPreviewDocument }, { dirOf, parseAssetRefs }, { buildAssets }] =
-    await Promise.all([
-      import('@/core/parse'),
-      import('@/lib/preview'),
-      import('@/core/assets'),
-      import('@/lib/assets'),
-    ]);
+  const [
+    { parseBlocks },
+    { buildPreviewDocument },
+    { cssAssetPaths, dirOf, parseAssetRefs, styleTexts },
+    { buildAssets },
+  ] = await Promise.all([
+    import('@/core/parse'),
+    import('@/lib/preview'),
+    import('@/core/assets'),
+    import('@/lib/assets'),
+  ]);
   const docPath = file.path ?? '';
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
   const refs = parseAssetRefs(file.text, docDir);
   const assets = files ? await buildAssets(files) : EMPTY_BUNDLE;
+
+  // 속성 · 문서에 박힌 <style> · 붙인 스타일시트가 부르는 것까지 한자리에 모은다.
+  const inStyle = styleTexts(file.text).flatMap((css) => cssAssetPaths(css, docDir));
+  const assetPaths = [...new Set([...refs.map((r) => r.path), ...inStyle, ...assets.missing])];
+
   return {
     file,
     source: file.text,
     blocks,
     assetRefs: refs,
+    assetPaths,
     assets,
     docDir,
     docPath,
@@ -189,6 +233,7 @@ async function load(
     revertQueue: [],
     editOrder: [],
     scanned: false,
+    unsaved: false,
     notice: null,
   };
 }
@@ -263,8 +308,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   editOrder: [],
   scanned: false,
   busy: false,
+  unsaved: false,
   notice: null,
   assetRefs: [],
+  assetPaths: [],
   assets: EMPTY_BUNDLE,
   docDir: '',
   docPath: '',
@@ -275,8 +322,12 @@ export const useEditor = create<EditorState>((set, get) => ({
   openFile: async () => {
     set({ busy: true, notice: null });
     try {
+      // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
+      // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
       const picked = await pickFile();
-      if (picked) set(await replace(get, openPicked(picked)));
+      if (!picked) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      set(await replace(get, openPicked(picked)));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
       set({ notice: openFailedNotice(e) });
@@ -348,8 +399,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
     const editOrder = get().editOrder.filter((x) => x !== id);
     if (patches.has(id)) editOrder.push(id);
-    set({ patches, editOrder });
+    set({ patches, editOrder, unsaved: true });
   },
+
+  failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false }),
 
   onBlocked: (id) => set({ blockedId: id, selectedId: null }),
   select: (id) => set({ selectedId: id, blockedId: null }),
@@ -365,6 +418,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       patches: next,
       editOrder: get().editOrder.filter((x) => x !== id),
       revertQueue: [...revertQueue, { id, html: block?.sourceInner ?? '' }],
+      // 되돌리기도 파일과 달라지는 일이다 — 이미 저장한 내용을 되돌린 것일 수 있다.
+      unsaved: true,
     });
   },
 
@@ -374,7 +429,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       id,
       html: blocks.find((b) => b.id === id)?.sourceInner ?? '',
     }));
-    set({ patches: new Map(), editOrder: [], revertQueue: [...revertQueue, ...restored] });
+    set({
+      patches: new Map(),
+      editOrder: [],
+      revertQueue: [...revertQueue, ...restored],
+      unsaved: true,
+    });
   },
 
   // 편집 중이 아닐 때의 Ctrl+Z. 편집 중에는 브라우저의 네이티브 undo 가 담당한다 (spec §4).
@@ -421,8 +481,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
     set({ busy: true, notice: null });
     try {
+      // 파일 열기와 같은 이유로 대화상자가 먼저다.
       const read = await pickFolder(null, 'readwrite');
       if (!read) return;
+      if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
       set(await replace(get, openBundle(read.files, undefined, read.handles)));
       if (read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
@@ -453,8 +515,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
+      if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
 
-      set(await replace(get, load(file, read.files)));
+      set(await replace(get, load(await reread(get().file ?? file), read.files)));
       const attached = countAssets(get()).linked;
       set({
         notice: read.truncated
@@ -482,6 +545,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
     set({ busy: true, notice: null });
     try {
+      if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
       set(await replace(get, openBundle(bundle, path, get().bundleHandles)));
     } catch (e) {
       set({ notice: openFailedNotice(e) });
@@ -491,16 +555,17 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   save: async () => {
-    const { file, source, blocks, patches } = get();
-    // 고친 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
+    const { file, source, blocks, patches, unsaved } = get();
+    // 고친 것이 없거나 이미 저장했으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
     // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
-    if (!file || patches.size === 0) return false;
+    if (!file || patches.size === 0 || !unsaved) return false;
     set({ busy: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
       const how = await saveFile(file, output);
       set({
+        unsaved: false,
         notice: {
           key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
           params: { name: file.name, count: list.length },

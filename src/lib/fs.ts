@@ -96,7 +96,7 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
   for await (const [name, handle] of dir.entries()) {
     // 숨김 폴더와 의존성 더미는 자원일 리 없고 파일 수만 폭발시킨다.
     if (name.startsWith('.') || name === 'node_modules') continue;
-    if (into.files.size >= FOLDER_LIMITS.files || into.bytes >= FOLDER_LIMITS.bytes) {
+    if (into.files.size >= FOLDER_LIMITS.files) {
       into.truncated = true;
       return;
     }
@@ -110,11 +110,24 @@ async function walk(dir: DirectoryHandle, prefix: string, into: Walk): Promise<v
       await walk(handle, path, into);
       continue;
     }
-    const file = await handle.getFile();
-    into.bytes += file.size;
-    into.files.set(path, file);
-    into.handles.set(path, handle);
+    keep(into, path, await handle.getFile(), handle);
   }
+}
+
+/**
+ * 한도 안이면 담는다.
+ *
+ * **크기는 담기 전에 본다.** 담고 나서 누계를 더하면 한 파일이 한도보다 커도 그대로
+ * 들어가고, 마지막 파일이 선을 넘어도 넘은 줄 모른 채 끝난다.
+ */
+function keep(into: Walk, path: string, file: File, handle?: FileHandle): void {
+  if (into.bytes + file.size > FOLDER_LIMITS.bytes) {
+    into.truncated = true;
+    return;
+  }
+  into.bytes += file.size;
+  into.files.set(path, file);
+  if (handle) into.handles.set(path, handle);
 }
 
 /**
@@ -248,7 +261,7 @@ async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Wa
 
     for (const entry of batch) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-      if (into.files.size >= FOLDER_LIMITS.files || into.bytes >= FOLDER_LIMITS.bytes) {
+      if (into.files.size >= FOLDER_LIMITS.files) {
         into.truncated = true;
         return;
       }
@@ -262,9 +275,7 @@ async function walkEntry(dir: FileSystemDirectoryEntry, prefix: string, into: Wa
         await walkEntry(entry as FileSystemDirectoryEntry, path, into);
         continue;
       }
-      const file = await fileOf(entry as FileSystemFileEntry);
-      into.bytes += file.size;
-      into.files.set(path, file);
+      keep(into, path, await fileOf(entry as FileSystemFileEntry));
     }
   }
 }

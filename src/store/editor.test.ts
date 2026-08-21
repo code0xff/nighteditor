@@ -195,3 +195,80 @@ describe('editor · 폴더 열기', () => {
     expect(useEditor.getState().notice).toEqual({ key: 'notice.bundleNoDocument' });
   });
 });
+
+describe('editor · 저장했는지 아는가', () => {
+  it('저장하면 되묻지 않을 상태가 된다', async () => {
+    // patches 는 저장해도 남는다(INV-1). 그걸로 판단하면 저장한 뒤에도 계속 되묻는다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    expect(useEditor.getState().unsaved).toBe(true);
+
+    await useEditor.getState().save();
+
+    expect(useEditor.getState().unsaved).toBe(false);
+    expect(useEditor.getState().patches.size).toBe(1);
+  });
+
+  it('저장한 뒤 다시 고치면 또 저장할 것이 생긴다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    useEditor.getState().onEdit(a?.id ?? -1, '고친 값');
+    await useEditor.getState().save();
+
+    useEditor.getState().onEdit(b?.id ?? -1, '또 고친 값');
+
+    expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('되돌리기도 파일과 달라지는 일이다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    await useEditor.getState().save();
+
+    useEditor.getState().revert(target?.id ?? -1);
+
+    expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('저장할 것이 없으면 저장하지 않는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    await useEditor.getState().save();
+
+    // 같은 내용을 다시 쓰는 헛일을 막는다.
+    expect(await useEditor.getState().save()).toBe(false);
+  });
+});
+
+describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
+  it('저장한 뒤 폴더를 연결해도 저장한 내용이 살아 있다', async () => {
+    // source 는 열었을 때 그대로다(INV-1). 그 상태로 다시 그리면 저장한 편집이 화면에서
+    // 사라지고, 그 뒤에 저장하면 디스크의 내용을 옛 내용으로 덮어쓴다.
+    const saved = '<html><body><p>저장된 뒤의 내용</p></body></html>';
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.resolve(new File([saved], 'deck.html', { type: 'text/html' })),
+      createWritable: () =>
+        Promise.resolve({ write: () => Promise.resolve(), close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>열었을 때의 내용</p></body></html>',
+      handle,
+    });
+    (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
+      Promise.resolve({
+        name: 'deck',
+        entries: () => ({
+          [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true }) }),
+        }),
+      });
+
+    await useEditor.getState().linkFolder();
+
+    expect(useEditor.getState().source).toBe(saved);
+  });
+});

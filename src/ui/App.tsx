@@ -31,6 +31,7 @@ export function App() {
   const linkFolder = useEditor((s) => s.linkFolder);
   // 참조는 있는데 못 붙인 자원. 조용히 깨진 채로 두지 않는다 (대원칙 3 · spec §5.1).
   const missing = useEditor((s) => countAssets(s).missing);
+  const failedToOpen = useEditor((s) => s.failedToOpen);
   const { t, tn } = useI18n();
   // 저장 전 편집은 메모리에만 있다. 탭을 닫기 전에 브라우저가 되묻게 한다.
   useEffect(() => onBeforeUnload(() => patches.size > 0), [patches]);
@@ -70,11 +71,14 @@ export function App() {
         // 폴더 항목은 이벤트가 끝나면 사라진다. 묻기 전에 먼저 꺼내 둔다.
         const folder = readDroppedFolder(items);
         // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
-        void keepEdits({ key: 'confirm.whyOpen' }).then(async (go) => {
-          if (!go) return;
-          // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
-          if (!(await loadFolder(await folder)) && dropped) void loadDropped(dropped);
-        });
+        void keepEdits({ key: 'confirm.whyOpen' })
+          .then(async (go) => {
+            if (!go) return;
+            // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
+            if (!(await loadFolder(await folder)) && dropped) await loadDropped(dropped);
+          })
+          // 폴더를 걷다 실패하면 여기로 온다. 잡지 않으면 놓아도 아무 일이 없는 것처럼 보인다.
+          .catch(failedToOpen);
       }}
     >
       <Toolbar />

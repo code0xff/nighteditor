@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assetEdits,
+  cssAssetPaths,
   dirOf,
   parseAssetRefs,
   resolvePath,
@@ -177,5 +178,90 @@ describe('styleEdits', () => {
 
   it('바꿀 것이 없으면 편집을 만들지 않는다', () => {
     expect(styleEdits('<style>body{color:red}</style>', '', fake)).toHaveLength(0);
+  });
+});
+
+describe('parseAssetRefs · 이름공간 속성', () => {
+  it('xlink:href 를 찾는다', () => {
+    // parse5 는 이걸 { name: 'href', prefix: 'xlink' } 로 쪼개 두고 위치만
+    // 'xlink:href' 키로 남긴다. 이름만 보면 통째로 놓친다.
+    const refs = parseAssetRefs('<svg><use xlink:href="sprite.svg#icon"/></svg>');
+
+    expect(refs.map((r) => r.path)).toEqual(['sprite.svg']);
+  });
+
+  it('두 형태가 함께 있어도 각자 제 값을 집는다', () => {
+    const source = '<svg><use xlink:href="old.svg#a"/><use href="new.svg#b"/></svg>';
+    const refs = parseAssetRefs(source);
+
+    expect(refs.map((r) => r.path)).toEqual(['old.svg', 'new.svg']);
+    for (const ref of refs) {
+      // 값 범위가 제 속성을 가리켜야 한다 — 어긋나면 엉뚱한 자리를 바꾼다.
+      expect(source.slice(ref.valueStart, ref.valueEnd)).toBe(ref.url);
+    }
+  });
+});
+
+describe('자원 참조의 질의와 조각', () => {
+  it('붙일 때 조각을 다시 단다', () => {
+    // #icon 을 잃으면 스프라이트에서 무엇을 꺼낼지가 사라져 아무것도 그리지 않는다.
+    const source = '<svg><use href="sprite.svg#icon"/></svg>';
+    const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
+
+    expect(out).toContain('href="blob:sprite.svg#icon"');
+  });
+
+  it('질의 문자열도 지키고, 파일은 질의를 뺀 이름으로 찾는다', () => {
+    const source = '<link href="deck.css?v=3">';
+    const [ref] = parseAssetRefs(source);
+    const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
+
+    expect(ref?.path).toBe('deck.css');
+    expect(out).toBe('<link href="blob:deck.css?v=3">');
+  });
+
+  it('CSS 안에서도 조각을 지킨다', () => {
+    expect(rewriteCssUrls('a{clip-path:url(shapes.svg#round)}', '', fake)).toBe(
+      'a{clip-path:url(blob:shapes.svg#round)}'
+    );
+  });
+});
+
+describe('rewriteCssUrls · 문자열과 주석', () => {
+  it('문자열 안의 url( 은 자원이 아니라 글자다', () => {
+    // content 는 화면에 찍히는 값이다. 바꾸면 없던 글자가 생긴다.
+    const css = `a::after{content:'url(icon.png)'}`;
+
+    expect(rewriteCssUrls(css, '', fake)).toBe(css);
+  });
+
+  it('주석 안도 건드리지 않는다', () => {
+    const css = '/* url(icon.png) 는 예시다 */ a{background:url(icon.png)}';
+
+    expect(rewriteCssUrls(css, '', fake)).toBe(
+      '/* url(icon.png) 는 예시다 */ a{background:url(blob:icon.png)}'
+    );
+  });
+
+  it('따옴표에 싸인 값과 대문자 URL( 도 바꾼다', () => {
+    expect(rewriteCssUrls('a{background:URL("bg.png")}', '', fake)).toBe(
+      'a{background:url("blob:bg.png")}'
+    );
+  });
+
+  it('닫히지 않은 url( 은 그대로 둔다', () => {
+    expect(rewriteCssUrls('a{background:url(bg.png', '', fake)).toBe('a{background:url(bg.png');
+  });
+});
+
+describe('cssAssetPaths', () => {
+  it('CSS 가 가리키는 자원 경로를 모은다 — 못 붙인 것을 세려면 목록이 필요하다', () => {
+    const css = '@font-face{src:url(fonts/x.woff2)}a{background:url("../img/bg.png")}';
+
+    expect(cssAssetPaths(css, 'assets')).toEqual(['assets/fonts/x.woff2', 'img/bg.png']);
+  });
+
+  it('바깥 URL 은 세지 않는다', () => {
+    expect(cssAssetPaths('a{background:url(https://cdn.example.com/x.png)}', '')).toEqual([]);
   });
 });

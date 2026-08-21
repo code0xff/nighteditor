@@ -8,25 +8,21 @@
  *
  * 메뉴로 묶어 하나처럼 보이게 할 수도 있지만, 그러면 매번 한 번 더 누르게 된다.
  * 버튼 둘은 자리를 조금 더 쓰는 대신 한 번에 간다.
+ *
+ * 저장하지 않은 편집을 묻는 일은 **스토어가** 한다. 대화상자는 사용자 제스처 안에서
+ * 열려야 하므로, 여기서 먼저 묻고 기다렸다가 열면 그 사이 제스처가 만료된다.
  */
 import { Button } from '@/components/ui/button';
 import { canPickFolder } from '@/lib/fs';
 import { IconOpen, IconOpenFolder } from '@/lib/icons';
 import { useEditor } from '@/store/editor';
 import { useI18n } from '@/store/locale';
-import { keepEdits } from '@/store/unsaved';
 
 export function OpenButton() {
   const busy = useEditor((s) => s.busy);
   const openFile = useEditor((s) => s.openFile);
   const openFolder = useEditor((s) => s.openFolder);
   const { t } = useI18n();
-
-  // 여는 순간 지금 편집이 사라진다. 조용히 버리지 않는다 (spec §4).
-  const start = async (what: 'file' | 'folder'): Promise<void> => {
-    if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
-    await (what === 'file' ? openFile() : openFolder());
-  };
 
   return (
     <div className="flex items-center gap-1.5">
@@ -35,7 +31,7 @@ export function OpenButton() {
         size="sm"
         disabled={busy}
         title={t('toolbar.openFileHint')}
-        onClick={() => void start('file')}
+        onClick={() => void openFile()}
       >
         <IconOpen />
         {t('toolbar.openFile')}
@@ -48,7 +44,7 @@ export function OpenButton() {
           size="sm"
           disabled={busy}
           title={t('toolbar.openFolderHint')}
-          onClick={() => void start('folder')}
+          onClick={() => void openFolder()}
         >
           <IconOpenFolder />
           {t('toolbar.openFolder')}

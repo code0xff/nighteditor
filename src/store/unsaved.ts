@@ -44,15 +44,16 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
 /**
  * 편집을 잃을 수 있는 일을 하기 전에 부른다. 계속해도 되면 true.
  *
- * 고친 것이 없으면 묻지 않는다 — 물을 것이 없는데 묻는 대화상자는 방해일 뿐이다.
+ * 고친 것이 없거나 이미 저장했으면 묻지 않는다 — 물을 것이 없는데 묻는 대화상자는 방해다.
  * 저장을 골랐는데 저장이 실패하면 **계속하지 않는다.** 그대로 넘어가면
  * 저장한 줄 알았던 편집이 사라진다.
  *
  * @param why 무엇 때문에 사라지는지 — 물음에 그대로 들어간다
  */
 export async function keepEdits(why: Notice): Promise<boolean> {
-  const { patches, save } = useEditor.getState();
-  if (patches.size === 0) return true;
+  const { unsaved, save } = useEditor.getState();
+  // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
+  if (!unsaved) return true;
 
   const choice = await useUnsaved.getState().ask(why);
   if (choice === 'cancel') return false;

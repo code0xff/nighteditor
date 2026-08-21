@@ -38,6 +38,14 @@ export interface AssetRef {
   url: string;
   /** 문서 위치를 기준으로 푼 정규 경로. 자원 묶음의 키가 된다 */
   path: string;
+  /**
+   * 경로 뒤에 붙어 있던 질의·조각 (`?v=3`, `#icon`).
+   *
+   * 파일을 찾을 때는 떼어내야 하지만 **붙일 때는 다시 달아야 한다.**
+   * `<use href="sprite.svg#icon">` 에서 `#icon` 을 잃으면 스프라이트에서 무엇을
+   * 꺼낼지가 사라져 아무것도 그리지 않는다.
+   */
+  suffix: string;
   /** 원본에서 **값만** 가리키는 범위 (따옴표는 포함하지 않는다) */
   valueStart: number;
   valueEnd: number;
@@ -66,13 +74,18 @@ export function dirOf(path: string): string {
  * 밖으로 나가는 참조(`https:`, `//cdn`, `data:`, `#anchor`)는 null 이다 —
  * 그대로 두는 것이 맞다. 이미 브라우저가 알아서 가져올 수 있거나, 자원이 아니다.
  */
+export function splitSuffix(url: string): { path: string; suffix: string } {
+  const at = url.search(/[?#]/);
+  return at < 0 ? { path: url, suffix: '' } : { path: url.slice(0, at), suffix: url.slice(at) };
+}
+
 export function resolvePath(baseDir: string, url: string): string | null {
   const trimmed = url.trim();
   if (!trimmed || trimmed.startsWith('#')) return null;
   // `scheme:` 과 프로토콜 상대 URL. 윈도 경로(`C:\`)도 여기서 걸린다.
   if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) || trimmed.startsWith('//')) return null;
 
-  const [clean = ''] = trimmed.split(/[?#]/);
+  const { path: clean } = splitSuffix(trimmed);
   if (!clean) return null;
 
   // 절대 경로는 문서가 아니라 묶음의 뿌리를 기준으로 본다 — 폴더/zip 의 최상단이다.
@@ -137,15 +150,25 @@ export function parseAssetRefs(source: string, baseDir = ''): AssetRef[] {
       const names = ASSET_ATTRS[node.tagName];
       const attrs = node.sourceCodeLocation?.attrs;
       if (names && attrs) {
-        for (const name of names) {
-          const loc = attrs[name];
-          const url = node.attrs.find((a) => a.name === name)?.value;
-          if (!loc || url === undefined) continue;
+        for (const attr of node.attrs) {
+          // parse5 는 `xlink:href` 를 `{ name: 'href', prefix: 'xlink' }` 로 쪼개 두고
+          // 위치만 `xlink:href` 키로 남긴다. 이름만 보면 xlink 참조를 놓치거나,
+          // 둘 다 있는 문서에서 엉뚱한 쪽 값을 집는다.
+          const key = attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name;
+          const loc = attrs[key];
+          if (!names.includes(key) || !loc) continue;
 
-          const path = resolvePath(baseDir, url);
+          const path = resolvePath(baseDir, attr.value);
           const span = path === null ? null : valueSpan(source, loc);
           if (path !== null && span) {
-            refs.push({ url, path, valueStart: span.start, valueEnd: span.end });
+            const { suffix } = splitSuffix(attr.value.trim());
+            refs.push({
+              url: attr.value,
+              path,
+              suffix,
+              valueStart: span.start,
+              valueEnd: span.end,
+            });
           }
         }
       }
@@ -162,9 +185,44 @@ export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] 
   const edits: Edit[] = [];
   for (const ref of refs) {
     const url = resolve(ref.path);
-    if (url) edits.push({ start: ref.valueStart, end: ref.valueEnd, text: url });
+    // 질의·조각을 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
+    if (url) edits.push({ start: ref.valueStart, end: ref.valueEnd, text: url + ref.suffix });
   }
   return edits;
+}
+
+/** 따옴표 문자열의 끝 (닫는 따옴표 다음). 이스케이프를 건너뛴다 */
+function endOfString(css: string, at: number): number {
+  const quote = css[at];
+  let i = at + 1;
+  while (i < css.length) {
+    if (css[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (css[i] === quote) return i + 1;
+    i++;
+  }
+  return css.length;
+}
+
+/** `url(` 다음부터 닫는 괄호까지를 뜯는다. 값 자체가 따옴표에 싸여 있을 수 있다 */
+function readUrl(css: string, at: number): { raw: string; quote: string; end: number } | null {
+  let i = at;
+  while (i < css.length && /\s/.test(css[i] ?? '')) i++;
+
+  const quote = css[i] === '"' || css[i] === "'" ? (css[i] as string) : '';
+  if (quote) {
+    const close = endOfString(css, i);
+    const raw = css.slice(i + 1, close - 1);
+    let j = close;
+    while (j < css.length && /\s/.test(css[j] ?? '')) j++;
+    return css[j] === ')' ? { raw, quote, end: j + 1 } : null;
+  }
+
+  const close = css.indexOf(')', i);
+  if (close < 0) return null;
+  return { raw: css.slice(i, close).trim(), quote: '', end: close + 1 };
 }
 
 /**
@@ -172,14 +230,76 @@ export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] 
  *
  * blob URL 에는 디렉터리가 없다. 스타일시트만 붙이고 이걸 안 바꾸면 그 안의 글꼴이
  * 기준을 잃어 전부 깨진다. `@import` 는 건드리지 않는다 (spec §5.1).
+ *
+ * 문자열과 주석은 통째로 건너뛴다. `content: "url(icon.png)"` 는 자원을 가리키는
+ * 함수가 아니라 **화면에 찍히는 글자**다. 이걸 바꾸면 없던 글자가 생긴다.
  */
 export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): string {
-  return css.replace(/url\(\s*(["']?)([^"')]*)\1\s*\)/gi, (whole, quote: string, raw: string) => {
-    const path = resolvePath(baseDir, raw);
-    if (path === null) return whole;
-    const url = resolve(path);
-    return url ? `url(${quote}${url}${quote})` : whole;
+  let out = '';
+  let i = 0;
+
+  while (i < css.length) {
+    const ch = css[i] ?? '';
+
+    if (ch === '"' || ch === "'") {
+      const end = endOfString(css, i);
+      out += css.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === '/' && css[i + 1] === '*') {
+      const close = css.indexOf('*/', i + 2);
+      const end = close < 0 ? css.length : close + 2;
+      out += css.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (css.slice(i, i + 4).toLowerCase() === 'url(') {
+      const token = readUrl(css, i + 4);
+      const path = token ? resolvePath(baseDir, token.raw) : null;
+      const url = path === null ? undefined : resolve(path);
+      if (token && url) {
+        const { suffix } = splitSuffix(token.raw.trim());
+        out += `url(${token.quote}${url}${suffix}${token.quote})`;
+        i = token.end;
+        continue;
+      }
+    }
+
+    out += ch;
+    i++;
+  }
+
+  return out;
+}
+
+/** CSS 가 가리키는 자원 경로만 모은다 — 무엇을 못 붙였는지 세기 위한 것이다 */
+export function cssAssetPaths(css: string, baseDir: string): string[] {
+  const paths: string[] = [];
+  rewriteCssUrls(css, baseDir, (path) => {
+    paths.push(path);
+    return undefined;
   });
+  return paths;
+}
+
+/** 문서에 박혀 있는 `<style>` 들의 본문. 무엇을 부르는지 세려면 텍스트가 필요하다 */
+export function styleTexts(source: string): string[] {
+  const doc = parse(source, { sourceCodeLocationInfo: true });
+  const texts: string[] = [];
+
+  const visit = (node: Node): void => {
+    if (isElement(node) && node.tagName === 'style') {
+      for (const child of childrenOf(node)) {
+        if (child.nodeName === '#text' && 'value' in child) texts.push(child.value);
+      }
+      return;
+    }
+    for (const child of childrenOf(node)) visit(child);
+  };
+
+  visit(doc);
+  return texts;
 }
 
 /** 문서에 박혀 있는 `<style>` 안의 `url(...)` 도 같은 규칙으로 바꾼다 */
