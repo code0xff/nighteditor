@@ -46,7 +46,20 @@ async function inflate(data: Uint8Array, budget: number): Promise<Blob> {
  * 두고 크게 부푸는 조작된 zip 이 통과하므로, 한도는 실제로 나온 바이트로 다시 세고
  * 목차와 다르면 조작으로 보고 멈춘다 (대원칙 3).
  */
+/**
+ * 압축 파일 자체에 허락하는 크기. 내용 한도에 헤더 몫(항목마다 로컬+중앙 헤더,
+ * 끝에 최대 64KB 주석)을 조금 얹은 값이다 — deflate 는 원본보다 의미 있게 커지지
+ * 않으므로, 이보다 큰 zip 은 풀어 봐야 어차피 내용 한도를 넘는다.
+ */
+const ARCHIVE_LIMIT = FOLDER_LIMITS.bytes + 1024 * 1024;
+
 export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
+  // 통째로 메모리에 올리기 **전에** 크기부터 본다. arrayBuffer() 는 전체 복사라,
+  // 한도를 훨씬 넘는 zip 은 목차를 읽기도 전에 복사만으로 탭을 굳힌다 (spec §5.1).
+  if (zip.size > ARCHIVE_LIMIT) {
+    throw new ZipError('tooBig', {}, `archive is ${zip.size} bytes (limit ${ARCHIVE_LIMIT})`);
+  }
+
   const files = new Map<string, Blob>();
   let bytes = 0;
 

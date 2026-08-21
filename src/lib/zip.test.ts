@@ -62,6 +62,21 @@ describe('unzip', () => {
   });
 });
 
+describe('unzip · 한도를 넘는 zip 은 올리기 전에 거절한다 (spec §5.1)', () => {
+  it('arrayBuffer 로 복사하기 전에 크기만 보고 멈춘다', async () => {
+    // 복사부터 하면 한도가 있으나 마나다 — 수백 MB 를 옮기는 동안 탭이 굳는다.
+    // 진짜 그 크기의 Blob 을 만들 필요는 없다. 보는 것은 size 뿐이어야 하니까.
+    const huge = {
+      size: 512 * 1024 * 1024,
+      arrayBuffer: () => {
+        throw new Error('한도 검사 전에 통째로 복사했다');
+      },
+    } as unknown as Blob;
+
+    await expect(unzip(huge)).rejects.toMatchObject({ code: 'tooBig' });
+  });
+});
+
 describe('unzip · 조작된 크기 (spec §6)', () => {
   /** 진짜 zip 의 목차(중앙 디렉터리)에서 한 항목의 "풀었을 때 크기" 만 바꿔치기한다 */
   function forgeSize(bytes: Uint8Array, name: string, size: number): Uint8Array {
