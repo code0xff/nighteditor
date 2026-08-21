@@ -325,6 +325,32 @@ describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
   });
 });
 
+describe('editor · 핸들 없는 문서의 저장본은 내려받은 사본이다 (spec §5)', () => {
+  it('내려받기로 저장한 뒤 폴더를 연결해도 저장한 내용이 살아 있다', async () => {
+    // 핸들이 없으면 reread 가 file.text 를 그대로 돌려준다. 저장이 그 text 를
+    // 결과물로 갈아 끼우지 않으면, 폴더 연결이 저장 전 내용으로 프리뷰를 되돌린다.
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>열었을 때의 내용</p></body></html>',
+      handle: null,
+    });
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 내용');
+
+    expect(await useEditor.getState().save()).toBe(true);
+    const output = useEditor.getState().savedText;
+    expect(output).toContain('고친 내용');
+
+    pickerReturns(fakeTree('assets', {}));
+    await useEditor.getState().linkFolder();
+
+    expect(useEditor.getState().source).toBe(output);
+    expect(useEditor.getState().unsaved).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('editor · 리뷰가 짚은 자리', () => {
   it('묻는 동안에는 busy 가 아니다 — 대화상자의 저장 버튼이 눌려야 한다', async () => {
     // busy 면 "저장하고 계속하기" 가 비활성이라 남는 선택지가 버리기와 취소뿐이 된다.
