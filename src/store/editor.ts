@@ -205,17 +205,52 @@ export function titleBlock(blocks: readonly Block[]): Block | undefined {
 }
 
 /**
+ * 갈아 끼우기 세대 — **시작할 때** 오른다 (spec §5 · 겹친 갈아 끼우기).
+ *
+ * 문서의 표(doc)로는 겹친 갈아 끼우기를 못 가린다 — 표는 새 상태가 설치될 때
+ * 바뀌므로, 폴더를 연달아 놓으면 겹친 둘 다 같은 표를 들고 있다가 **먼저 끝난 쪽**이
+ * 이겨 버린다. 이겨야 하는 것은 나중에 시작한 쪽 — 사용자의 마지막 선택이다.
+ * 값 자체에는 뜻이 없고 비교만 뜻이 있어, 화면이 볼 일이 없는 상태 밖에 둔다.
+ */
+let replaceGen = 0;
+
+/** 갈아 끼우기 한 번의 시작 — 세대를 받아 둔다. 이후 판정은 전부 이 값과의 비교다 */
+function beginReplace(): number {
+  return ++replaceGen;
+}
+
+/**
+ * 이 흐름이 아직 최신 갈아 끼우기인가.
+ *
+ * 아니면 설치도, 실패 알림도, busy·replacing 해제도 전부 남(최신 흐름)의 몫이다 —
+ * 물러나는 흐름이 알리면 남의 화면에 대한 말이 되고, busy 를 끄면 아직 읽는 중인
+ * 화면의 잠금이 풀린다 (저장의 claim 과 같은 이치, spec §5).
+ */
+function latestReplace(gen: number): boolean {
+  return gen === replaceGen;
+}
+
+/**
  * 새로 연 문서로 갈아탄다. 이전 blob URL 을 여기서 놓아준다 —
  * 안 놓으면 파일을 여러 번 열수록 탭이 계속 무거워진다.
  *
  * 새 상태를 다 만든 **뒤에** 놓는다. 만들다 실패하면 지금 보고 있는 화면이
  * 그대로 살아 있어야 하고, 그 화면은 이전 blob 을 쓰고 있다.
+ *
+ * 읽는 사이 더 새 갈아 끼우기가 시작됐으면 설치하지 않고 `null` 로 물러난다.
+ * 그때 지금 상태의 자원은 보던 문서(또는 그 새 흐름이 세운 문서)의 것이라 놓아줄
+ * 권리가 없다 — **제가 만든 것만** 놓아준다 (spec §5 · 겹친 갈아 끼우기).
  */
 async function replace(
   get: () => EditorState,
+  gen: number,
   loading: Promise<Partial<EditorState>>
-): Promise<Partial<EditorState>> {
+): Promise<Partial<EditorState> | null> {
   const next = await loading;
+  if (!latestReplace(gen)) {
+    next.assets?.dispose();
+    return null;
+  }
   get().assets.dispose();
   // 새 상태에는 새 표를 박는다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
   // 저장 등)는 claim 의 판정에 걸려 버려진다 (spec §5).
@@ -457,6 +492,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   openFile: async () => {
     set({ notice: null });
+    // 세대는 잠금(busy·replacing)을 세울 때 받는다 — 그 전의 실패는 잠근 것이 없어
+    // 끌 것도 없고, 알림은 언제나 이 흐름의 몫이다 (아직 아무와도 겹치지 않았다).
+    let gen: number | null = null;
     try {
       // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
@@ -465,13 +503,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 묻는 동안에는 busy 를 세우지 않는다. 세우면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      gen = beginReplace();
       set({ busy: true, replacing: true });
-      set(await replace(get, openPicked(picked)));
+      const next = await replace(get, gen, openPicked(picked));
+      if (next) set(next);
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
-      set({ notice: openFailedNotice(e) });
+      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
@@ -481,13 +521,15 @@ export const useEditor = create<EditorState>((set, get) => ({
     // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
     // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
     if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+    const gen = beginReplace();
     set({ busy: true, replacing: true, notice: null });
     try {
-      set(await replace(get, load(file)));
+      const next = await replace(get, gen, load(file));
+      if (next) set(next);
     } catch (e) {
-      set({ notice: openFailedNotice(e) });
+      if (latestReplace(gen)) set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
@@ -495,30 +537,37 @@ export const useEditor = create<EditorState>((set, get) => ({
   // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
   loadFolder: async (read) => {
     if (!read) return false;
+    const gen = beginReplace();
     set({ busy: true, replacing: true, notice: null });
     try {
-      set(await replace(get, openBundle(read.files, undefined, read.handles)));
-      if (read.truncated) {
-        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+      const next = await replace(get, gen, openBundle(read.files, undefined, read.handles));
+      // 물러난 흐름의 뒷말(잘림 알림)은 남이 세운 화면에 대한 말이 된다 — 설치한 쪽만 말한다.
+      if (next) {
+        set(next);
+        if (read.truncated) {
+          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+        }
       }
       return true;
     } catch (e) {
-      set({ notice: folderFailedNotice(e, read) });
+      if (latestReplace(gen)) set({ notice: folderFailedNotice(e, read) });
       return true;
     } finally {
-      set({ busy: false, replacing: false });
+      if (latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
   loadDropped: async (file) => {
+    const gen = beginReplace();
     set({ busy: true, replacing: true, notice: null });
     try {
-      set(await replace(get, openPicked(droppedFile(file))));
+      const next = await replace(get, gen, openPicked(droppedFile(file)));
+      if (next) set(next);
     } catch (e) {
       // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
-      set({ notice: openFailedNotice(e) });
+      if (latestReplace(gen)) set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
@@ -565,7 +614,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
-  failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false, replacing: false }),
+  // busy·replacing 은 세운 흐름의 finally 가 끈다 — 여기서 끄면 겹쳐 도는 다른
+  // 갈아 끼우기의 잠금을 남이 푸는 셈이다 (spec §5). 여기로 오는 실패(드롭한 폴더
+  // 훑기 등)는 잠금을 세우기 전의 것이라 끌 것도 없다.
+  failedToOpen: (e) => set({ notice: openFailedNotice(e) }),
 
   // 잠긴 블록을 누르면 이유를 말한다 (대원칙 3). 누를 때마다 뜨는 것이라 여기서 띄운다 —
   // 화면 쪽에서 blockedId 변화를 보면 같은 블록을 다시 눌렀을 때 아무 일도 일어나지 않는다.
@@ -661,20 +713,25 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ notice: null });
     // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
     let read: FolderRead | null = null;
+    let gen: number | null = null;
     try {
       // 파일 열기와 같은 이유로 대화상자가 먼저다.
       read = await pickFolder(null, 'readwrite');
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }))) return;
+      gen = beginReplace();
       set({ busy: true, replacing: true });
-      set(await replace(get, openBundle(read.files, undefined, read.handles)));
-      if (read.truncated) {
-        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+      const next = await replace(get, gen, openBundle(read.files, undefined, read.handles));
+      if (next) {
+        set(next);
+        if (read.truncated) {
+          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+        }
       }
     } catch (e) {
-      set({ notice: folderFailedNotice(e, read) });
+      if (gen === null || latestReplace(gen)) set({ notice: folderFailedNotice(e, read) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
@@ -693,11 +750,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
 
     set({ notice: null });
+    let gen: number | null = null;
     try {
       // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
       const read = await pickFolder(file.handle);
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }))) return;
+      gen = beginReplace();
       set({ busy: true, replacing: true });
 
       // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
@@ -727,19 +786,22 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 증명 못 한 문서는 묶음의 일원도 아니다 — 되찾은 자리는 자원을 찾는 기준으로만
       // 쓴다. 묶음 경로로 삼으면 저장이 그 경로의 묶음 내용을 이 문서의 결과물로
       // 갈아 끼워, 폴더의 **다른** 문서를 바꿔치기한다 (spec §5.1).
-      set(await replace(get, load(rebased, read.files, keep, proven)));
-      const attached = countAssets(get()).linked;
-      set({
-        notice: read.truncated
-          ? { key: 'notice.folderTruncated', params: { count: read.files.size } }
-          : attached > 0
-            ? { key: 'notice.assetsLinked', params: { count: attached } }
-            : { key: 'notice.assetsNotFound' },
-      });
+      const next = await replace(get, gen, load(rebased, read.files, keep, proven));
+      if (next) {
+        set(next);
+        const attached = countAssets(get()).linked;
+        set({
+          notice: read.truncated
+            ? { key: 'notice.folderTruncated', params: { count: read.files.size } }
+            : attached > 0
+              ? { key: 'notice.assetsLinked', params: { count: attached } }
+              : { key: 'notice.assetsNotFound' },
+        });
+      }
     } catch (e) {
-      set({ notice: openFailedNotice(e) });
+      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 
@@ -754,14 +816,17 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!bundle || path === docPath) return;
 
     set({ notice: null });
+    let gen: number | null = null;
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }))) return;
+      gen = beginReplace();
       set({ busy: true, replacing: true });
-      set(await replace(get, openBundle(bundle, path, get().bundleHandles)));
+      const next = await replace(get, gen, openBundle(bundle, path, get().bundleHandles));
+      if (next) set(next);
     } catch (e) {
-      set({ notice: openFailedNotice(e) });
+      if (gen === null || latestReplace(gen)) set({ notice: openFailedNotice(e) });
     } finally {
-      set({ busy: false, replacing: false });
+      if (gen !== null && latestReplace(gen)) set({ busy: false, replacing: false });
     }
   },
 

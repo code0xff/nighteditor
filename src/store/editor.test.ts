@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureSource } from '../__fixtures__/load.js';
+import type { FolderRead } from '@/lib/fs';
 import { countAssets, useEditor } from './editor.js';
 import { useToasts } from './toasts.js';
 import { useUnsaved } from './unsaved.js';
@@ -1060,5 +1061,107 @@ describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
       key: 'notice.assetsLinked',
       params: { count: 1 },
     });
+  });
+});
+
+describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴다 (spec §5)', () => {
+  /** text() 가 release 를 부를 때까지 멈춰 있는 폴더 — 흐름의 완료 순서를 손에 쥔다 */
+  function gatedFolder(tag: string) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const html = `<html><body><p>${tag}</p><img src="pic.png"></body></html>`;
+    const files = new Map<string, unknown>([
+      [
+        'index.html',
+        {
+          text: async () => {
+            await gate;
+            return html;
+          },
+        },
+      ],
+      ['pic.png', new Blob(['png'], { type: 'image/png' })],
+    ]);
+    return {
+      read: { files, handles: new Map(), truncated: false } as unknown as FolderRead,
+      release,
+    };
+  }
+
+  /** blob URL 의 생성·회수를 기록한다 — 누가 무엇을 놓아줬는지 봐야 한다 */
+  function trackUrls() {
+    let at = 0;
+    const created: string[] = [];
+    const revoked: string[] = [];
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: () => {
+        const url = `blob:${++at}`;
+        created.push(url);
+        return url;
+      },
+      revokeObjectURL: (url: string) => revoked.push(url),
+    });
+    return { created, revoked };
+  }
+
+  it('옛 흐름이 뒤늦게 끝나도 새 문서를 덮지 않고, 새 문서의 blob 도 놓지 않는다', async () => {
+    // 표(doc)는 설치될 때 바뀌므로 겹친 둘은 같은 표를 들고 시작한다 — 그걸로 가리면
+    // 뒤늦게 끝난 옛 흐름이 새 문서의 blob 을 놓아 버리고 제 상태를 덮어쓴다.
+    const { created, revoked } = trackUrls();
+    try {
+      const first = gatedFolder('첫 폴더');
+      const second = gatedFolder('둘째 폴더');
+      const opening1 = useEditor.getState().loadFolder(first.read);
+      const opening2 = useEditor.getState().loadFolder(second.read);
+
+      second.release();
+      await opening2;
+      const doc = useEditor.getState().doc;
+      // 첫 폴더의 읽기는 아직 멈춰 있다 — 지금까지 만든 URL 은 전부 둘째 폴더의 것이다.
+      const secondUrls = [...created];
+      first.release();
+      await opening1;
+
+      expect(useEditor.getState().source).toContain('둘째 폴더');
+      // 옛 흐름은 설치하지 않는다 — 표도 그대로다.
+      expect(useEditor.getState().doc).toBe(doc);
+      // 옛 흐름은 제가 만든 것만 놓아준다 — 화면이 쓰는 둘째 폴더의 blob 은 살아 있다.
+      const firstUrls = created.filter((url) => !secondUrls.includes(url));
+      expect(firstUrls.length).toBeGreaterThan(0);
+      expect(firstUrls.every((url) => revoked.includes(url))).toBe(true);
+      expect(secondUrls.some((url) => revoked.includes(url))).toBe(false);
+      expect(useEditor.getState().busy).toBe(false);
+      expect(useEditor.getState().replacing).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('옛 흐름이 먼저 끝나도 설치하지 않는다 — 마지막에 놓은 폴더가 열린다', async () => {
+    trackUrls();
+    try {
+      const first = gatedFolder('첫 폴더');
+      const second = gatedFolder('둘째 폴더');
+      const opening1 = useEditor.getState().loadFolder(first.read);
+      const opening2 = useEditor.getState().loadFolder(second.read);
+
+      first.release();
+      await opening1;
+      // 사용자의 마지막 선택은 둘째 폴더다 — 먼저 끝났다고 첫 폴더를 세우면 안 된다.
+      expect(useEditor.getState().source).not.toContain('첫 폴더');
+      // 물러난 흐름이 화면 잠금을 풀면, 아직 읽는 중인데 편집이 들어온다.
+      expect(useEditor.getState().busy).toBe(true);
+      expect(useEditor.getState().replacing).toBe(true);
+
+      second.release();
+      await opening2;
+
+      expect(useEditor.getState().source).toContain('둘째 폴더');
+      expect(useEditor.getState().busy).toBe(false);
+      expect(useEditor.getState().replacing).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
