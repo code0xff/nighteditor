@@ -86,13 +86,28 @@ function isExternal(url: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//');
 }
 
-/** 조각 하나의 퍼센트 인코딩을 푼다. 잘못된 인코딩은 적힌 그대로 둔다 */
-function decodeSegment(segment: string): string {
+/** 풀 수 있으면 푼다. 잘못된 인코딩은 적힌 그대로 둔다 */
+function decodePart(part: string): string {
   try {
-    return decodeURIComponent(segment);
+    return decodeURIComponent(part);
   } catch {
-    return segment;
+    return part;
   }
+}
+
+/**
+ * 조각 하나의 퍼센트 인코딩을 푼다.
+ *
+ * `%2F` 만은 풀지 않고 적힌 그대로 둔다 (spec §5.1) — 디스크의 파일 이름에는
+ * 슬래시가 있을 수 없으므로, 푸는 순간 이름의 일부가 경로 구분자로 변해
+ * `a%2Fb.png` 라는 실제 파일 대신 `a/b.png` 라는 없는 자리를 찾는다.
+ * 표기(대소문자)도 그대로 남긴다 — 묶음의 키는 디스크의 이름이다.
+ */
+function decodeSegment(segment: string): string {
+  return segment
+    .split(/(%2F)/i)
+    .map((part) => (/^%2F$/i.test(part) ? part : decodePart(part)))
+    .join('');
 }
 
 /** `.`·`..` 을 접고 퍼센트 인코딩을 푼 정규 경로. 뿌리는 빈 문자열이다 */

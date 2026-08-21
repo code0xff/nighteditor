@@ -68,6 +68,18 @@ describe('resolvePath', () => {
     expect(resolvePath('', '100%/my%20deck.css')).toBe('100%/my deck.css');
   });
 
+  it('조각 안의 %2F 는 구분자로 풀지 않는다 (spec §5.1)', () => {
+    // 디스크의 파일 이름에는 슬래시가 있을 수 없다 — 풀면 이름의 일부가 경로
+    // 구분자로 변해, a%2Fb.png 라는 실제 파일 대신 a/b.png 라는 없는 자리를 찾는다.
+    expect(resolvePath('', 'a%2Fb.png')).toBe('a%2Fb.png');
+    // 표기(대소문자)는 적힌 그대로다 — 묶음의 키는 디스크의 이름이다.
+    expect(resolvePath('', 'a%2fb.png')).toBe('a%2fb.png');
+    // 같은 조각의 다른 인코딩은 여전히 풀린다.
+    expect(resolvePath('', 'img/a%2Fb%20c.png')).toBe('img/a%2Fb c.png');
+    // %252F 의 %25 는 % 로 풀린다 — %2F 그 자체가 아니다.
+    expect(resolvePath('', 'a%252Fb.png')).toBe('a%2Fb.png');
+  });
+
   it('뿌리 밖으로 나가려 해도 넘어가지 않는다', () => {
     expect(resolvePath('', '../../etc/passwd')).toBe('etc/passwd');
   });
