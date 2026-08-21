@@ -56,6 +56,33 @@ describe('buildAssets · 스타일시트가 스타일시트를 부른다', () =>
     expect(await fonts?.text()).toBe(`@font-face{src:url(${bundle.urls.get('sub/f.woff2')})}`);
   });
 
+  it('한 다리 건넌 시트의 깨진 참조도 못 붙였다고 센다', async () => {
+    // 문서 → main.css → theme.css → 없는 글꼴. 문서에서 바로 닿는 시트만 보면
+    // theme.css 를 건너뛰어, 화면은 깨졌는데 못 붙였다는 말이 없다 (대원칙 3).
+    stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['main.css', css("@import url('theme.css');")],
+      ['theme.css', css('@font-face{src:url(fonts/f.woff2)}')],
+    ]);
+
+    const bundle = await buildAssets(files, ['main.css']);
+
+    expect(bundle.missing).toContain('fonts/f.woff2');
+  });
+
+  it('문서와 무관한 시트의 깨진 참조는 여전히 세지 않는다', async () => {
+    // 닿는 범위를 넓히는 것이지, 폴더에 굴러다니는 남의 시트까지 줍는 것이 아니다.
+    stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['main.css', css('p{color:red}')],
+      ['stray.css', css('@font-face{src:url(ghost.woff2)}')],
+    ]);
+
+    const bundle = await buildAssets(files, ['main.css']);
+
+    expect(bundle.missing).toEqual([]);
+  });
+
   it('서로를 부르는 순환에서도 멈추지 않고 전부 만든다', async () => {
     // blob 으로는 이을 수 없는 고리다 — 기다려도 URL 은 생기지 않으므로 그대로 만든다.
     stubObjectUrls();

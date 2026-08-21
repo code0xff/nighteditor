@@ -96,6 +96,20 @@ export async function buildAssets(
   // 못 붙인 것은 **이 문서가 부르는** 스타일시트에서만 센다. 폴더에 굴러다니는 남의
   // 스타일시트가 부르는 글꼴까지 세면, 이 문서와 아무 상관 없는 파일을 찾으라고 조른다.
   const wanted = reachable ? new Set(reachable) : null;
+  // "부르는" 은 한 다리가 아니다 — 문서가 부른 시트가 @import 로 다른 시트를 부르면
+  // 그 시트가 부르는 것도 이 문서의 것이다. 문서에서 바로 닿는 시트만 보면 한 다리
+  // 건너의 깨진 참조가 조용히 넘어가, 화면은 깨졌는데 못 붙였다는 말이 없다 (대원칙 3).
+  if (wanted) {
+    const queue = [...wanted].filter((p) => sheets.has(p));
+    for (let at = 0; at < queue.length; at++) {
+      for (const want of sheets.get(queue[at] ?? '')?.wants ?? []) {
+        if (!wanted.has(want)) {
+          wanted.add(want);
+          queue.push(want);
+        }
+      }
+    }
+  }
   const missing = new Set<string>();
 
   for (const [path, sheet] of sheets) {
