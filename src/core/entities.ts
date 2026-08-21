@@ -1,4 +1,4 @@
-import { decodeHTML, escapeText } from 'entities';
+import { decodeHTML, escapeAttribute, escapeText } from 'entities';
 
 /**
  * INV-8 · 비교는 디코딩 후, 저장은 인코딩 후.
@@ -15,6 +15,19 @@ export function decode(html: string): string {
 /** 사용자 입력을 소스에 기록할 수 있는 형태로 — `&`, `<`, `>` 를 엔티티화 */
 export function encode(text: string): string {
   return escapeText(text);
+}
+
+/**
+ * 디코딩된 값을 속성 자리에 되적을 수 있는 형태로.
+ *
+ * 파서가 준 속성 값은 엔티티가 이미 풀려 있다 (`&quot;` → `"`). 그대로 원본의 속성
+ * 자리에 되적으면 따옴표가 값을 조기 종료시켜 뒤가 새 속성으로 풀린다. 그 자리가
+ * 어느 따옴표로 싸였는지(혹은 안 싸였는지)는 여기서 알 수 없으므로, 어떤 표기에서도
+ * 안전하게 양쪽 따옴표·공백류·`<>=\`` 을 전부 엔티티로 적는다 — 문자 참조는 세 표기
+ * 모두에서 유효하고, 브라우저가 도로 풀어 같은 값이 된다.
+ */
+export function encodeAttribute(text: string): string {
+  return escapeAttribute(text).replace(/['<>=`\t\n\f\r ]/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
 /** 공백 차이를 무시한 텍스트 비교용 정규화 */

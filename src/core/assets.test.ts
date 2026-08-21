@@ -142,6 +142,31 @@ describe('assetEdits', () => {
   });
 });
 
+describe('assetEdits · 디코딩된 조각의 인코딩 (INV-8)', () => {
+  it('엔티티로 적힌 따옴표가 조각에 있어도 속성을 조기 종료시키지 않는다', () => {
+    // parse5 는 &quot; 를 " 로 풀어 준다. 그대로 되적으면 값이 거기서 끝나고,
+    // 조각의 나머지가 프리뷰에서 onerror= 같은 새 속성으로 승격된다.
+    const source = '<img src="x.png#foo&quot; onerror=&quot;alert(1)">';
+    const refs = parseAssetRefs(source);
+    const edits = assetEdits(refs, () => 'blob:x');
+
+    expect(edits[0]?.text).not.toContain('"');
+    expect(edits[0]?.text).not.toContain(' ');
+    const out = applyEdits(source, edits);
+    // 치환된 값이 여전히 원래 따옴표 안에 통째로 담겨 있어야 한다.
+    expect(out.startsWith('<img src="blob:x#foo')).toBe(true);
+    expect(out.endsWith('">')).toBe(true);
+  });
+
+  it('평범한 조각은 그대로 남는다', () => {
+    const source = '<use href="sprite.svg#icon"/>';
+    const refs = parseAssetRefs(source);
+    const edits = assetEdits(refs, () => 'blob:s');
+
+    expect(edits[0]?.text).toBe('blob:s#icon');
+  });
+});
+
 describe('rewriteCssUrls', () => {
   it('스타일시트 안의 상대 경로를 그 파일 위치 기준으로 푼다', () => {
     // blob URL 에는 디렉터리가 없다. 안 바꾸면 글꼴이 전부 깨진다.

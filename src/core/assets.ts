@@ -9,6 +9,7 @@
  */
 import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 import type { Edit } from './edits.js';
+import { encodeAttribute } from './entities.js';
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;
@@ -199,8 +200,15 @@ export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] 
   for (const ref of refs) {
     const url = resolve(ref.path);
     // 조각만 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
+    // 조각은 디코딩된 값이라 되적기 전에 인코딩한다 (INV-8) — 엔티티로 적힌 따옴표가
+    // 풀린 채 들어가면 속성이 조기 종료되어, 조각의 나머지가 프리뷰에서 새 속성
+    // (onerror= 등)으로 승격된다.
     if (url) {
-      edits.push({ start: ref.valueStart, end: ref.valueEnd, text: url + blobSuffix(ref.suffix) });
+      edits.push({
+        start: ref.valueStart,
+        end: ref.valueEnd,
+        text: url + encodeAttribute(blobSuffix(ref.suffix)),
+      });
     }
   }
   return edits;
