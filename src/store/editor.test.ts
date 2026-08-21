@@ -19,6 +19,7 @@ beforeEach(() => {
     revertQueue: [],
     notice: null,
     unsaved: false,
+    savedText: '',
   });
   useUnsaved.setState({ why: null, answer: null });
 });
@@ -234,6 +235,41 @@ describe('editor · 저장했는지 아는가', () => {
     useEditor.getState().revert(target?.id ?? -1);
 
     expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('저장한 적 없는 편집을 되돌리면 다시 깨끗해진다', async () => {
+    // unsaved 를 단조 증가로 두면 결과물이 파일과 같은데도 되묻는다 (spec §5).
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+    expect(useEditor.getState().unsaved).toBe(true);
+
+    useEditor.getState().revert(target?.id ?? -1);
+
+    expect(useEditor.getState().unsaved).toBe(false);
+  });
+
+  it('전체 되돌리기도 파일과 같아지면 깨끗해진다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
+    useEditor.getState().onEdit(b?.id ?? -1, 'B 수정');
+
+    useEditor.getState().revertAll();
+
+    expect(useEditor.getState().unsaved).toBe(false);
+  });
+
+  it('제목을 고쳤다가 원래대로 돌려 적으면 깨끗해진다', async () => {
+    // 손으로 되돌린 편집도 결과물이 파일과 같으면 잃을 것이 없다.
+    await useEditor.getState().loadDropped(dropped());
+    const title = useEditor.getState().blocks.find((x) => x.rcdata);
+    useEditor.getState().onEdit(title?.id ?? -1, '새 제목');
+    expect(useEditor.getState().unsaved).toBe(true);
+
+    useEditor.getState().onEdit(title?.id ?? -1, title?.sourceText ?? '');
+
+    expect(useEditor.getState().unsaved).toBe(false);
   });
 
   it('저장할 것이 없으면 저장하지 않는다', async () => {

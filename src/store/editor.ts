@@ -43,12 +43,18 @@ export interface EditorState {
   scanned: boolean;
   busy: boolean;
   /**
-   * 아직 파일에 없는 편집이 있다.
+   * 아직 파일에 없는 편집이 있다 — 지금 만들 결과물이 `savedText` 와 다르다 (spec §5).
    *
-   * `patches` 로는 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1) 패치 목록이
-   * 그대로 남는다. 그걸 "저장 안 함" 으로 읽으면 저장한 뒤에도 계속 되묻는다.
+   * `patches` 로는 어느 방향으로도 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1)
+   * 패치 목록이 그대로 남고(그걸 "저장 안 함" 으로 읽으면 저장한 뒤에도 계속 되묻는다),
+   * 반대로 저장한 적 없는 편집을 되돌리면 패치가 없어져도 잃을 것 자체가 없다.
    */
   unsaved: boolean;
+  /**
+   * 파일이 들고 있는 내용 — 열 때 읽은 그대로였다가, 저장할 때마다 쓴 결과물로 갱신된다.
+   * `unsaved` 는 언제나 이것과의 비교다. 저장 경로의 입력은 아니다 (그건 `source`, INV-1).
+   */
+  savedText: string;
   /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
   notice: Notice | null;
 
@@ -121,6 +127,24 @@ export function countAssets(state: Pick<EditorState, 'assetPaths' | 'assets'>): 
     (state.assets.urls.has(path) ? linked : missing).add(path);
   }
   return { linked: linked.size, missing: missing.size };
+}
+
+/**
+ * 파일과 다른가 — 지금 만들 결과물을 파일이 들고 있는 내용과 견준다 (spec §5).
+ *
+ * 저장 버튼·`Ctrl+S` 의 조기 반환·`beforeunload`·저장 대화상자가 전부 이 한 기준을
+ * 본다. 결과물을 만들 수 없으면 같은지도 알 수 없다 — 잃을 수 있다고 보고 묻는 쪽이
+ * 안전하다 (대원칙 3).
+ */
+function differsFromDisk(
+  s: Pick<EditorState, 'source' | 'blocks' | 'patches' | 'savedText'>
+): boolean {
+  try {
+    const list = [...s.patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
+    return applyPatches(s.source, s.blocks, list) !== s.savedText;
+  } catch {
+    return true;
+  }
 }
 
 /** 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다 */
@@ -245,6 +269,7 @@ async function load(
   return {
     file,
     source: file.text,
+    savedText: file.text,
     blocks,
     assetRefs: refs,
     assetPaths,
@@ -344,6 +369,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   scanned: false,
   busy: false,
   unsaved: false,
+  savedText: '',
   notice: null,
   assetRefs: [],
   assetPaths: [],
@@ -430,7 +456,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));
     const patches = new Map([...get().patches].filter(([id]) => !lockedIds.has(id)));
     const editOrder = get().editOrder.filter((id) => patches.has(id));
-    set({ blocks, patches, editOrder, scanned: true });
+    // 패치가 빠졌으면 결과물도 달라졌을 수 있다 — 기준은 언제나 하나다 (spec §5).
+    set({
+      blocks,
+      patches,
+      editOrder,
+      scanned: true,
+      unsaved: differsFromDisk({ ...get(), blocks, patches }),
+    });
   },
 
   onEdit: (id, html, pristine = false) => {
@@ -441,10 +474,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
     const editOrder = get().editOrder.filter((x) => x !== id);
     if (patches.has(id)) editOrder.push(id);
-    // 눌렀다 그냥 빠져나온 것은 고친 것이 아니다. 그것까지 "저장 안 함" 으로 세면
-    // 아무것도 안 고치고도 되묻고, 저장을 골라도 쓸 것이 없어 그대로 멈춘다.
-    const changed = patches.get(id) !== before.get(id);
-    set({ patches, editOrder, unsaved: get().unsaved || changed });
+    // 눌렀다 그냥 빠져나온 것도, 고쳤다가 파일과 같은 내용으로 되돌아온 것도
+    // 저장할 것이 아니다. 결과물과 파일을 견줘야 두 경우 모두 맞게 읽힌다 (spec §5).
+    set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
   failedToOpen: (e) => set({ notice: openFailedNotice(e), busy: false }),
@@ -473,8 +505,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       patches: next,
       editOrder: get().editOrder.filter((x) => x !== id),
       revertQueue: [...revertQueue, { id, html: block?.sourceInner ?? '' }],
-      // 되돌리기도 파일과 달라지는 일이다 — 이미 저장한 내용을 되돌린 것일 수 있다.
-      unsaved: true,
+      // 되돌리기도 파일과 달라질 수 있는 일이다 — 이미 저장한 내용을 되돌린 것일 수
+      // 있다. 반대로 저장한 적 없는 편집을 되돌렸으면 파일과 같아져 잃을 것이 없다.
+      unsaved: differsFromDisk({ ...get(), patches: next }),
     });
   },
 
@@ -488,7 +521,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       patches: new Map(),
       editOrder: [],
       revertQueue: [...revertQueue, ...restored],
-      unsaved: true,
+      // 전부 되돌린 결과물은 원본 그대로다 — 파일도 원본 그대로면 잃을 것이 없다.
+      unsaved: differsFromDisk({ ...get(), patches: new Map() }),
     });
   },
 
@@ -639,10 +673,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       const output = applyPatches(source, blocks, list);
       const how = await saveFile(file, output);
       set((s) => ({
-        // 파일을 쓰는 동안에도 프리뷰는 편집할 수 있다. 그 사이 확정된 편집은 방금 쓴
-        // 파일에 없으므로, 쓰기 시작할 때의 패치 목록이 그대로일 때만 깨끗해진 것이다.
-        // (patches 는 편집·되돌리기마다 새 Map 이 된다 — 그대로면 같은 참조다.)
-        unsaved: s.patches === patches ? false : s.unsaved,
+        // 파일은 이제 방금 쓴 결과물을 들고 있다. 쓰는 동안에도 프리뷰는 편집할 수
+        // 있으므로, 지금 상태를 그 결과물과 다시 견준다 — 그 사이 확정된 편집은
+        // 파일에 없으니 더러운 채로 남고, 아무 일도 없었으면 깨끗해진다.
+        savedText: output,
+        unsaved: differsFromDisk({ ...s, savedText: output }),
         notice: {
           key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
           params: { name: file.name, count: list.length },
