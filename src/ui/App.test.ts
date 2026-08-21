@@ -88,3 +88,49 @@ describe('App · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe('App · 물음이 떠 있는 동안 실패한 폴더 훑기 (spec §5.1)', () => {
+  it('취소해도 훑기 실패를 알린다 — 기다리는 이가 없어도 실패는 사라지지 않는다', async () => {
+    // 훑기는 묻기 전에 시작된다(항목이 이벤트 끝에 사라진다). 답을 기다린 뒤에 실패를
+    // 잡으면, 취소한 경우 아무도 그 프라미스를 기다리지 않아 실패가 알림 없이
+    // unhandled rejection 으로 사라진다 (대원칙 3).
+    act(() => {
+      root = createRoot(host!);
+      root.render(createElement(App));
+    });
+    act(() => {
+      useEditor.setState({ unsaved: true });
+    });
+
+    // 걷다가 죽는 폴더 항목 — 접근 거부 등으로 readEntries 가 실패하는 상황.
+    const entry = {
+      isDirectory: true,
+      name: 'deck',
+      createReader: () => ({
+        readEntries: (_ok: unknown, err: (e: Error) => void) =>
+          err(new Error('폴더를 읽을 수 없어요')),
+      }),
+    };
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: { files: [], items: [{ webkitGetAsEntry: () => entry }] },
+    });
+
+    await act(async () => {
+      host!.firstElementChild!.dispatchEvent(drop);
+      // 훑기 실패와 물음이 마이크로태스크로 온다 — 물음이 뜰 때까지 걷는다.
+      for (let tries = 0; useUnsaved.getState().why === null && tries < 1000; tries++) {
+        await Promise.resolve();
+      }
+      useUnsaved.getState().reply('cancel');
+      // 취소한 뒤에도 실패 알림이 남아 있어야 한다 — 몇 태스크 더 흘려보낸다.
+      for (let tries = 0; tries < 10; tries++) await Promise.resolve();
+    });
+
+    expect(useUnsaved.getState().why).toBeNull();
+    expect(useEditor.getState().notice).toEqual({
+      key: 'notice.openFailedDetail',
+      params: { detail: '폴더를 읽을 수 없어요' },
+    });
+  });
+});
