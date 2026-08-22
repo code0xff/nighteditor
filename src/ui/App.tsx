@@ -109,8 +109,8 @@ export function App() {
         <div className="px-3 pt-2">
           <Alert>
             <IconUnlinked className="h-3.5 w-3.5" />
-            <AlertDescription className="flex items-center justify-between gap-3">
-              <span>{t('assets.missing', { count: missing })}</span>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span className="min-w-0">{t('assets.missing', { count: missing })}</span>
               <Button
                 variant="outline"
                 size="sm"

@@ -101,6 +101,13 @@ export function injectEditorStyle(html: string): string {
     'outline-offset:2px!important;background:var(--ne-tint)!important}' +
     `[${LOCKED_ATTR}]{cursor:not-allowed}` +
     `[${LOCKED_ATTR}]:hover{outline:2px dashed var(--ne-soft)!important;outline-offset:2px!important}` +
+    // A finger cannot hover. Without this, a phone shows no state at all until
+    // the edit is already open — press feedback is the only thing left to say
+    // "this one, and it is editable" before it happens (spec §4).
+    '@media (hover:none){' +
+    `${editable}:active{outline:2px solid var(--ne-soft)!important;outline-offset:2px!important}` +
+    `[${LOCKED_ATTR}]:active{outline:2px dashed var(--ne-soft)!important;outline-offset:2px!important}` +
+    '}' +
     // Point out the spot picked from the list. Scrolling alone cannot say which block it is.
     `[${REVEALED_ATTR}]{outline:2px solid var(--ne-mark)!important;outline-offset:2px!important;` +
     'background:var(--ne-tint)!important}' +

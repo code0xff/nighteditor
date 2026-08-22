@@ -24,7 +24,10 @@ export function Toaster() {
 
   return (
     <div
-      className="pointer-events-none fixed right-3 top-14 z-50 flex w-80 flex-col gap-2"
+      // 320px of notice does not fit a 320px window. Below `sm` it spans the
+      // width instead — a notice hanging off the right edge widens the page,
+      // and a widened page scrolls sideways the moment a popup opens.
+      className="pointer-events-none fixed inset-x-3 top-14 z-50 flex flex-col gap-2 sm:left-auto sm:w-80"
       // Notices must be delivered without interrupting what is being read.
       aria-live="polite"
     >

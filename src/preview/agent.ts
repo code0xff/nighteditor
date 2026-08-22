@@ -195,6 +195,7 @@ export function previewAgent(token = ''): () => void {
     const el = editingEl;
     if (el) {
       el.removeAttribute('contenteditable');
+      el.removeAttribute('enterkeyhint');
       // Last line of defense (INV-9): an artifact script may have churned the
       // DOM and moved the bar inside the block. Preview furniture must not leak
       // into the save via innerHTML, so move it back outside before reading.
@@ -227,6 +228,7 @@ export function previewAgent(token = ''): () => void {
     const el = editingEl;
     if (el) {
       el.removeAttribute('contenteditable');
+      el.removeAttribute('enterkeyhint');
       // Same defense as commit: an artifact script may have moved the bar
       // inside the block. Restoring innerHTML with the bar inside detaches it
       // from the DOM while the reference (bar) survives, so the next selection
@@ -266,6 +268,11 @@ export function previewAgent(token = ''): () => void {
     editingEl = el;
     snapshot = el.innerHTML;
     el.setAttribute('contenteditable', 'true');
+    // Name the return key on a virtual keyboard. It commits and closes the
+    // block (Principle 4), so a key labelled "new line" would promise the one
+    // thing it does not do. Like contenteditable, this sits on the element and
+    // never on the innerHTML the commit reads (INV-9).
+    el.setAttribute('enterkeyhint', 'done');
     el.focus();
     post({ type: 'select', id });
   };
@@ -769,9 +776,19 @@ export function previewAgent(token = ''): () => void {
   // at the input stage, not the key. A non-composition Enter never reaches here
   // — keydown above already consumed it. Shift+Enter is insertLineBreak, so it
   // is not caught — in-block line breaks still go in.
+  //
+  // It is also the **only** commit path on a phone. Virtual keyboards do not
+  // reliably raise a usable keydown — many report every key as `Unidentified`
+  // — so the return key would block the line break above and then do nothing
+  // at all. The input stage names the intent whatever the keyboard did, so
+  // commit here too when no composition is in flight (mid-composition it is the
+  // IME's finalize key, and committing on it would end the edit a keystroke
+  // early).
   on(document, 'beforeinput', ((e: InputEvent) => {
     if (editingId === null) return;
-    if (e.inputType === 'insertParagraph') e.preventDefault();
+    if (e.inputType !== 'insertParagraph') return;
+    e.preventDefault();
+    if (!composing && !e.isComposing) commit();
   }) as EventListener);
 
   // Keep the artifact's swipe handlers from firing while editing.

@@ -378,6 +378,17 @@ someone to do what their device cannot is worse than saying nothing (Principle 3
 Buttons in the preview's format bar grow for the same reason — a 12px color dot is
 a coin toss to tap.
 
+**A finger cannot hover**, so the editable/locked outlines (§4 · Visual state) never
+appear on a phone until the edit is already open. Under `(hover: none)` the same
+outlines are drawn on `:active` instead — press feedback is all that is left to say
+"this one, and it is editable" before it happens. The lock notice on tapping a locked
+block is unchanged, and is what keeps Principle 3 met there.
+
+Notices span the width below `sm` rather than sitting at a fixed 320px, and the
+on-screen keyboard shrinks the layout viewport (`interactive-widget=resizes-content`)
+instead of sliding over it — otherwise it covers the bottom of the app, which is
+where the block being edited usually is.
+
 ### Editing interactions
 - Click: only that block gets `contenteditable=true`; the rest are false
 - `Enter`: **commit and close.** Inserts no line break and is not forwarded to
@@ -415,6 +426,14 @@ completed. But let it pass untouched and the browser processes **composition com
 and line break together**, spawning a `<div>` inside a `<p>`. So the **input** is
 blocked, not the key: while editing, `insertParagraph` in `beforeinput` is always
 `preventDefault()`-ed. The composition commits intact; only the line break vanishes.
+
+**That same handler is the only commit path on a phone.** Virtual keyboards do not
+reliably raise a usable `keydown` — many report every key as `Unidentified` — so the
+return key would be blocked by the rule above and then do nothing at all. The input
+stage names the intent whatever the keyboard did, so `insertParagraph` commits there
+too when no composition is in flight. The key itself is labelled by
+`enterkeyhint="done"` on the block being edited: it closes the block, so a key
+reading "new line" would promise the one thing it does not do.
 
 ### Closing the document
 

@@ -115,8 +115,10 @@ describe('injectEditorStyle', () => {
   it('inserts a single chunk at the front of <head> — the fixture has a <style> of its own', () => {
     const head = /<head[^>]*>/i.exec(source);
     expect(styled.indexOf('<style>')).toBe((head?.index ?? 0) + (head?.[0].length ?? 0));
-    // Exactly one copy of the injected rules.
-    expect(styled.match(new RegExp(`\\[${MARKER_ATTR}\\]:not`, 'g'))).toHaveLength(2);
+    // Exactly one copy of the injected rules. Counted by the variable block that
+    // opens them — counting rule occurrences instead would have to be retuned
+    // every time a rule is added, which says nothing about being injected twice.
+    expect(styled.match(new RegExp(`\\[${MARKER_ATTR}\\]\\{--ne-mark`, 'g'))).toHaveLength(1);
   });
 
   it('uses the marker and lock marks as selectors — mismatched names mean no display', () => {
