@@ -1,71 +1,80 @@
 # nighteditor
 
-Claude 아티팩트로 생성된 단일 HTML 문서를, 브라우저에서 클릭해 직접 수정하고
-**원본을 최소 diff로 되돌려주는** 로컬 편집 도구.
+A local editing tool for single-file HTML documents generated as Claude artifacts:
+click the text in the browser, edit it in place, and get the original back as a
+**minimal diff**.
 
 ---
 
-## 대원칙
+## Core principles
 
-이 프로젝트의 정체성을 규정하는 다섯 가지. 방향성이 바뀌지 않는 한 변경하지 않는다.
+Five principles that define this project's identity. They do not change unless the
+project's direction does.
 
-### 1. 원본은 문자열이다
+### 1. The original is a string
 
-편집 결과물은 **원본 문자열에 패치를 적용한 것**이지, DOM을 재직렬화한 것이 아니다.
-`outerHTML` / `serialize()` 로 문서 전체를 다시 쓰는 코드는 어떤 이유로도 들어오지 않는다.
-들여쓰기, 속성 순서, 따옴표 스타일, 엔티티 표기, 주석, DOCTYPE은 사용자가 건드리지 않는 한
-바이트 단위로 보존된다.
+The edited output is **the original string with patches applied**, not a re-serialized DOM.
+Code that rewrites the whole document via `outerHTML` / `serialize()` does not get in,
+for any reason. Indentation, attribute order, quote style, entity notation, comments,
+and the DOCTYPE are preserved byte for byte unless the user touches them.
 
-### 2. 편집한 것만 바뀐다
+### 2. Only what you edit changes
 
-블록 하나를 고치면 diff도 그 블록만 나와야 한다.
-`diff original.html edited.html` 의 결과가 사용자가 실제로 수정한 범위를 넘어서면 버그다.
+Fix one block, and the diff shows only that block.
+If `diff original.html edited.html` extends beyond what the user actually edited, that is a bug.
 
-### 3. 못 하는 것은 조용히 하지 않는다
+### 3. What we cannot do, we do not do quietly
 
-소스로 역추적할 수 없는 텍스트, 스크립트가 생성·변조하는 텍스트, 구조가 깨질 수 있는 영역은
-**편집 불가로 잠그고 그 사실을 사용자에게 보여준다.**
-추측으로 고치는 것보다 못 고친다고 말하는 쪽이 항상 낫다.
+Text that cannot be traced back to the source, text that scripts generate or mutate,
+and regions where the structure could break are **locked against editing, and the user
+is shown that fact.**
+Saying we cannot fix something always beats fixing it by guesswork.
 
-### 4. 편집 단위는 블록이다
+### 4. The unit of editing is the block
 
-텍스트 노드가 아니라 블록(`p`, `h2`, `li`, `td` …)이 편집의 최소 단위다.
-인라인 마크업(`<b>`, `<span>`)은 편집의 장벽이 아니라 블록 안에 보존되는 내용물이다.
+The smallest unit of editing is the block (`p`, `h2`, `li`, `td` …), not the text node.
+Inline markup (`<b>`, `<span>`) is not a barrier to editing — it is content preserved
+inside the block.
 
-### 5. 사용자 파일은 이 기기를 떠나지 않는다
+### 5. User files never leave this machine
 
-백엔드가 없다. 업로드도, 텔레메트리도, 외부 전송도 없다.
-이 원칙이 깨지는 순간 보안 모델 전체를 다시 설계해야 한다.
+There is no backend. No uploads, no telemetry, no outbound transfer of any kind.
+The moment this principle breaks, the entire security model must be redesigned.
 
 ---
 
-## 문서
+## Documents
 
-| 문서 | 내용 |
+| Document | Contents |
 |---|---|
-| [README.md](README.md) | 이 도구가 무엇이고 어떻게 쓰는지 (사용자용) |
-| [docs/guide.md](docs/guide.md) | 사용 가이드 — 여는 법, 편집 조작, 저장·결과물, 잠금 사유, 문제 해결 |
-| [docs/architecture.md](docs/architecture.md) | 기술 스택, 모듈 구조, 데이터 흐름, 설계 결정(ADR)과 근거 |
-| [docs/spec.md](docs/spec.md) | 제품 사양, 블록 판정·잠금 규칙, 사용자 플로우, 범위 밖, 합격 기준 |
-| [docs/rules.md](docs/rules.md) | 개발 프로세스(플랜→구현→리뷰), 불변식, 커밋·분리 규칙, 검증/CI, 금지 사항 |
+| [README.md](README.md) | What this tool is and how to use it (for users) |
+| [docs/guide.md](docs/guide.md) | User guide — opening files, editing, saving and output, lock reasons, troubleshooting |
+| [docs/architecture.md](docs/architecture.md) | Tech stack, module structure, data flow, design decisions (ADRs) and their rationale |
+| [docs/spec.md](docs/spec.md) | Product spec, block detection and lock rules, user flows, out of scope, acceptance criteria |
+| [docs/rules.md](docs/rules.md) | Development process (plan → implement → review), invariants, commit and separation rules, verification/CI, prohibitions |
 
-작업 전에 해당 문서를 읽는다. 문서와 코드가 어긋나면 **문서를 먼저 고치고** 코드를 고친다.
+Read the relevant document before working. When the docs and the code disagree,
+**fix the docs first**, then the code.
 
-작업은 기본 브랜치 `dev` 에 직접 쌓는다 (관리하는 유일한 브랜치).
-모든 작업은 **플랜 → 구현 → 리뷰** 순서를 지키고, 커밋은 기능 단위로 쪼개며,
-push 전에 `pnpm verify` 를 통과시킨다. 상세는 [docs/rules.md](docs/rules.md) §2·§3·§5.
+Work stacks directly on the default branch `dev` (the only branch we manage).
+Every task follows **plan → implement → review**, commits are split by feature,
+and `pnpm verify` must pass before push. Details in [docs/rules.md](docs/rules.md) §2·§3·§5.
 
-## 픽스처
+## Fixtures
 
-`src/__fixtures__/artifact.html` — 회귀 테스트의 대상이 되는 합성 아티팩트.
-실제 Claude 아티팩트에서 문제가 됐던 구조(암시적 `<tbody>`, 스크립트가 채우는 빈 요소,
-중첩 `.code`, 엔티티, 인라인 승격 두 갈래, 전역 클릭 핸들러, DOM 재구성)를 한 파일에 모았다.
+`src/__fixtures__/artifact.html` — the synthetic artifact that regression tests target.
+It collects, in one file, the structures that caused trouble in real Claude artifacts
+(implicit `<tbody>`, empty elements filled by scripts, nested `.code`, entities,
+both branches of inline promotion, a global click handler, DOM restructuring).
 
-`src/__fixtures__/bundle.zip` — 여러 파일로 흩어진 문서. 스타일·그림·스크립트를 옆에 두고
-상대 경로로 참조하고, 스타일시트는 다시 상위 폴더의 글꼴을 부른다.
-`zip` 명령이 만든 진짜 zip 이다 — 손으로 조립한 헤더는 만든 사람의 오해까지 그대로
-베껴 담아서, 파서가 맞는지 틀리는지를 가리지 못한다.
+`src/__fixtures__/bundle.zip` — a document spread across multiple files. Its styles,
+images, and script sit alongside and are referenced by relative paths, and the
+stylesheet in turn pulls a font from the parent folder.
+It is a real zip made by the `zip` command — a hand-assembled header copies its
+author's misunderstandings right along with it, so it cannot tell a correct parser
+from a broken one.
 
-문서에 나오는 실측값(867개 블록, `.foot` 40개 등)은 **실제 아티팩트 1개**(1,411줄/110KB)를
-분석해 얻은 설계 근거다. 그 파일은 내용이 공개 대상이 아니라 저장소에 포함하지 않는다.
-새 규칙을 만들 땐 근거가 된 상황을 픽스처에 먼저 추가한다.
+The measured figures cited in the docs (867 blocks, 40 `.foot` elements, and so on)
+come from analyzing **one real artifact** (1,411 lines / 110KB); they are the design's
+evidence. That file's contents are not for publication, so it is not in the repository.
+When you create a new rule, first add the situation that motivated it to the fixture.
