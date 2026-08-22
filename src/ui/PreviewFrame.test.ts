@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useEditor } from '@/store/editor';
+import type { Block } from '@/core/types';
 import { useReplacement } from '@/store/replacement';
 import { PreviewFrame } from './PreviewFrame';
 
@@ -73,5 +74,68 @@ describe('PreviewFrame · 갈아 끼우는 동안은 프리뷰를 잠근다 (spe
       useReplacement.setState({ replacing: false });
     });
     expect(host!.querySelector('iframe')?.classList.contains('pointer-events-none')).toBe(false);
+  });
+});
+
+describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 버린다 (spec §5)', () => {
+  function mountFrame(): HTMLIFrameElement {
+    act(() => {
+      root = createRoot(host!);
+      root.render(createElement(PreviewFrame));
+    });
+    const frame = host!.querySelector('iframe');
+    if (!frame?.contentWindow) throw new Error('iframe 이 그려지지 않았다');
+    return frame;
+  }
+
+  const arrive = (frame: HTMLIFrameElement, data: unknown) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
+    });
+
+  it('표가 다른 ready 는 대조를 세우지 못한다', () => {
+    // iframe 은 재사용되어 srcDoc 을 갈아도 contentWindow 신원이 그대로다 — 출처
+    // 검사만으로는 옛 문서의 메시지를 못 가린다. 블록 id 는 문서마다 0부터 다시
+    // 시작하므로, 옛 ready 를 받으면 옛 문서의 잠금이 새 문서에 적힌다.
+    useEditor.setState({ previewToken: 'doc-2' });
+    const frame = mountFrame();
+
+    arrive(frame, { type: 'ready', blocks: [], token: 'doc-1' });
+    expect(useEditor.getState().scanned).toBe(false);
+
+    arrive(frame, { type: 'ready', blocks: [], token: 'doc-2' });
+    expect(useEditor.getState().scanned).toBe(true);
+  });
+
+  it('표가 다른 edit 는 패치가 되지 못한다', () => {
+    useEditor.setState({
+      previewToken: 'doc-2',
+      blocks: [
+        {
+          id: 0,
+          tag: 'p',
+          sourceInner: '원래',
+          sourceText: '원래',
+          innerStart: 0,
+          innerEnd: 2,
+          locked: null,
+          rcdata: false,
+        } as unknown as Block,
+      ],
+      patches: new Map(),
+    });
+    const frame = mountFrame();
+
+    arrive(frame, { type: 'edit', id: 0, html: '옛 문서의 내용', pristine: false, token: 'doc-1' });
+    expect(useEditor.getState().patches.size).toBe(0);
+
+    arrive(frame, {
+      type: 'edit',
+      id: 0,
+      html: '지금 문서의 내용',
+      pristine: false,
+      token: 'doc-2',
+    });
+    expect(useEditor.getState().patches.get(0)).toBe('지금 문서의 내용');
   });
 });

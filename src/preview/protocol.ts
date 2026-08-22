@@ -6,8 +6,17 @@
  * 타입만 있으면 컴파일 후 아무것도 남지 않으므로 두 번들은 여전히 분리된다.
  */
 
-/** 프리뷰 → 호스트 */
-export type FromPreview =
+/** 프리뷰 → 호스트. 모든 메시지에 문서의 표(token)가 실린다 — 아래 참조 */
+export type FromPreview = {
+  /**
+   * 이 프리뷰 문서의 표. iframe 은 재사용되고 `srcDoc` 을 갈아 끼워도 `contentWindow`
+   * 신원은 그대로라, 옛 문서의 메시지가 출처 검사를 통과한다 — 호스트는 지금 문서의
+   * 표가 아닌 메시지를 버린다 (spec §5). 표 없는 에이전트(테스트)만 이 필드가 없다.
+   */
+  token?: string;
+} & FromPreviewBody;
+
+type FromPreviewBody =
   | { type: 'ready'; blocks: { id: number; text: string }[] }
   | { type: 'select'; id: number | null }
   /** pristine 이면 편집 결과가 원래 내용과 같다 — 호스트는 패치를 지운다 */

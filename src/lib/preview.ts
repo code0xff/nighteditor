@@ -20,12 +20,18 @@ import type { Block } from '@/core/types';
 export function buildPreviewDocument(
   source: string,
   blocks: readonly Block[],
-  swaps: readonly AssetSwap[] = []
+  swaps: readonly AssetSwap[] = [],
+  /** 이 문서의 표 — 에이전트가 모든 메시지에 붙인다 (spec §5 · 갈아 끼우기 예약) */
+  token = ''
 ): string {
   const edits = [
     ...markerEdits(source, blocks),
     ...swaps.map(({ start, end, to }) => ({ start, end, text: to })),
   ];
 
-  return injectAgentScript(injectEditorStyle(applyEdits(source, edits)), previewAgent.toString());
+  return injectAgentScript(
+    injectEditorStyle(applyEdits(source, edits)),
+    previewAgent.toString(),
+    token
+  );
 }

@@ -1953,3 +1953,19 @@ describe('editor · BOM 과 인코딩 (spec §1 · 문서 인코딩)', () => {
     expect(useEditor.getState().file).toBeNull();
   });
 });
+
+describe('editor · 문서마다 다른 프리뷰 표 (spec §5)', () => {
+  it('문서를 세울 때마다 새 표를 만들어 프리뷰 문서에 싣는다', async () => {
+    await useEditor.getState().loadDropped(dropped());
+    const first = useEditor.getState().previewToken;
+    expect(first).not.toBe('');
+    // 에이전트 호출 인자로 실려 있어야 프리뷰가 그 표로 메시지를 보낸다.
+    expect(useEditor.getState().previewDoc).toContain(`("${first}")`);
+
+    await useEditor.getState().loadDropped(dropped());
+    const second = useEditor.getState().previewToken;
+    // 같은 표면 옛 프리뷰의 메시지를 못 가린다 — 갈아탈 때마다 달라야 한다.
+    expect(second).not.toBe(first);
+    expect(useEditor.getState().previewDoc).toContain(`("${second}")`);
+  });
+});

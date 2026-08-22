@@ -81,6 +81,16 @@ describe('injectAgentScript (ADR-007)', () => {
     expect(out.indexOf('<script>')).toBeLessThan(out.indexOf('<body>'));
   });
 
+  it('문서의 표를 에이전트의 인자로 싣는다 (spec §5)', () => {
+    const out = injectAgentScript('<html><head></head></html>', agent, 'doc-3');
+    expect(out).toContain(')("doc-3");</script>');
+  });
+
+  it('표 안의 < 는 이스케이프한다 — </script 꼴이 인라인 스크립트를 끊지 않는다', () => {
+    const out = injectAgentScript('<html><head></head></html>', agent, '</script>');
+    expect(out.match(/<\/script>/g)).toHaveLength(1);
+  });
+
   it('에이전트 안의 </script> 가 인라인 스크립트를 끊지 않는다', () => {
     const out = injectAgentScript(
       '<html><head></head></html>',

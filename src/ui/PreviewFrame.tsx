@@ -17,6 +17,7 @@ export function PreviewFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
   const { t } = useI18n();
   const previewDoc = useEditor((s) => s.previewDoc);
+  const previewToken = useEditor((s) => s.previewToken);
   const blocks = useEditor((s) => s.blocks);
   const scanned = useEditor((s) => s.scanned);
   const onReady = useEditor((s) => s.onReady);
@@ -36,7 +37,12 @@ export function PreviewFrame() {
   useEffect(() => {
     const handle = (e: MessageEvent) => {
       if (e.source !== frame.current?.contentWindow) return;
-      const msg = e.data as FromPreview;
+      const msg = e.data as FromPreview | null;
+      if (!msg || typeof msg !== 'object') return;
+      // 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 버린다 (spec §5) — iframe 은 재사용되어
+      // srcDoc 을 갈아도 contentWindow 신원이 그대로라 출처 검사를 통과하는데, 블록
+      // id 는 문서마다 0부터 다시 시작해 옛 문서의 내용·잠금이 새 문서를 건드린다.
+      if ((msg.token ?? '') !== previewToken) return;
       if (msg.type === 'ready') onReady(msg.blocks);
       else if (msg.type === 'edit') onEdit(msg.id, msg.html, msg.pristine);
       else if (msg.type === 'blocked') onBlocked(msg.id);
@@ -50,7 +56,7 @@ export function PreviewFrame() {
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
-  }, [onReady, onEdit, onBlocked, onNotReady, select, downloadCopy, undoLast]);
+  }, [previewToken, onReady, onEdit, onBlocked, onNotReady, select, downloadCopy, undoLast]);
 
   // 서식 막대에 붙일 문구를 건넨다. 에이전트는 언어팩을 불러올 수 없다 (ADR-007).
   // 언어를 바꾸면 다시 보내 이미 떠 있는 막대까지 함께 바뀌게 한다.

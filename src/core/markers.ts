@@ -48,10 +48,14 @@ export function injectMarkers(source: string, blocks: readonly Block[]): string 
  * 걸어야 버블 단계에서 먼저 실행되고, 그래야 아티팩트의 전역 핸들러를 막을 수 있다.
  * 아티팩트 스크립트는 대개 `<body>` 끝에 있으므로 `<head>` 맨 앞이면 충분하다.
  */
-export function injectAgentScript(html: string, agentSource: string): string {
+export function injectAgentScript(html: string, agentSource: string, token = ''): string {
   // 에이전트 소스 안의 `</script>` 는 인라인 스크립트를 조기 종료시킨다.
   const safe = agentSource.replace(/<\/script/gi, '<\\/script');
-  const script = `<script>(${safe})();</script>`;
+  // 문서마다 다른 표 — 에이전트가 모든 메시지에 붙여, 갈아탄 뒤 도착한 옛 프리뷰의
+  // 메시지를 호스트가 가려낼 수 있게 한다 (spec §5). `<` 는 이스케이프한다 —
+  // 표 안의 `</script` 가 인라인 스크립트를 조기 종료시키면 안 된다.
+  const arg = JSON.stringify(token).replace(/</g, '\\u003c');
+  const script = `<script>(${safe})(${arg});</script>`;
 
   const anchor = /<head[^>]*>/i.exec(html) ?? /<html[^>]*>/i.exec(html);
   if (!anchor) return script + html;

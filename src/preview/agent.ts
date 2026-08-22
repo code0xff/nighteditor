@@ -6,9 +6,12 @@
  * 그래서 `data-ne-id` 같은 상수도 여기서 다시 적는다 — core/markers.ts 와
  * 값이 같아야 하며, 어긋나면 agent.test.ts 가 잡는다.
  *
+ * @param token 이 프리뷰 문서의 표. iframe 은 재사용되어 `contentWindow` 신원으로는
+ *   문서를 가릴 수 없다 — 모든 메시지에 이 표를 붙여, 갈아탄 뒤 도착한 옛 프리뷰의
+ *   메시지를 호스트가 버릴 수 있게 한다 (spec §5).
  * @returns 걸어둔 리스너를 모두 떼는 함수. 다른 파일을 열 때 호출한다.
  */
-export function previewAgent(): () => void {
+export function previewAgent(token = ''): () => void {
   const MARKER = 'data-ne-id';
   const LOCKED = 'data-ne-locked';
   const DARK = 'data-ne-dark';
@@ -25,8 +28,10 @@ export function previewAgent(): () => void {
     target.addEventListener(type, fn);
     bound.push({ target, type, fn });
   };
-  const post = (msg: unknown): void => {
-    parent.postMessage(msg, '*');
+  const post = (msg: Record<string, unknown>): void => {
+    // 문서의 표를 모든 메시지에 붙인다 (spec §5). 표 없이 부르는 것은 표가 필요
+    // 없는 자리(테스트 하네스)뿐이다 — 그때는 메시지를 그대로 보낸다.
+    parent.postMessage(token ? { ...msg, token } : msg, '*');
   };
 
   let editingId: number | null = null;

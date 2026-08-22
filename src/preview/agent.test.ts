@@ -1257,6 +1257,29 @@ describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', (
   });
 });
 
+describe('previewAgent · 문서의 표 (spec §5)', () => {
+  it('표를 받으면 모든 메시지에 붙인다 — 호스트가 옛 프리뷰의 메시지를 가릴 수 있어야 한다', () => {
+    document.body.innerHTML = `<p ${MARKER_ATTR}="0">본문</p>`;
+    sent = [];
+    vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
+      sent.push(msg as Record<string, unknown>);
+    }) as typeof window.parent.postMessage);
+    dispose = previewAgent('doc-7');
+    fromHost({ type: 'locked', ids: [] });
+    sent = [];
+
+    click(el(0)!);
+
+    expect(sent).toContainEqual({ type: 'select', id: 0, token: 'doc-7' });
+  });
+
+  it('표 없이 부르면 메시지를 그대로 보낸다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    expect(sent).toContainEqual({ type: 'select', id: 0 });
+  });
+});
+
 describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)', () => {
   it('흉내 낸 data-ne-bar 속 블록도 편집이 열린다 — 견주는 것은 속성이 아니라 우리 막대다', () => {
     // closest('[data-ne-bar]') 로 걸렀다면 이 블록의 클릭이 전부 막대 클릭으로

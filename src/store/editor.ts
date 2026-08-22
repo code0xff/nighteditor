@@ -36,6 +36,14 @@ export interface EditorState {
   source: string;
   blocks: Block[];
   previewDoc: string;
+  /**
+   * 지금 프리뷰 문서의 표 (spec §5). iframe 은 재사용되고 `srcDoc` 을 갈아 끼워도
+   * `contentWindow` 신원은 그대로라, 옛 문서의 에이전트가 띄워 둔 메시지가 새 문서가
+   * 선 뒤에 도착하면 출처 검사를 통과한다 — 블록 id 는 문서마다 0부터 다시 시작해
+   * 옛 내용·잠금이 새 문서를 건드린다. 에이전트는 모든 메시지에 이 표를 붙이고,
+   * PreviewFrame 은 표가 다른 메시지를 버린다. 문서가 없으면 빈 문자열이다.
+   */
+  previewToken: string;
   /** 블록 id → 편집된 innerHTML */
   patches: Map<number, string>;
   selectedId: number | null;
@@ -364,6 +372,9 @@ function openFailedNotice(e: unknown): Notice {
     : { key: 'notice.openFailed' };
 }
 
+/** 프리뷰 문서의 표 — 세션 안에서 문서마다 다르기만 하면 된다. 순번으로 충분하다 */
+let previewSerial = 0;
+
 /**
  * parse5 와 프리뷰 조립기는 **파일을 열 때 처음** 필요하다. 초기 화면은 드롭 영역뿐이라
  * 파서를 같이 실어 보낼 이유가 없다 — 그래서 여기서 동적으로 불러온다 (코드 분할).
@@ -422,6 +433,8 @@ async function load(
   // 바꾸면 틀린 자원을 붙인다.
   const swaps =
     baseDir === null ? [] : assetSwaps(file.text, refs, baseDir, (p) => assets.urls.get(p));
+  // 갈아탄 뒤 도착할 옛 프리뷰의 메시지를 가릴 표 — 문서마다 다르다 (spec §5).
+  const previewToken = `doc-${++previewSerial}`;
 
   return {
     file,
@@ -437,7 +450,8 @@ async function load(
     candidates: files ? candidatesOf(files) : [],
     bundleHandles: handles ?? new Map(),
     boundary: swaps.length > 0 ? assetBoundary(swaps) : null,
-    previewDoc: buildPreviewDocument(file.text, blocks, swaps),
+    previewToken,
+    previewDoc: buildPreviewDocument(file.text, blocks, swaps, previewToken),
     patches: new Map(),
     savedPatches: new Map(),
     selectedId: null,
@@ -545,6 +559,7 @@ function emptyDocument(): Partial<EditorState> {
     source: '',
     blocks: [],
     previewDoc: '',
+    previewToken: '',
     patches: new Map(),
     selectedId: null,
     blockedId: null,
