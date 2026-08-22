@@ -280,6 +280,44 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(useUnsaved.getState().why).toBeNull();
   });
 
+  it('물음의 답을 기다리는 사이 밀려났으면 저장으로 답해도 save() 를 부르지 않는다 (spec §5)', async () => {
+    // 답이 돌아온 순간 예약을 다시 본다 — 안 보면 밀려난 흐름의 "저장" 답이 그대로
+    // save() 를 불러, 옛 흐름의 결과물이 파일에 적히고 사용자의 마지막 선택을 덮는다.
+    const save = vi.fn().mockResolvedValue(true);
+    edited({ save });
+    const mine = reserveReplacement();
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' }, mine);
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+      await Promise.resolve();
+    }
+    // 물음이 떠 있는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+    reserveReplacement();
+    useUnsaved.getState().reply('save');
+
+    expect(await asked).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('저장을 기다리는 사이 밀려났으면 계속하지 않는다 (spec §5)', async () => {
+    // 파일에는 이미 썼고 그건 그 파일의 몫이다 — 하지만 이어질 설치는 최신 흐름의
+    // 것이라, 여기서 true 로 돌아가면 밀려난 흐름이 옛 문서를 설치하려 든다.
+    const save = vi.fn().mockImplementation(async () => {
+      // 쓰는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+      reserveReplacement();
+      return true;
+    });
+    edited({ save });
+    const mine = reserveReplacement();
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' }, mine);
+    await answerWith('save');
+
+    expect(await asked).toBe(false);
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it('떼고 나면 청하지 않는다 — 프리뷰가 없으면 확정시킬 편집도 없다', async () => {
     const flush = vi.fn().mockResolvedValue(undefined);
     registerPreviewFlush(flush)();

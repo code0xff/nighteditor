@@ -89,7 +89,10 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
  * 저장한 줄 알았던 편집이 사라진다.
  *
  * @param why 무엇 때문에 사라지는지 — 물음에 그대로 들어간다
- * @param mine 이 물음이 딸린 갈아 끼우기 예약. 저장으로 답하면 **그 순간** 잠근다
+ * @param mine 이 물음이 딸린 갈아 끼우기 예약. 긴 단계(확정 기다림·물음·저장)가
+ *   전부 guarded 를 지나므로, true 로 돌아왔다면 마지막 긴 단계까지 이 예약이
+ *   최신이었다 — 부르는 쪽이 돌아온 직후를 다시 확인할 필요가 없다 (spec §5).
+ *   저장으로 답하면 **그 순간** 잠근다
  *   (spec §4) — 저장이 파일을 쓰는 사이의 편집도 이어질 설치 순간 갈 곳이 없다.
  *   여기서 잠그지 않으면 그 사이의 편집이 받아졌다가 설치에 조용히 쓸려 나간다.
  *   홀로 도는 저장과 다르다 — 그쪽 편집은 살아남으므로 잠그지 않는다.
@@ -111,7 +114,10 @@ export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolea
     // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
     if (!unsaved) return true;
 
-    const choice = await useUnsaved.getState().ask(why);
+    // 물음도 긴 단계다 — 답을 기다리는 사이 더 새 흐름이 예약하면, 밀려난 흐름의
+    // "저장" 답이 그대로 save() 를 불러 옛 흐름의 결과물이 파일에 적힌다 (spec §5).
+    // guarded 가 답이 돌아온 순간 예약을 다시 본다.
+    const choice = await pass(useUnsaved.getState().ask(why));
     if (choice === 'cancel') return false;
     if (choice === 'save') {
       mine?.engage();
@@ -120,7 +126,9 @@ export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolea
       // 으로 false 를 돌려주는데, 그것을 실패로 읽으면 청한 저장이 이미 충족됐는데도
       // 하려던 일이 조용히 취소된다. 깨끗하면 저장된 것으로 치고 계속한다 (spec §4).
       if (!useEditor.getState().unsaved) return true;
-      return await save();
+      // 저장을 기다리는 사이 밀려났으면 계속하지 않는다 — 파일에는 이미 썼고 그건
+      // 그 파일의 몫이지만, 이어질 설치는 최신 흐름의 것이다 (spec §5).
+      return await pass(save());
     }
     return true;
   } catch (e) {

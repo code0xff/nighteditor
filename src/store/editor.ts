@@ -615,8 +615,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
-      if (!mine.current()) return;
       await replace(get, set, mine, openPicked(picked));
     } catch (e) {
       // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
@@ -648,8 +646,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
       // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다 (spec §5).
-      if (!mine.current()) return;
       // 답한 순간부터 잠근다 — 읽기가 끝나기를 기다리는 사이의 편집도 새 상태가
       // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
       mine.engage();
@@ -684,8 +680,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 이 드롭은 밀려났다.
-      if (!mine.current()) return;
       // 답한 순간부터 잠근다 — 훑기가 끝나기를 기다리는 사이의 편집도 새 상태가
       // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
       mine.engage();
@@ -933,8 +927,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       read = await mine.guarded(pickFolder(null, 'readwrite'));
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
-      if (!mine.current()) return;
       const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
       if (next && read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
@@ -969,8 +961,6 @@ export const useEditor = create<EditorState>((set, get) => ({
       const read = await mine.guarded(pickFolder(file.handle));
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }, mine))) return;
-      // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
-      if (!mine.current()) return;
 
       const loading = async (): Promise<Partial<EditorState>> => {
         // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
@@ -1040,8 +1030,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     const mine = reserveReplacement();
     try {
       if (!(await keepEdits({ key: 'confirm.whyClose' }, mine))) return;
-      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
-      if (!mine.current()) return;
       await replace(get, set, mine, Promise.resolve(emptyDocument()));
     } catch (e) {
       if (mine.current()) set({ notice: openFailedNotice(e) });
@@ -1059,8 +1047,6 @@ export const useEditor = create<EditorState>((set, get) => ({
     const mine = reserveReplacement();
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }, mine))) return;
-      // 물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
-      if (!mine.current()) return;
       // 물음에 저장으로 답했으면 묶음이 방금 그 결과물로 갈렸다 (내려받기 저장은
       // 묶음이 유일한 원천이다, spec §5). 멈추기 전에 받아 둔 묶음을 그대로 쓰면
       // 설치가 저장 전 바이트를 되살려, 돌아왔을 때 저장한 내용이 조용히 사라진다.
