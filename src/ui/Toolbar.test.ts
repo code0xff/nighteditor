@@ -18,7 +18,7 @@ beforeEach(() => {
     patches: new Map(),
     saving: false,
     unsaved: false,
-    // 제목 칸은 대조가 끝나야 열린다 (spec §4) — 여기 테스트들은 그 뒤의 세계를 다룬다.
+    // The title field only opens after verification (spec §4) — these tests live in the world after it.
     scanned: true,
   });
   useReplacement.setState({ replacing: false });
@@ -37,17 +37,17 @@ afterEach(() => {
   host = null;
 });
 
-/** 저장 버튼 — 사본 내려받기는 아이콘뿐이라 글자가 있는 쪽이 저장이다 */
+/** The save button — download-copy is icon-only, so the one with text is save */
 function saveButton(): HTMLButtonElement | undefined {
   return [...document.querySelectorAll('button')].find((b) =>
     /저장|Save/.test(b.textContent ?? '')
   );
 }
 
-describe('Toolbar · 저장 버튼은 파일과 다른가로 잠긴다 (spec §5)', () => {
-  it('저장한 뒤에는 패치가 남아 있어도 잠긴다 — 눌리는데 아무 일도 없는 버튼을 두지 않는다', () => {
-    // 저장해도 patches 는 남는다(INV-1). 개수로 열어 두면 save() 의 조기 반환과
-    // 어긋나, 버튼은 눌리는데 아무 일도 일어나지 않는다.
+describe('Toolbar · the save button locks on "differs from the file" (spec §5)', () => {
+  it('locks after a save even with patches remaining — no button that presses but does nothing', () => {
+    // Patches survive a save (INV-1). Enabling by count diverges from save()'s
+    // early return: the button presses and nothing happens.
     act(() => {
       useEditor.setState({ patches: new Map([[0, '고친 값']]), unsaved: false });
     });
@@ -55,7 +55,7 @@ describe('Toolbar · 저장 버튼은 파일과 다른가로 잠긴다 (spec §5
     expect(saveButton()?.disabled).toBe(true);
   });
 
-  it('저장한 편집을 되돌리면 패치 0개여도 눌린다 — 파일을 화면과 같게 되쓸 일이 남았다', () => {
+  it('reverting a saved edit makes it pressable even at zero patches — the file still needs rewriting to match the screen', () => {
     act(() => {
       useEditor.setState({ patches: new Map(), unsaved: true });
     });
@@ -64,7 +64,7 @@ describe('Toolbar · 저장 버튼은 파일과 다른가로 잠긴다 (spec §5
   });
 });
 
-describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §4)', () => {
+describe('Toolbar · the title field locks during replacement (spec §4)', () => {
   const title = {
     id: 0,
     tag: 'title',
@@ -76,11 +76,11 @@ describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §
     locked: null,
   };
 
-  /** 제목 칸 — Input 은 이것 하나다 */
+  /** The title field — the only Input there is */
   const titleInput = (): HTMLInputElement | null =>
     document.querySelector<HTMLInputElement>('#doc-title');
 
-  it('replacing 동안 잠긴다 — 이 사이의 편집은 새 문서가 서면 사라질 자리다', () => {
+  it('locks while replacing — an edit made in between has nowhere to go once the new document stands', () => {
     act(() => {
       useEditor.setState({ blocks: [title] });
       useReplacement.setState({ replacing: true });
@@ -89,7 +89,7 @@ describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §
     expect(titleInput()?.disabled).toBe(true);
   });
 
-  it('저장하는 동안(saving)은 잠기지 않는다 — 그 편집은 살아남는다 (spec §5)', () => {
+  it('does not lock while saving — those edits survive (spec §5)', () => {
     act(() => {
       useEditor.setState({ blocks: [title], saving: true });
     });
@@ -97,7 +97,7 @@ describe('Toolbar · 갈아 끼우는 동안은 제목 칸을 잠근다 (spec §
     expect(titleInput()?.disabled).toBe(false);
   });
 
-  it('대조가 끝나기 전에도 잠긴다 — 스크립트가 제목을 바꾸면 그 패치가 지워진다 (spec §4)', () => {
+  it('locks before verification ends too — if a script changes the title, that patch gets erased (spec §4)', () => {
     act(() => {
       useEditor.setState({ blocks: [title], scanned: false });
     });

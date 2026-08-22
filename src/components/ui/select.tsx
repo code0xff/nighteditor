@@ -76,8 +76,9 @@ const SelectContent = React.forwardRef<
         className={cn(
           'p-1',
           position === 'popper' &&
-            // 고정 높이(h-)로 두면 부모가 flex 가 아닐 때 뷰포트가 트리거 높이에
-            // 갇혀 항목 두 개도 못 보여준다. 최소 높이로만 잡는다.
+            // A fixed height (h-) traps the viewport at the trigger height
+            // when the parent is not flex, showing not even two items. Set
+            // only a minimum height.
             'min-h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]'
         )}
       >

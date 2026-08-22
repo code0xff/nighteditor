@@ -12,7 +12,7 @@ import { ChangeList } from './ChangeList';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-/** 편집된 블록 하나가 목록에 뜬 상태 */
+/** State with one edited block showing in the list */
 const block: Block = {
   id: 0,
   tag: 'p',
@@ -42,27 +42,28 @@ afterEach(() => {
   host = null;
 });
 
-/** 되돌리기류 버튼 — 카드 이동(reveal)은 버튼이 아니라 role=button 카드다 */
+/** The revert-style buttons — the card jump (reveal) is a role=button card, not a button */
 function revertButtons(): HTMLButtonElement[] {
   return [...document.querySelectorAll('button')].filter((b) =>
     /되돌리기|Revert/.test(b.textContent ?? '')
   );
 }
 
-describe('ChangeList · 갈아 끼우는 동안은 되돌리기를 잠근다 (spec §4)', () => {
-  it('replacing 동안 되돌리기·전체 되돌리기가 눌리지 않는다', () => {
-    // 목록이 보여주는 것은 아직 이전 문서다 — 여기서 되돌린 것은 새 문서가
-    // 서는 순간 갈 곳이 없다. 잠금의 근거는 예약 상태 하나다 (ADR-010).
+describe('ChangeList · revert is locked during replacement (spec §4)', () => {
+  it('revert and revert-all cannot be pressed while replacing', () => {
+    // What the list shows is still the previous document — a revert made here
+    // has nowhere to go the moment the new document stands. The lock's basis
+    // is the single reservation state (ADR-010).
     act(() => {
       useReplacement.setState({ replacing: true });
     });
 
     const buttons = revertButtons();
-    expect(buttons.length).toBeGreaterThan(1); // 개별 + 전체
+    expect(buttons.length).toBeGreaterThan(1); // individual + all
     expect(buttons.every((b) => b.disabled)).toBe(true);
   });
 
-  it('끝나면 다시 눌린다', () => {
+  it('becomes pressable again when it ends', () => {
     act(() => {
       useReplacement.setState({ replacing: true });
     });

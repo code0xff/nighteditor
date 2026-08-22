@@ -1,9 +1,10 @@
 /**
- * 제품 워드마크 — 앱 아이콘 + 이름.
+ * The product wordmark — app icon + name.
  *
- * 이름은 **한 단어**다. 두 톤으로 쪼개면 `night` 와 `editor` 가 서로 다른 것처럼 읽히고,
- * 저장소 이름·PWA 매니페스트·`<title>` 에 적힌 이름과도 어긋난다.
- * 아이콘을 갈아끼우려면 `@/lib/icons` 의 `APP_ICON` 을 고친다.
+ * The name is **one word**. Split into two tones, `night` and `editor` read as
+ * separate things, and it diverges from the name in the repository, the PWA
+ * manifest, and the `<title>`.
+ * To swap the icon, change `APP_ICON` in `@/lib/icons`.
  */
 import { APP_ICON, IconBrand, type LucideIcon } from '@/lib/icons';
 

@@ -21,7 +21,7 @@ export function Toolbar() {
   const scanned = useEditor((s) => s.scanned);
   const unsaved = useEditor((s) => s.unsaved);
   const busy = useEditorBusy();
-  // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
+  // All screen locking during replacement derives from the single reservation state (ADR-010).
   const replacing = useReplacement((s) => s.replacing);
   const onEdit = useEditor((s) => s.onEdit);
   const save = useEditor((s) => s.save);
@@ -43,7 +43,7 @@ export function Toolbar() {
           <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>
           <DocSelect />
 
-          {/* 문서를 바꾸는 일이라 여는 것과 같이 잠근다 — 저장 중·갈아 끼우는 중에는 못 누른다 */}
+          {/* Changes the document, so it locks like opening does — unpressable while saving or replacing */}
           <Button
             variant="ghost"
             size="icon"
@@ -64,11 +64,13 @@ export function Toolbar() {
                 id="doc-title"
                 className="h-8 w-56"
                 value={titleValue}
-                // 갈아 끼우는 동안(replacing)의 편집은 새 문서가 서면 사라질 자리다.
-                // 받는 척하고 버리는 대신 칸을 잠근다 (spec §4). saving 으로 잠그면 안 된다 —
-                // 저장하는 사이의 편집은 살아남으므로 그때는 계속 받는다.
-                // 대조가 끝나기 전(!scanned)에도 잠근다 — 스크립트가 제목을 바꾸면 대조가
-                // 이 블록을 잠그며 그 패치를 지워, 화면과 저장본이 갈라진다 (spec §4).
+                // An edit made while replacing has nowhere to go once the new
+                // document stands. Lock the field instead of pretending to
+                // accept and discarding (spec §4). Never lock on saving —
+                // edits made during a save survive, so keep accepting then.
+                // Lock before verification too (!scanned) — if a script changes
+                // the title, verification locks this block and erases the patch,
+                // splitting the screen from the saved file (spec §4).
                 disabled={replacing || !scanned || title.locked !== null}
                 title={
                   title.locked
@@ -102,11 +104,13 @@ export function Toolbar() {
           </Button>
         )}
         {file && (
-          // 패치 개수로 잠그면 안 된다 (spec §5) — 저장하면 패치가 남은 채 unsaved 만
-          // 풀리고(눌리는데 아무 일도 없는 버튼이 된다), 저장한 편집을 되돌리면 패치
-          // 0개로 저장할 것이 생긴다. save() 의 조기 반환과 같은 기준을 본다.
-          // 저장이 도는 동안과 갈아 끼우는 동안도 잠근다(useEditorBusy) —
-          // 앞은 겹쳐 쓰지 않으려고, 뒤는 이전 문서를 저장하는 일이 되기 때문이다.
+          // Never lock on patch count (spec §5) — saving clears unsaved while
+          // patches remain (a button that presses but does nothing), and
+          // reverting a saved edit leaves something to save at zero patches.
+          // Watch the same criterion as save()'s early return.
+          // Also lock while a save runs and while replacing (useEditorBusy) —
+          // the former to avoid overlapping writes, the latter because it
+          // would mean saving the previous document.
           <Button size="sm" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
             {t('toolbar.save')} {patches.size > 0 && `(${patches.size})`}

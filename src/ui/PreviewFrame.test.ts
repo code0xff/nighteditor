@@ -8,7 +8,7 @@ import { useReplacement } from '@/store/replacement';
 import { FLUSH_TIMEOUT, flushPreviewEdits } from '@/store/unsaved';
 import { PreviewFrame } from './PreviewFrame';
 
-// react 의 act 는 이 표식이 있어야 테스트 환경으로 인정하고 경고 없이 돈다.
+// React's act only accepts this as a test environment, and runs without warnings, when this flag is set.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | null = null;
@@ -31,15 +31,16 @@ afterEach(() => {
   host = null;
 });
 
-// 나중에 등록한 afterEach 가 먼저 돈다 — 위의 unmount 는 실제 타이머로 돌아야 한다.
+// The later-registered afterEach runs first — the unmount above must run on real timers.
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('PreviewFrame · 서식 문구는 에이전트가 준비된 뒤에 다시 보낸다 (spec §4.1)', () => {
-  it('대조가 끝나면(ready) 문구를 다시 보낸다', () => {
-    // 문서가 갈린 직후의 전송은 새 iframe 이 에이전트를 실행하기 전이라 사라질 수 있다.
-    // ready 뒤의 재전송이 없으면 첫 막대가 빈 제목으로 뜬다.
+describe('PreviewFrame · formatting labels are resent once the agent is ready (spec §4.1)', () => {
+  it('resends the labels when verification ends (ready)', () => {
+    // A send right after the document switches can vanish — the new iframe has
+    // not run the agent yet. Without the resend after ready, the first bar
+    // shows up with empty titles.
     act(() => {
       root = createRoot(host!);
       root.render(createElement(PreviewFrame));
@@ -62,10 +63,11 @@ describe('PreviewFrame · 서식 문구는 에이전트가 준비된 뒤에 다�
   });
 });
 
-describe('PreviewFrame · 갈아 끼우는 동안은 프리뷰를 잠근다 (spec §4)', () => {
-  it('replacing 동안 클릭이 닿지 않고, 끝나면 되살아난다', () => {
-    // 이 사이 화면에 뜬 것은 아직 이전 문서다 — 여기서 시작한 편집은 새 문서가
-    // 서는 순간 사라질 자리라, 시작 자체를 막는다.
+describe('PreviewFrame · the preview locks during replacement (spec §4)', () => {
+  it('clicks cannot reach it while replacing, and it revives when that ends', () => {
+    // What is on screen in between is still the previous document — an edit
+    // started here would vanish the moment the new document stands, so even
+    // starting one is blocked.
     act(() => {
       root = createRoot(host!);
       root.render(createElement(PreviewFrame));
@@ -83,7 +85,7 @@ describe('PreviewFrame · 갈아 끼우는 동안은 프리뷰를 잠근다 (spe
   });
 });
 
-describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 버린다 (spec §5)', () => {
+describe('PreviewFrame · messages from the old preview arriving after a switch are dropped (spec §5)', () => {
   function mountFrame(): HTMLIFrameElement {
     act(() => {
       root = createRoot(host!);
@@ -99,10 +101,11 @@ describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 
       window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
     });
 
-  it('표가 다른 ready 는 대조를 세우지 못한다', () => {
-    // iframe 은 재사용되어 srcDoc 을 갈아도 contentWindow 신원이 그대로다 — 출처
-    // 검사만으로는 옛 문서의 메시지를 못 가린다. 블록 id 는 문서마다 0부터 다시
-    // 시작하므로, 옛 ready 를 받으면 옛 문서의 잠금이 새 문서에 적힌다.
+  it('a ready with the wrong token cannot establish verification', () => {
+    // The iframe is reused; swapping srcDoc keeps the contentWindow identity —
+    // the source check alone cannot screen out the old document's messages.
+    // Block ids restart at 0 in every document, so accepting an old ready
+    // writes the old document's locks onto the new one.
     useEditor.setState({ previewToken: 'doc-2' });
     const frame = mountFrame();
 
@@ -113,7 +116,7 @@ describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 
     expect(useEditor.getState().scanned).toBe(true);
   });
 
-  it('표가 다른 edit 는 패치가 되지 못한다', () => {
+  it('an edit with the wrong token cannot become a patch', () => {
     useEditor.setState({
       previewToken: 'doc-2',
       blocks: [
@@ -146,7 +149,7 @@ describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 
   });
 });
 
-describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
+describe('PreviewFrame · preview flush requests (spec §4)', () => {
   function mountFrame(): HTMLIFrameElement {
     act(() => {
       root = createRoot(host!);
@@ -162,7 +165,7 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
       window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
     });
 
-  it('iframe 에 flush 를 청하고, 지금 문서의 flushed 가 와야 풀린다', async () => {
+  it("requests a flush from the iframe and only resolves on the current document's flushed", async () => {
     useEditor.setState({ previewToken: 'doc-2' });
     const frame = mountFrame();
     const posted: { type?: string; seq?: number }[] = [];
@@ -177,7 +180,7 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
     const flush = posted.find((m) => m.type === 'flush');
     expect(flush?.seq).toBeTypeOf('number');
 
-    // 옛 프리뷰의 답은 표 검사가 걸러낸다 — 새 청을 풀면 안 된다 (spec §5).
+    // The old preview's reply is filtered by the token check — it must not release the new request (spec §5).
     arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-1' });
     await act(async () => {});
     expect(done).toBe(false);
@@ -187,9 +190,10 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
     expect(done).toBe(true);
   });
 
-  it('답이 오면 그 청의 한도 타이머도 함께 걷는다', async () => {
-    // 대기 항목의 수명은 settle 하나로 끝난다 — 답이 왔는데 타이머가 남으면
-    // 항목 정리가 두 갈래가 되고, 한 갈래만 고치는 회귀가 스며든다.
+  it("a reply also clears that request's timeout timer", async () => {
+    // A waiter's lifetime ends through settle alone — a timer surviving the
+    // reply splits entry cleanup into two paths, and regressions creep in
+    // through fixes that touch only one.
     vi.useFakeTimers();
     useEditor.setState({ previewToken: 'doc-2' });
     const frame = mountFrame();
@@ -200,20 +204,21 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
 
     const before = vi.getTimerCount();
     const pending = flushPreviewEdits();
-    // 청 하나에 타이머 둘 — 항목의 한도와 청한 쪽(flushPreviewEdits)의 한도.
+    // Two timers per request — the entry's timeout and the requester's (flushPreviewEdits).
     expect(vi.getTimerCount()).toBe(before + 2);
 
     const flush = posted.find((m) => m.type === 'flush');
     arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-2' });
     await pending;
 
-    // 항목의 타이머는 답이 걷었다 — 남은 하나는 청한 쪽의 race 다.
+    // The reply cleared the entry's timer — the one left is the requester's race.
     expect(vi.getTimerCount()).toBe(before + 1);
   });
 
-  it('한도가 지난 대기는 목록에 남지 않는다 — 늦은 답이 와도 아무 일 없다', async () => {
-    // 답 없는 프리뷰 앞에서 갈아 끼우기를 거듭 시도하면, 시간이 다 된 대기가
-    // 목록에 남아 화면이 내려갈 때까지 쌓인다 — 항목 스스로 한도에 정리해야 한다.
+  it('a timed-out waiter does not linger in the map — a late reply changes nothing', async () => {
+    // Retrying replacement against an unresponsive preview would leave
+    // timed-out waiters in the map, piling up until unmount — each entry must
+    // clean itself up on timeout.
     vi.useFakeTimers();
     useEditor.setState({ previewToken: 'doc-2' });
     const frame = mountFrame();
@@ -227,27 +232,27 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
     await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT);
     await first;
     await second;
-    // 모든 타이머가 정리됐다 — 대기 항목의 한도가 발동해 항목도 함께 지웠다.
+    // Every timer is cleaned up — the entry's timeout fired and removed the entry with it.
     expect(vi.getTimerCount()).toBe(0);
 
-    // 정리된 청의 늦은 답은 조용히 지나간다 — 죽은 항목을 되살리거나 던지지 않는다.
+    // A late reply to a cleaned-up request passes quietly — it neither revives a dead entry nor throws.
     for (const m of posted) {
       if (m.type === 'flush') arrive(frame, { type: 'flushed', seq: m.seq, token: 'doc-2' });
     }
   });
 
-  it('화면이 내려가면 기다리던 청을 푼다 — 답을 전달할 길이 없다', async () => {
+  it('unmounting releases waiting requests — there is no way left to deliver a reply', async () => {
     useEditor.setState({ previewToken: 'doc-2' });
     const frame = mountFrame();
     vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((() => {
-      /* 답 없는 프리뷰 */
+      /* an unresponsive preview */
     }) as typeof window.postMessage);
 
     const pending = flushPreviewEdits();
     act(() => root?.unmount());
     root = null;
 
-    // 한도(1초)를 기다리지 않고 바로 풀린다 — 여기서 멈추면 테스트가 그 증거다.
+    // Resolves right away without waiting out the timeout (1s) — hanging here is the test's evidence.
     await pending;
   });
 });

@@ -3,17 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewAgent } from './agent.js';
 import { DARK_ATTR, LOCKED_ATTR, MARKER_ATTR } from '../core/markers.js';
 
-/** 에이전트가 parent 로 보낸 메시지를 모은다 */
+/** Collects the messages the agent sent to parent */
 let sent: Record<string, unknown>[] = [];
 let dispose: (() => void) | null = null;
 
-/** 에이전트는 호스트가 보낸 메시지만 받는다 */
+/** The agent only accepts messages sent by the host */
 const fromHost = (data: unknown) =>
   window.dispatchEvent(new MessageEvent('message', { data, source: window.parent }));
 
 /**
- * @param verified 대조가 끝난 상태로 세울지. 기본이 true 다 — 편집은 잠금 목록이
- *   온 뒤에만 열리므로(spec §4), 대부분의 테스트는 그 뒤의 세계를 다룬다.
+ * @param verified Whether to mount in the post-verification state. Defaults to
+ *   true — editing only opens after the lock list arrives (spec §4), so most
+ *   tests deal with the world after it.
  */
 function mount(html: string, { verified = true } = {}): void {
   document.body.innerHTML = html;
@@ -22,13 +23,14 @@ function mount(html: string, { verified = true } = {}): void {
     sent.push(msg as Record<string, unknown>);
   }) as typeof window.parent.postMessage);
   dispose = previewAgent();
-  // 잠금 목록이 대조 종료의 신호다. 빈 목록이라도 보내야 편집이 열린다.
+  // The lock list is the end-of-verification signal. Even an empty one must be
+  // sent for editing to open.
   if (verified) fromHost({ type: 'locked', ids: [] });
   sent = [];
 }
 
 const el = (id: number) => document.querySelector<HTMLElement>(`[${MARKER_ATTR}="${id}"]`);
-/** 실제 브라우저 클릭처럼 cancelable 로 보낸다 — preventDefault 여부를 볼 수 있어야 한다 */
+/** Sent cancelable like a real browser click — preventDefault must be observable */
 const clickEvent = (node: Element): MouseEvent => {
   const e = new MouseEvent('click', { bubbles: true, cancelable: true });
   node.dispatchEvent(e);
@@ -42,7 +44,7 @@ const keydown = (key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
   return e;
 };
 
-/** 브라우저가 실제 편집을 반영하기 직전에 보내는 이벤트 */
+/** The event the browser sends right before applying an actual edit */
 const beforeinput = (inputType: string): InputEvent => {
   const e = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true });
   (document.activeElement ?? document.body).dispatchEvent(e);
@@ -54,26 +56,26 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-// 리스너는 document 에 남는다. 떼지 않으면 앞 테스트의 에이전트가
-// 옛 상태로 이벤트를 가로채 뒤 테스트를 오염시킨다.
+// Listeners stay on document. Left attached, the previous test's agent
+// intercepts events with stale state and contaminates the next test.
 afterEach(() => {
   dispose?.();
   dispose = null;
 });
 
-describe('previewAgent · 자기완결 제약 (ADR-007)', () => {
-  it('core 와 같은 마커 이름을 쓴다', () => {
-    // 에이전트는 import 를 쓸 수 없어 상수를 다시 적는다. 어긋나면 여기서 잡힌다.
+describe('previewAgent · self-containment constraint (ADR-007)', () => {
+  it('uses the same marker name as core', () => {
+    // The agent cannot use imports, so it rewrites the constants. Drift is caught here.
     expect(previewAgent.toString()).toContain(MARKER_ATTR);
   });
 
-  it('외부 스코프를 참조하지 않는다 — 문자열화해도 동작해야 한다', () => {
+  it('references no outer scope — it must work even stringified', () => {
     expect(previewAgent.toString()).not.toMatch(/\bimport\b|\brequire\(/);
   });
 
-  it('문자열화해서 되살린 함수가 그대로 동작한다', () => {
-    // 실제 주입 방식과 같다. 클로저로 바깥 값을 참조하고 있었다면 여기서 죽는다.
-    // 번들 최소화 후에도 살아남는 성질이 바로 이것이다.
+  it('a function revived from its string works unchanged', () => {
+    // Same as the real injection path. Had it closed over an outer value, it
+    // would die here. This is exactly the property that survives minification.
     document.body.innerHTML = `<p ${MARKER_ATTR}="0">본문</p>`;
     sent = [];
     vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
@@ -82,7 +84,8 @@ describe('previewAgent · 자기완결 제약 (ADR-007)', () => {
 
     const revived = new Function(`return (${previewAgent.toString()})`)() as typeof previewAgent;
     dispose = revived();
-    // 편집은 대조가 끝나야 열린다 (spec §4) — 되살린 함수도 같은 계약을 따라야 한다.
+    // Editing only opens after verification (spec §4) — the revived function
+    // must honor the same contract.
     fromHost({ type: 'locked', ids: [] });
 
     click(el(0)!);
@@ -91,8 +94,8 @@ describe('previewAgent · 자기완결 제약 (ADR-007)', () => {
   });
 });
 
-describe('previewAgent · 정리', () => {
-  it('dispose 하면 더 이상 이벤트를 가로채지 않는다', () => {
+describe('previewAgent · cleanup', () => {
+  it('after dispose it no longer intercepts events', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     dispose?.();
     dispose = null;
@@ -105,10 +108,10 @@ describe('previewAgent · 정리', () => {
   });
 });
 
-describe('previewAgent · 이벤트 가로채기', () => {
-  it('아티팩트의 전역 클릭 핸들러가 발동하지 않는다', () => {
+describe('previewAgent · event interception', () => {
+  it("the artifact's global click handler does not fire", () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
-    // 아티팩트 스크립트는 body 끝에 있으므로 에이전트보다 늦게 등록된다.
+    // Artifact scripts sit at the end of body, so they register after the agent.
     const artifact = vi.fn();
     document.addEventListener('click', artifact);
 
@@ -118,7 +121,7 @@ describe('previewAgent · 이벤트 가로채기', () => {
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
-  it('편집 중이 아니면 블록 밖 클릭을 통과시킨다 — 아티팩트 네비게이션이 살아 있어야 한다', () => {
+  it('outside editing, clicks outside blocks pass through — artifact navigation must stay alive', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><div id="bg">여백</div>`);
     const artifact = vi.fn();
     document.addEventListener('click', artifact);
@@ -128,7 +131,7 @@ describe('previewAgent · 이벤트 가로채기', () => {
     expect(artifact).toHaveBeenCalled();
   });
 
-  it('편집 중 블록 밖 클릭은 편집 종료로 소비하고 네비게이션으로 새지 않는다', () => {
+  it('while editing, a click outside blocks is consumed as end-of-editing and never leaks to navigation', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><div id="bg">여백</div>`);
     click(el(0)!);
     const artifact = vi.fn();
@@ -140,7 +143,7 @@ describe('previewAgent · 이벤트 가로채기', () => {
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('편집 중 방향키가 아티팩트로 새지 않는다', () => {
+  it('arrow keys never leak to the artifact while editing', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     const artifact = vi.fn();
@@ -151,7 +154,7 @@ describe('previewAgent · 이벤트 가로채기', () => {
     expect(artifact).not.toHaveBeenCalled();
   });
 
-  it('편집 중이 아니면 방향키를 막지 않는다 — 아티팩트 네비게이션은 살아 있어야 한다', () => {
+  it('outside editing, arrow keys are not blocked — artifact navigation must stay alive', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     const artifact = vi.fn();
     document.addEventListener('keydown', artifact);
@@ -162,10 +165,11 @@ describe('previewAgent · 이벤트 가로채기', () => {
   });
 });
 
-describe('previewAgent · 대조 전에는 편집을 열지 않는다 (spec §4)', () => {
-  it('잠금 목록이 오기 전의 클릭은 notReady 만 보낸다', () => {
-    // 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져
-    // 화면과 저장본이 갈라진다 — 열지 않고 사정만 알린다 (대원칙 3).
+describe('previewAgent · no editing opens before verification (spec §4)', () => {
+  it('a click before the lock list arrives sends only notReady', () => {
+    // An edit opened now would be erased from the save the moment verification
+    // locks that block, splitting the screen from the saved file — open
+    // nothing and only report the situation (Principle 3).
     mount(`<p ${MARKER_ATTR}="0">본문</p>`, { verified: false });
 
     click(el(0)!);
@@ -175,7 +179,7 @@ describe('previewAgent · 대조 전에는 편집을 열지 않는다 (spec §4)
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('잠금 목록이 오면 그때부터 편집이 열린다', () => {
+  it('editing opens once the lock list arrives', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`, { verified: false });
     click(el(0)!);
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
@@ -187,14 +191,14 @@ describe('previewAgent · 대조 전에는 편집을 열지 않는다 (spec §4)
   });
 });
 
-describe('previewAgent · 편집 흐름', () => {
-  it('클릭하면 select 를 보내고 편집을 연다', () => {
+describe('previewAgent · editing flow', () => {
+  it('clicking sends select and opens editing', () => {
     mount(`<p ${MARKER_ATTR}="7">본문</p>`);
     click(el(7)!);
     expect(sent).toContainEqual({ type: 'select', id: 7 });
   });
 
-  it('포커스가 빠지면 편집 결과를 보낸다', () => {
+  it('sends the edit result when focus leaves', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 <b>본문</b>';
@@ -209,7 +213,7 @@ describe('previewAgent · 편집 흐름', () => {
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('잠긴 블록은 편집을 열지 않고 blocked 를 보낸다 (INV-5)', () => {
+  it('a locked block opens no editing and sends blocked (INV-5)', () => {
     mount(`<p ${MARKER_ATTR}="3">코드</p>`);
     fromHost({ type: 'locked', ids: [3] });
 
@@ -219,7 +223,7 @@ describe('previewAgent · 편집 흐름', () => {
     expect(el(3)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('Escape 를 누르면 편집을 닫는다', () => {
+  it('pressing Escape closes editing', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -227,15 +231,15 @@ describe('previewAgent · 편집 흐름', () => {
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('revert 메시지로 원래 내용을 되돌린다', () => {
+  it('a revert message restores the original content', () => {
     mount(`<p ${MARKER_ATTR}="0">고쳐진 값</p>`);
     fromHost({ type: 'revert', id: 0, html: '원래 값' });
     expect(el(0)?.innerHTML).toBe('원래 값');
   });
 });
 
-describe('previewAgent · Enter 로 편집 닫기', () => {
-  it('확정하고 편집을 닫는다', () => {
+describe('previewAgent · closing editing with Enter', () => {
+  it('commits and closes the edit', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 본문';
@@ -246,7 +250,7 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('아티팩트로 새지 않고 줄바꿈도 넣지 않는다', () => {
+  it('never leaks to the artifact and inserts no line break', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     const artifact = vi.fn();
@@ -258,22 +262,24 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('조합 중 Enter 는 편집을 닫지 않는다 — 한글 확정 키다', () => {
+  it('a mid-composition Enter does not close editing — it is the Hangul finalize key', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
 
     const e = keydown('Enter');
 
-    // 확정을 막으면 글자를 완성할 수 없으므로 기본 동작을 살려 둔다.
+    // Blocking the finalization would make characters impossible to complete,
+    // so the default stays alive.
     expect(e.defaultPrevented).toBe(false);
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
     expect(sent.some((m) => m.type === 'edit')).toBe(false);
   });
 
-  it('조합 중 Enter 가 남기려는 줄바꿈은 입력 단계에서 막는다', () => {
-    // 브라우저는 조합 확정과 줄바꿈을 함께 처리한다. 키를 막을 수 없으니 입력을 막는다.
-    // 놓치면 <p> 안에 <div> 가 생겨 고치지도 않은 구조가 패치에 실린다.
+  it('the line break a mid-composition Enter would leave is blocked at the input stage', () => {
+    // The browser handles finalization and the line break together. The key
+    // cannot be blocked, so block the input. Missed, a <div> appears inside <p>
+    // and untouched structure ships in the patch.
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -282,26 +288,26 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
     expect(beforeinput('insertParagraph').defaultPrevented).toBe(true);
   });
 
-  it('편집 중이 아니면 줄바꿈 입력에 손대지 않는다', () => {
+  it('outside editing, line break input is left alone', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
 
     expect(beforeinput('insertParagraph').defaultPrevented).toBe(false);
   });
 
-  it('Shift+Enter 는 편집을 닫지 않고 블록 안에 줄바꿈을 넣는다', () => {
+  it('Shift+Enter does not close editing and inserts a line break inside the block', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
 
     const e = keydown('Enter', { shiftKey: true });
 
-    // 기본 동작이 살아 있어야 브라우저가 <br> 을 넣는다.
+    // The default must stay alive for the browser to insert the <br>.
     expect(e.defaultPrevented).toBe(false);
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
     expect(sent.some((m) => m.type === 'edit')).toBe(false);
     expect(beforeinput('insertLineBreak').defaultPrevented).toBe(false);
   });
 
-  it('편집 중이 아니면 Enter 를 아티팩트로 넘긴다', () => {
+  it('outside editing, Enter is handed to the artifact', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     const artifact = vi.fn();
     document.addEventListener('keydown', artifact);
@@ -313,8 +319,8 @@ describe('previewAgent · Enter 로 편집 닫기', () => {
   });
 });
 
-describe('previewAgent · 잠금 표식', () => {
-  it('호스트가 알려준 잠긴 블록에 표식을 붙인다 — 스타일이 이걸 보고 표시한다', () => {
+describe('previewAgent · lock marks', () => {
+  it('marks the blocks the host reported locked — the style watches this to display them', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><p ${MARKER_ATTR}="1">코드</p>`);
 
     fromHost({ type: 'locked', ids: [1] });
@@ -323,7 +329,7 @@ describe('previewAgent · 잠금 표식', () => {
     expect(el(1)?.hasAttribute(LOCKED_ATTR)).toBe(true);
   });
 
-  it('목록이 바뀌면 이전 표식을 지운다 — 풀린 블록이 잠긴 척하면 안 된다', () => {
+  it('clears previous marks when the list changes — an unlocked block must not pose as locked', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><p ${MARKER_ATTR}="1">코드</p>`);
 
     fromHost({ type: 'locked', ids: [0, 1] });
@@ -333,8 +339,8 @@ describe('previewAgent · 잠금 표식', () => {
     expect(el(1)?.hasAttribute(LOCKED_ATTR)).toBe(true);
   });
 
-  it('core 와 같은 잠금 표식 이름을 쓴다', () => {
-    // 에이전트는 모듈을 불러올 수 없어 상수를 다시 적는다. 어긋나면 여기서 잡힌다.
+  it('uses the same lock mark name as core', () => {
+    // The agent cannot load modules, so it rewrites the constants. Drift is caught here.
     expect(previewAgent.toString()).toContain(LOCKED_ATTR);
   });
 });
@@ -352,7 +358,7 @@ describe('previewAgent · Ctrl+S', () => {
     return e;
   };
 
-  it('편집 중이면 확정하고 저장을 부탁한다 — 방금 고친 내용이 빠지면 안 된다', () => {
+  it('while editing, commits first and then asks to save — what was just edited must not be missing', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 본문';
@@ -366,7 +372,7 @@ describe('previewAgent · Ctrl+S', () => {
     );
   });
 
-  it('편집 중이 아니어도 저장을 부탁한다', () => {
+  it('asks to save even outside editing', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
 
     ctrlS();
@@ -374,7 +380,7 @@ describe('previewAgent · Ctrl+S', () => {
     expect(sent).toContainEqual({ type: 'save' });
   });
 
-  it('브라우저의 페이지 저장을 막고 아티팩트로도 넘기지 않는다', () => {
+  it('blocks the browser page-save and does not hand the key to the artifact', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     const artifact = vi.fn();
     document.addEventListener('keydown', artifact);
@@ -385,7 +391,7 @@ describe('previewAgent · Ctrl+S', () => {
     expect(artifact).not.toHaveBeenCalled();
   });
 
-  it('조합 중에는 저장하지 않는다 — 글자가 아직 확정되지 않았다', () => {
+  it('does not save mid-composition — the character is not finalized yet', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -393,11 +399,11 @@ describe('previewAgent · Ctrl+S', () => {
     const e = ctrlS();
 
     expect(sent.some((m) => m.type === 'save')).toBe(false);
-    // 저장은 미루더라도 브라우저 대화상자는 뜨지 않아야 한다.
+    // Even with the save deferred, the browser dialog must not appear.
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('Ctrl+Shift+S 는 사본 내려받기로 넘긴다 — 저장과 갈라져야 한다', () => {
+  it('Ctrl+Shift+S goes to download-copy — it must diverge from save', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 본문';
@@ -406,7 +412,7 @@ describe('previewAgent · Ctrl+S', () => {
 
     expect(sent).toContainEqual({ type: 'downloadCopy' });
     expect(sent.some((m) => m.type === 'save')).toBe(false);
-    // 사본도 열려 있는 편집을 확정한 뒤에 나가야 한다.
+    // The copy too must go out only after the open edit is committed.
     expect(sent).toContainEqual({ type: 'edit', id: 0, html: '고친 본문', pristine: false });
     expect(e.defaultPrevented).toBe(true);
   });
@@ -424,7 +430,7 @@ describe('previewAgent · Ctrl+Z', () => {
     return e;
   };
 
-  it('편집 중이 아니면 되돌리기를 부탁한다', () => {
+  it('outside editing, asks for an undo', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
 
     const e = ctrlZ();
@@ -433,7 +439,7 @@ describe('previewAgent · Ctrl+Z', () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('편집 중에는 손대지 않는다 — 네이티브 undo 가 블록 안 타이핑을 되돌린다', () => {
+  it('hands off while editing — native undo reverses in-block typing', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
 
@@ -445,8 +451,8 @@ describe('previewAgent · Ctrl+Z', () => {
   });
 });
 
-describe('previewAgent · 클릭의 기본 동작', () => {
-  it('블록 안의 링크를 눌러도 문서가 이동하지 않는다', () => {
+describe('previewAgent · click defaults', () => {
+  it('clicking a link inside a block does not navigate the document', () => {
     mount(`<p ${MARKER_ATTR}="0">본문 <a href="#next">링크</a></p>`);
 
     const e = clickEvent(document.querySelector('a')!);
@@ -455,7 +461,7 @@ describe('previewAgent · 클릭의 기본 동작', () => {
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
-  it('편집을 닫는 블록 밖 클릭도 기본 동작을 막는다', () => {
+  it('the outside-block click that closes editing also blocks the default', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><a id="nav" href="#next">이동</a>`);
     click(el(0)!);
 
@@ -465,7 +471,7 @@ describe('previewAgent · 클릭의 기본 동작', () => {
     expect(el(0)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('편집 중이 아니면 기본 동작을 막지 않는다 — 아티팩트 링크는 살아 있어야 한다', () => {
+  it('outside editing, defaults are not blocked — artifact links must stay alive', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p><a id="nav" href="#next">이동</a>`);
 
     const e = clickEvent(document.getElementById('nav')!);
@@ -474,8 +480,8 @@ describe('previewAgent · 클릭의 기본 동작', () => {
   });
 });
 
-describe('previewAgent · IME (한글 조합)', () => {
-  it('조합 중에는 확정하지 않는다 — 자모가 깨진다', () => {
+describe('previewAgent · IME (Hangul composition)', () => {
+  it('never commits mid-composition — the jamo break apart', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -484,7 +490,7 @@ describe('previewAgent · IME (한글 조합)', () => {
     expect(sent.filter((m) => m.type === 'edit')).toHaveLength(0);
   });
 
-  it('조합이 끝난 뒤에는 확정한다', () => {
+  it('commits once composition ends', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -496,23 +502,24 @@ describe('previewAgent · IME (한글 조합)', () => {
   });
 });
 
-describe('previewAgent · 잠금 표시', () => {
-  it('잠긴 블록에 표식을 붙인다', () => {
+describe('previewAgent · lock display', () => {
+  it('marks locked blocks', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     fromHost({ type: 'locked', ids: [0] });
 
     expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(true);
   });
 
-  it('화면에 아무것도 없는 요소에는 칠하지 않는다', () => {
-    // CSS 로 그린 막대까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
+  it('does not paint elements that show nothing on screen', () => {
+    // Covering even CSS-drawn bars in a forbidden cursor makes the whole
+    // document look uneditable.
     mount(`<div ${MARKER_ATTR}="0" class="bar"></div>`);
     fromHost({ type: 'locked', ids: [0] });
 
     expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
   });
 
-  it('칠하지 않아도 잠금은 그대로다 — 누르면 이유가 뜬다', () => {
+  it('unpainted blocks stay locked — clicking still shows the reason', () => {
     mount(`<div ${MARKER_ATTR}="0" class="bar"></div>`);
     fromHost({ type: 'locked', ids: [0] });
 
@@ -523,29 +530,31 @@ describe('previewAgent · 잠금 표시', () => {
   });
 });
 
-describe('previewAgent · 표시 색 맞추기', () => {
+describe('previewAgent · matching mark colors', () => {
   const scan = async (): Promise<void> => {
     window.dispatchEvent(new Event('load'));
     await new Promise((r) => setTimeout(r, 0));
   };
 
-  it('어두운 배경 위의 블록에 표식을 붙인다', async () => {
+  it('marks a block on a dark background', async () => {
     mount(`<div style="background-color:rgb(16,16,20)"><p ${MARKER_ATTR}="0">본문</p></div>`);
     await scan();
 
-    // 블록 자신은 투명하다 — 위로 올라가 실제로 깔린 색을 찾아야 한다.
+    // The block itself is transparent — the color actually behind it must be
+    // found by walking up.
     expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(true);
   });
 
-  it('밝은 배경 위의 블록에는 붙이지 않는다', async () => {
+  it('does not mark a block on a light background', async () => {
     mount(`<div style="background-color:rgb(255,255,255)"><p ${MARKER_ATTR}="0">본문</p></div>`);
     await scan();
 
     expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(false);
   });
 
-  it('한 문서 안에서 블록마다 따로 판정한다', async () => {
-    // 어두운 바탕에 밝은 카드. 문서 단위로 정하면 카드 안 블록이 안 보인다.
+  it('judges each block separately within one document', async () => {
+    // A light card on a dark page. One verdict per document would hide the
+    // blocks inside the card.
     mount(
       `<div style="background-color:rgb(16,16,20)">` +
         `<p ${MARKER_ATTR}="0">바탕 위</p>` +
@@ -559,8 +568,8 @@ describe('previewAgent · 표시 색 맞추기', () => {
   });
 });
 
-describe('previewAgent · 렌더 후 대조 (ADR-005)', () => {
-  it('마커가 붙은 모든 요소의 라이브 텍스트를 보고한다', async () => {
+describe('previewAgent · post-render verification (ADR-005)', () => {
+  it('reports the live text of every marked element', async () => {
     mount(`<p ${MARKER_ATTR}="0">가</p><span ${MARKER_ATTR}="1">나</span>`);
     window.dispatchEvent(new Event('load'));
     await new Promise((r) => setTimeout(r, 0));
@@ -574,9 +583,9 @@ describe('previewAgent · 렌더 후 대조 (ADR-005)', () => {
     });
   });
 
-  it('스크립트가 DOM 을 재구성해도 마커를 따라간다 (ADR-003)', async () => {
+  it('follows markers even when a script reshapes the DOM (ADR-003)', async () => {
     mount(`<section ${MARKER_ATTR}="9">원본</section>`);
-    // wrapSheets() 처럼 자식을 새 wrapper 로 옮기는 상황
+    // The wrapSheets() situation — children moved into a new wrapper
     const wrapper = document.createElement('div');
     const moved = el(9)!;
     document.body.appendChild(wrapper);
@@ -588,34 +597,36 @@ describe('previewAgent · 렌더 후 대조 (ADR-005)', () => {
     expect(sent).toContainEqual({ type: 'ready', blocks: [{ id: 9, text: '원본' }] });
   });
 
-  it('블록 안의 흉내 표식은 보고에 싣지 않는다 — 내용이지 블록이 아니다 (spec §3)', async () => {
-    // snapshotMarkers 는 흉내를 거르는데 보고만 겹침째로 실으면, 호스트의 대조가
-    // 같은 id 를 둘로 보고 멀쩡한 바깥 블록을 MARKER_CLASH 로 잠근다.
+  it('a mimic marker inside a block is left out of the report — it is content, not a block (spec §3)', async () => {
+    // snapshotMarkers filters mimics; if the report alone shipped the clash,
+    // the host's verification would see the same id twice and lock the healthy
+    // outer block as MARKER_CLASH.
     mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="0">흉내</span></p>`);
 
     window.dispatchEvent(new Event('load'));
     await new Promise((r) => setTimeout(r, 0));
 
-    // 흉내의 글자는 바깥 블록의 내용으로서 함께 실린다.
+    // The mimic's text still ships as part of the outer block's content.
     expect(sent).toContainEqual({ type: 'ready', blocks: [{ id: 0, text: '본문 흉내' }] });
   });
 });
 
-describe('previewAgent · 리뷰 회귀', () => {
-  it('Escape 는 내용을 열기 전으로 되돌린다', () => {
+describe('previewAgent · review regressions', () => {
+  it('Escape restores the content from before editing opened', () => {
     mount(`<p ${MARKER_ATTR}="0">원래 내용</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 내용';
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
     expect(el(0)?.innerHTML).toBe('원래 내용');
-    // 잠긴 것도 아닌데 blocked 를 보내면 호스트가 "편집 불가 — null" 을 띄운다.
+    // Sending blocked for something that is not even locked makes the host
+    // show "not editable — null".
     expect(sent.filter((m) => m.type === 'blocked')).toHaveLength(0);
   });
 
-  it('고치지 않고 빠져나오면 pristine 으로 알린다', () => {
-    // 소스 문자열과 브라우저 직렬화는 다를 수 있다(<br/> → <br>).
-    // 호스트가 소스와 비교하면 만지지도 않은 블록에 패치가 생긴다.
+  it('leaving without editing reports pristine', () => {
+    // Source strings and browser serialization can differ (<br/> → <br>).
+    // If the host compared against the source, untouched blocks would grow patches.
     mount(`<p ${MARKER_ATTR}="0">건드리지 않음</p>`);
     click(el(0)!);
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
@@ -624,12 +635,13 @@ describe('previewAgent · 리뷰 회귀', () => {
     expect(edit?.pristine).toBe(true);
   });
 
-  it('조합 중 포커스가 빠져도 편집을 잃지 않는다', () => {
+  it('losing focus mid-composition does not lose the edit', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
     el(0)!.innerHTML = '한글 입력';
-    // 조합이 열린 채로 iframe 밖(호스트 툴바)을 클릭한 상황
+    // The situation of clicking outside the iframe (host toolbar) with
+    // composition still open
     document.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
     expect(sent.filter((m) => m.type === 'edit')).toHaveLength(0);
 
@@ -638,10 +650,10 @@ describe('previewAgent · 리뷰 회귀', () => {
     expect(sent).toContainEqual({ type: 'edit', id: 0, html: '한글 입력', pristine: false });
   });
 
-  it('호스트가 아닌 곳에서 온 메시지는 무시한다', () => {
+  it('ignores messages not from the host', () => {
     mount(`<p ${MARKER_ATTR}="3">본문</p>`);
     fromHost({ type: 'locked', ids: [3] });
-    // 제3자가 잠금을 비우려 시도한다
+    // A third party tries to empty the locks
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'locked', ids: [] } }));
 
     click(el(3)!);
@@ -650,14 +662,14 @@ describe('previewAgent · 리뷰 회귀', () => {
     expect(el(3)?.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('null 메시지에 죽지 않는다', () => {
+  it('does not die on a null message', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     expect(() => fromHost(null)).not.toThrow();
   });
 });
 
-describe('previewAgent · 고른 블록 보여주기', () => {
-  it('그 자리로 데려가고 잠깐 짚어준다', async () => {
+describe('previewAgent · revealing a picked block', () => {
+  it('takes the user there and highlights briefly', async () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     const into = vi.fn();
     el(0)!.scrollIntoView = into;
@@ -665,11 +677,11 @@ describe('previewAgent · 고른 블록 보여주기', () => {
     fromHost({ type: 'reveal', id: 0 });
 
     expect(into).toHaveBeenCalledOnce();
-    // 스크롤만 하면 어디가 그 블록인지 알 수 없다.
+    // Scrolling alone does not say which block it was.
     expect(el(0)?.hasAttribute('data-ne-revealed')).toBe(true);
   });
 
-  it('짚어둔 표시는 스스로 사라진다', async () => {
+  it('the highlight clears itself', async () => {
     vi.useFakeTimers();
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     el(0)!.scrollIntoView = vi.fn();
@@ -681,21 +693,21 @@ describe('previewAgent · 고른 블록 보여주기', () => {
     vi.useRealTimers();
   });
 
-  it('없는 블록을 짚어 달라 해도 죽지 않는다', () => {
+  it('does not die on a reveal for a block that does not exist', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
 
     expect(() => fromHost({ type: 'reveal', id: 99 })).not.toThrow();
   });
 });
 
-describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
-  // happy-dom 에는 execCommand 가 없다. 실제 편집은 브라우저가 하는 일이라,
-  // 여기서는 **무엇을 어떤 모드로 부르는지**만 본다.
+describe('previewAgent · inline formatting (spec §4.1)', () => {
+  // happy-dom has no execCommand. The actual editing is the browser's job, so
+  // here we only check **what is called, in which mode**.
   beforeEach(() => {
     document.execCommand = (() => true) as typeof document.execCommand;
   });
 
-  /** 블록 안의 글자 일부를 고른다 */
+  /** Select part of the text inside a block */
   function select(id: number, from: number, to: number): void {
     const node = el(id)?.firstChild;
     if (!node) throw new Error('고를 글자가 없다');
@@ -708,7 +720,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     document.dispatchEvent(new Event('selectionchange'));
   }
 
-  it('고른 글자 위에 막대가 뜨고, 고른 것이 없으면 사라진다', () => {
+  it('the bar appears over selected text and disappears when nothing is selected', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
 
@@ -721,7 +733,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(bar?.style.display).toBe('none');
   });
 
-  it('편집 중이 아니면 막대를 띄우지 않는다', () => {
+  it('does not show the bar outside editing', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
 
     select(0, 1, 4);
@@ -731,8 +743,9 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     );
   });
 
-  it('막대를 누른 클릭은 편집을 닫지 않는다', () => {
-    // 블록 밖 클릭으로 세면 서식 버튼을 누르는 순간 편집이 끝난다.
+  it('a click on the bar does not close editing', () => {
+    // Counting it as an outside-block click would end editing the moment a
+    // formatting button is pressed.
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -744,8 +757,9 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(sent.some((m) => m.type === 'edit')).toBe(false);
   });
 
-  it('굵게·기울임·밑줄은 태그로, 색·크기는 style 로 뽑는다', () => {
-    // <font> 가 섞이면 다음에 이 파일을 열 때 그 문단이 통째로 편집 불가가 된다.
+  it('bold, italic, underline come out as tags; color and size as style', () => {
+    // Once <font> creeps in, the whole paragraph becomes uneditable the next
+    // time this file is opened.
     const modes: [string, boolean][] = [];
     document.execCommand = ((command: string, _ui: boolean, value: string) => {
       if (command === 'styleWithCSS') modes.push(['pending', value === 'true']);
@@ -768,7 +782,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(modes.filter(([c]) => c === 'fontSize').every(([, css]) => css)).toBe(true);
   });
 
-  it('Ctrl+B · I · U 가 아티팩트로 새지 않는다', () => {
+  it('Ctrl+B · I · U never leak to the artifact', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     const artifact = vi.fn();
@@ -780,8 +794,9 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(artifact).not.toHaveBeenCalled();
   });
 
-  it('막대 문구는 호스트가 건넨다 — 에이전트는 언어팩을 모른다', () => {
-    // 여기에 한 언어를 박으면 그 언어가 굳는다. 화면 문구의 출처는 언어팩 하나다 (spec §1).
+  it('bar labels come from the host — the agent knows no language pack', () => {
+    // Hardcoding one language here would freeze that language in. Screen text
+    // has one source: the language pack (spec §1).
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -792,7 +807,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(bold?.getAttribute('title')).toBe('Bold');
   });
 
-  it('문구를 받기 전에는 비워 둔다 — 한 언어를 박아 두지 않는다', () => {
+  it('labels stay empty until they arrive — no language is baked in', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -804,7 +819,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(titles.every((title) => title === '')).toBe(true);
   });
 
-  it('언어를 바꾸면 떠 있는 막대도 바뀐다', () => {
+  it('changing the language changes a bar already on screen', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -817,9 +832,9 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     );
   });
 
-  it('색은 이 문서가 글자에 쓰는 것으로만 채운다', () => {
-    // 우리가 고른 색을 주면 문서가 가진 배색을 이긴다. 거기 없던 색을 새로 들이는 것은
-    // 고치는 일이 아니라 디자인을 바꾸는 일이다.
+  it('the palette holds only colors this document uses for text', () => {
+    // Handing out our own colors overrides the document's palette. Bringing in
+    // a color it never had is not fixing — it is redesigning.
     mount(
       `<h1 ${MARKER_ATTR}="0" style="color: rgb(94, 201, 138)">제목</h1>` +
         `<p ${MARKER_ATTR}="1" style="color: rgb(233, 233, 236)">가나다라마바사</p>`
@@ -837,8 +852,9 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     ]);
   });
 
-  it('눈에 같은 색은 하나로 묶는다', () => {
-    // 계산된 값이 달라도 12px 동그라미에서 구분되지 않으면 고를 수 없는 선택지다.
+  it('colors that look the same are folded into one', () => {
+    // Different computed values that cannot be told apart in a 12px dot are
+    // not a real choice.
     mount(
       `<p ${MARKER_ATTR}="0" style="color: rgb(233, 233, 236)">가나다라마바사</p>` +
         `<p ${MARKER_ATTR}="1" style="color: rgb(231, 231, 234)">거의 같은 색</p>` +
@@ -854,9 +870,10 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(dots).toHaveLength(2);
   });
 
-  it('색 칸은 찌그러지지 않는다', () => {
-    // 버튼 기본 스타일이 all:unset 이라 display 가 inline 이고 좌우 패딩이 남는다.
-    // 그대로 두면 width·height 가 먹지 않아 옆으로 퍼진 타원이 된다.
+  it('color dots do not get squashed', () => {
+    // The base button style is all:unset, so display is inline and side
+    // padding remains. Left that way, width/height would not apply and the dot
+    // becomes a sideways-stretched oval.
     mount(`<p ${MARKER_ATTR}="0" style="color: rgb(0, 0, 0)">가나다라마바사</p>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -870,7 +887,7 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     expect(dot?.style.width).toBe(dot?.style.height);
   });
 
-  it('편집을 닫으면 막대도 사라진다', () => {
+  it('closing the edit hides the bar too', () => {
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p><div id="bg">여백</div>`);
     click(el(0)!);
     select(0, 1, 4);
@@ -881,12 +898,12 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
   });
 });
 
-describe('previewAgent · 서식 범위는 편집 중인 블록을 넘지 않는다 (spec §4.1)', () => {
+describe('previewAgent · formatting never reaches beyond the block being edited (spec §4.1)', () => {
   beforeEach(() => {
     document.execCommand = (() => true) as typeof document.execCommand;
   });
 
-  /** 블록 두 개에 걸치는 선택을 만든다 */
+  /** Make a selection spanning two blocks */
   function selectAcross(): void {
     const range = document.createRange();
     range.setStart(el(0)!.firstChild!, 1);
@@ -897,8 +914,9 @@ describe('previewAgent · 서식 범위는 편집 중인 블록을 넘지 않는
     document.dispatchEvent(new Event('selectionchange'));
   }
 
-  it('이웃 블록까지 걸친 선택에는 막대를 띄우지 않는다', () => {
-    // 시작만 보면 걸친 선택으로도 막대가 떠서, 추적되지 않는 이웃까지 바꾼다 (대원칙 2).
+  it('no bar appears for a selection spanning into a neighbor block', () => {
+    // Checking only the start would float the bar over a spanning selection,
+    // changing untracked neighbors too (Principle 2).
     mount(`<p ${MARKER_ATTR}="0">가나다라</p><p ${MARKER_ATTR}="1">마바사아</p>`);
     click(el(0)!);
 
@@ -909,7 +927,7 @@ describe('previewAgent · 서식 범위는 편집 중인 블록을 넘지 않는
     );
   });
 
-  it('이웃 블록까지 걸친 선택에는 Ctrl+B 도 걸리지 않는다', () => {
+  it('Ctrl+B does not apply to a selection spanning into a neighbor block either', () => {
     const commands: string[] = [];
     document.execCommand = ((command: string) => {
       commands.push(command);
@@ -925,8 +943,8 @@ describe('previewAgent · 서식 범위는 편집 중인 블록을 넘지 않는
   });
 });
 
-describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', () => {
-  /** bold 가 걸린 순간의 선택 내용을 붙잡는다 */
+describe('previewAgent · the lifetime of the held formatting range (spec §4.1)', () => {
+  /** Captures what was selected at the moment bold was applied */
   let selectedAtBold: string | null;
 
   beforeEach(() => {
@@ -948,13 +966,13 @@ describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', (
     document.dispatchEvent(new Event('selectionchange'));
   }
 
-  it('캐럿을 옮겨 선택을 떠나면 옛 범위를 버린다', () => {
-    // 남겨 두면 다음 Ctrl+B 가 지금 자리가 아니라 옛 글자에 걸린다.
+  it('moving the caret away from the selection drops the old range', () => {
+    // Kept, the next Ctrl+B would land on the old text, not the current spot.
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(1, 4);
 
-    // 캐럿만 남기고 이동한다 — 선택을 떠났다.
+    // Move leaving only a caret — the selection was abandoned.
     const caret = document.createRange();
     caret.setStart(el(0)!.firstChild!, 6);
     caret.collapse(true);
@@ -968,16 +986,16 @@ describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', (
     expect(selectedAtBold).toBe('');
   });
 
-  it('막대를 누르는 사이에 풀린 선택은 명령 직전에 되살린다', () => {
-    // 이 경우까지 버리면 막대의 존재 이유가 사라진다 — 누르는 동안 풀린 선택에
-    // 아무 서식도 걸 수 없게 된다.
+  it('a selection that collapsed while pressing the bar is revived right before the command', () => {
+    // Dropping even this case would defeat the bar's purpose — no formatting
+    // could ever apply to a selection that collapses during the press.
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     select(1, 4);
 
     const button = document.querySelector('[data-ne-bar] button')!;
     button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    // 브라우저가 이 순간 선택을 풀 수 있다.
+    // The browser may drop the selection at this moment.
     getSelection()?.removeAllRanges();
     document.dispatchEvent(new Event('selectionchange'));
     button.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
@@ -987,14 +1005,15 @@ describe('previewAgent · 들고 있던 서식 범위의 수명 (spec §4.1)', (
   });
 });
 
-describe('previewAgent · 반투명 배경의 밝기 (spec §4 · 시각 표시)', () => {
+describe('previewAgent · brightness of translucent backgrounds (spec §4 · visual marks)', () => {
   const scan = async (): Promise<void> => {
     window.dispatchEvent(new Event('load'));
     await new Promise((r) => setTimeout(r, 0));
   };
 
-  it('흰 바탕 위의 옅은 검정은 밝은 배경이다', async () => {
-    // rgba(0,0,0,.1) 의 색 값만 읽으면 어둡다고 잘못 판정해 표시가 배경에 묻힌다.
+  it('faint black on a white page is a light background', async () => {
+    // Reading only the color value of rgba(0,0,0,.1) would wrongly call it
+    // dark and drown the mark in the background.
     mount(
       `<div style="background-color:rgb(255,255,255)">` +
         `<div style="background-color:rgba(0,0,0,0.1)"><p ${MARKER_ATTR}="0">본문</p></div>` +
@@ -1005,7 +1024,7 @@ describe('previewAgent · 반투명 배경의 밝기 (spec §4 · 시각 표시)
     expect(el(0)?.hasAttribute(DARK_ATTR)).toBe(false);
   });
 
-  it('어두운 바탕 위의 옅은 흰색은 여전히 어두운 배경이다', async () => {
+  it('faint white on a dark page is still a dark background', async () => {
     mount(
       `<div style="background-color:rgb(16,16,20)">` +
         `<div style="background-color:rgba(255,255,255,0.1)"><p ${MARKER_ATTR}="0">본문</p></div>` +
@@ -1017,13 +1036,13 @@ describe('previewAgent · 반투명 배경의 밝기 (spec §4 · 시각 표시)
   });
 });
 
-describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV-9)', () => {
+describe('previewAgent · the formatting bar never ships in the save (INV-9)', () => {
   beforeEach(() => {
     document.execCommand = (() => true) as typeof document.execCommand;
   });
 
-  // body 는 요소 자식 없이 텍스트만 가지면 그 자체로 블록이 된다 (spec §2).
-  // mount() 는 body **안에** 마크업을 넣으므로 여기서는 body 에 직접 마커를 붙인다.
+  // body with only text and no element children is itself a block (spec §2).
+  // mount() puts markup **inside** body, so here the marker goes on body itself.
   function mountBodyBlock(): void {
     document.body.innerHTML = '';
     document.body.textContent = '가나다라마바사';
@@ -1033,7 +1052,7 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
       sent.push(msg as Record<string, unknown>);
     }) as typeof window.parent.postMessage);
     dispose = previewAgent();
-    // 편집은 대조가 끝나야 열린다 (spec §4) — 잠금 목록이 그 신호다.
+    // Editing only opens after verification (spec §4) — the lock list is that signal.
     fromHost({ type: 'locked', ids: [] });
   }
 
@@ -1050,25 +1069,26 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
   }
 
   afterEach(() => {
-    // 다음 테스트의 "블록 밖 클릭" 판정이 body 마커에 걸리지 않게 지운다.
+    // Remove it so the next test's outside-block click check does not catch
+    // the body marker.
     document.body.removeAttribute(MARKER_ATTR);
-    // body 에 남은 포커스도 내려놓는다. 남으면 다음 테스트의 focus() 가 동기로
-    // focusout 을 쏘아 방금 연 편집을 그 자리에서 확정해 버린다.
+    // Release any focus lingering on body. Left there, the next test's focus()
+    // fires focusout synchronously and commits the just-opened edit on the spot.
     (document.activeElement as HTMLElement | null)?.blur?.();
   });
 
-  it('<body> 자체가 블록이어도 막대가 블록 안에 들어가지 않는다', () => {
+  it('even when <body> itself is a block, the bar never lands inside the block', () => {
     mountBodyBlock();
     click(document.body);
     selectBodyText();
 
     const bar = document.querySelector<HTMLElement>('[data-ne-bar]');
     expect(bar?.style.display).toBe('flex');
-    // body 에 붙이면 이 블록의 innerHTML 에 편집기 버튼이 통째로 들어간다.
+    // Attached to body, this block's innerHTML would carry the editor buttons wholesale.
     expect(document.body.contains(bar)).toBe(false);
   });
 
-  it('Enter 확정이 보내는 innerHTML 에 막대가 없다', () => {
+  it('the innerHTML an Enter commit sends contains no bar', () => {
     mountBodyBlock();
     click(document.body);
     selectBodyText();
@@ -1081,9 +1101,10 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
     expect(String(edit?.html)).not.toContain('data-ne-bar');
   });
 
-  it('막대가 블록 안으로 옮겨져 있어도 확정 전에 걷어낸다', () => {
-    // 아티팩트 스크립트는 DOM 을 재구성한다(wrapSheets 식). 막대가 블록 안으로
-    // 끌려 들어간 채 확정되면 저장본에 편집기 UI 가 실린다 — 마지막 방어선을 본다.
+  it('even with the bar moved inside the block, it is removed before the commit', () => {
+    // Artifact scripts reshape the DOM (the wrapSheets pattern). Committing
+    // with the bar dragged inside the block would ship editor UI in the save —
+    // this checks the last line of defense.
     mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
     click(el(0)!);
     const node = el(0)!.firstChild!;
@@ -1104,10 +1125,11 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
     expect(String(edit?.html)).toBe('가나다라마바사');
   });
 
-  it('막대가 블록 안으로 옮겨져 있어도 취소가 막대를 죽이지 않는다', () => {
-    // Escape 는 innerHTML 을 스냅숏으로 되돌린다. 막대가 블록 안에 있는 채로 되돌리면
-    // 막대가 DOM 에서 떨어지는데 참조는 남아, 다음 선택부터 막대를 다시 만들지도
-    // 붙이지도 않는다 — 세션 내내 서식 기능이 사라진다.
+  it('even with the bar moved inside the block, cancel does not kill the bar', () => {
+    // Escape restores innerHTML from the snapshot. Restoring with the bar
+    // inside the block detaches it from the DOM while the reference survives,
+    // so from the next selection on it is neither rebuilt nor re-attached —
+    // formatting is gone for the rest of the session.
     const selectText = () => {
       const node = el(0)!.firstChild!;
       const range = document.createRange();
@@ -1126,19 +1148,19 @@ describe('previewAgent · 서식 막대는 저장본에 실리지 않는다 (INV
     el(0)!.appendChild(bar);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
-    // 막대는 살아 있고, 되돌린 블록에는 막대가 없다.
+    // The bar is alive, and the restored block contains no bar.
     expect(document.documentElement.contains(bar)).toBe(true);
     expect(el(0)!.innerHTML).toBe('가나다라마바사');
 
-    // 다시 편집하고 글자를 고르면 그 막대가 다시 뜬다.
+    // Editing again and selecting text brings that same bar back up.
     click(el(0)!);
     selectText();
     expect(bar.style.display).toBe('flex');
   });
 });
 
-describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec §4.1)', () => {
-  /** 텍스트 노드 하나에서 범위를 고른다 */
+describe('previewAgent · resizing screens by the selected range (spec §4.1)', () => {
+  /** Select a range within a single text node */
   function selectIn(node: Node, from: number, to: number): void {
     const range = document.createRange();
     range.setStart(node, from);
@@ -1157,8 +1179,9 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     return button;
   };
 
-  it('명령이 만든 자리는 배수로 바뀌고, 원본의 같은 값 자리는 그대로다', () => {
-    // 브라우저처럼: fontSize 명령이 고른 범위를 xxx-large 스팬으로 감싼다.
+  it('what the command made turns into a multiplier; the original spot with the same value stays', () => {
+    // Like the browser: the fontSize command wraps the selected range in an
+    // xxx-large span.
     document.execCommand = ((command: string) => {
       if (command === 'fontSize') {
         const range = getSelection()!.getRangeAt(0);
@@ -1184,13 +1207,14 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     const made = el(0)!.querySelector<HTMLElement>('span:not(#orig)');
     expect(made?.textContent).toBe('나다라');
     expect(made?.style.fontSize).toBe('1.35em');
-    // 고르지 않은, 원본이 같은 값을 쓰던 자리는 그대로다 (대원칙 2).
+    // The unselected spot where the original used the same value stays (Principle 2).
     expect(el(0)!.querySelector<HTMLElement>('#orig')?.style.fontSize).toBe('xxx-large');
   });
 
-  it('고른 범위 자체가 이미 그 값이면 — 명령이 아무것도 안 만들어도 — 배수가 적힌다', () => {
-    // 브라우저는 이미 그 크기인 범위에 fontSize 명령을 걸면 아무것도 바꾸지 않는다.
-    // 값("명령 전에 이미 그 값이던 자리")으로 가려내면 이때 A-/A+ 가 통째로 무시된다.
+  it('when the selected range itself is already that value — the command makes nothing — the multiplier is still written', () => {
+    // The browser changes nothing when fontSize is applied to a range already
+    // at that size. Screening by value ("what was already that value before
+    // the command") makes A-/A+ a no-op in this case.
     document.execCommand = (() => true) as typeof document.execCommand;
     mount(
       `<p ${MARKER_ATTR}="0"><span id="big" style="font-size: xxx-large">가나다</span>라마</p>`
@@ -1202,11 +1226,11 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
 
     expect(document.getElementById('big')?.style.fontSize).toBe('0.85em');
     expect(el(0)!.textContent).toBe('가나다라마');
-    // 고르지 않은 글자에는 아무것도 생기지 않는다.
+    // Nothing appears on the unselected text.
     expect(el(0)!.querySelectorAll('span').length).toBe(1);
   });
 
-  it('이미 그 값인 자리의 일부만 골랐으면 갈라서 고른 부분만 바꾼다', () => {
+  it('selecting only part of an already-sized spot splits it and changes just the selection', () => {
     document.execCommand = (() => true) as typeof document.execCommand;
     mount(
       `<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large; color: rgb(1, 2, 3)">가나다라마</span></p>`
@@ -1220,7 +1244,7 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     expect(el(0)!.textContent).toBe('가나다라마');
     expect(spans.map((s) => s.style.fontSize)).toEqual(['xxx-large', '0.85em', 'xxx-large']);
     expect(spans[1]?.textContent).toBe('나다라');
-    // 겉모습(색)은 물려받는다 — 사용자는 크기만 청했다.
+    // The look (color) is inherited — the user asked for size only.
     expect(spans.map((s) => s.style.color)).toEqual([
       'rgb(1, 2, 3)',
       'rgb(1, 2, 3)',
@@ -1228,9 +1252,10 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     ]);
   });
 
-  it('갈라도 앞자리의 주석은 남는다 — 사용자가 쓴 것이 사라지면 안 된다 (대원칙 1·2)', () => {
-    // 고른 범위 앞이 주석뿐이면 textContent 로만 재는 빈자리 판정이 host 를 지워,
-    // 고르지도 않은 주석이 저장본에서 사라진다.
+  it('splitting keeps a comment before the selection — what the user wrote must not vanish (Principles 1·2)', () => {
+    // When only a comment precedes the selected range, an emptiness check
+    // measured by textContent alone deletes the host, and a comment the user
+    // never selected vanishes from the save.
     document.execCommand = (() => true) as typeof document.execCommand;
     mount(
       `<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large"><!--메모-->가나다마</span></p>`
@@ -1245,7 +1270,7 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
     expect(el(0)!.textContent).toBe('가나다마');
   });
 
-  it('갈라도 뒷자리의 주석은 남는다', () => {
+  it('splitting keeps a comment after the selection too', () => {
     document.execCommand = (() => true) as typeof document.execCommand;
     mount(`<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large">가나다<!--끝--></span></p>`);
     click(el(0)!);
@@ -1259,7 +1284,7 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
   });
 });
 
-describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', () => {
+describe('previewAgent · the palette sweeps body itself too (spec §4.1)', () => {
   beforeEach(() => {
     document.execCommand = (() => true) as typeof document.execCommand;
   });
@@ -1270,8 +1295,9 @@ describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', (
     (document.activeElement as HTMLElement | null)?.blur?.();
   });
 
-  it('글자가 <body> 바로 아래 있고 색이 body 에 걸려 있어도 색이 나온다', () => {
-    // 자손만 훑으면(querySelectorAll('*')) body 를 건너뛰어 색 칸이 하나도 없다.
+  it('colors show up even when the text sits right under <body> and the color is on body', () => {
+    // Sweeping descendants only (querySelectorAll('*')) skips body and leaves
+    // no color dots at all.
     document.body.innerHTML = '';
     document.body.textContent = '가나다라마바사';
     document.body.setAttribute(MARKER_ATTR, '0');
@@ -1299,8 +1325,8 @@ describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', (
   });
 });
 
-describe('previewAgent · 문서의 표 (spec §5)', () => {
-  it('표를 받으면 모든 메시지에 붙인다 — 호스트가 옛 프리뷰의 메시지를 가릴 수 있어야 한다', () => {
+describe('previewAgent · the document token (spec §5)', () => {
+  it('once given a token, attaches it to every message — the host must be able to screen out old previews', () => {
     document.body.innerHTML = `<p ${MARKER_ATTR}="0">본문</p>`;
     sent = [];
     vi.spyOn(window.parent, 'postMessage').mockImplementation(((msg: unknown) => {
@@ -1315,17 +1341,17 @@ describe('previewAgent · 문서의 표 (spec §5)', () => {
     expect(sent).toContainEqual({ type: 'select', id: 0, token: 'doc-7' });
   });
 
-  it('표 없이 부르면 메시지를 그대로 보낸다', () => {
+  it('called without a token, sends messages as they are', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     expect(sent).toContainEqual({ type: 'select', id: 0 });
   });
 });
 
-describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)', () => {
-  it('흉내 낸 data-ne-bar 속 블록도 편집이 열린다 — 견주는 것은 속성이 아니라 우리 막대다', () => {
-    // closest('[data-ne-bar]') 로 걸렀다면 이 블록의 클릭이 전부 막대 클릭으로
-    // 삼켜져, 그 안의 블록은 영영 편집할 수 없다.
+describe('previewAgent · when the document mimics our marks (spec §3)', () => {
+  it('a block inside a mimicked data-ne-bar still opens for editing — compared against our bar, not the attribute', () => {
+    // Filtering by closest('[data-ne-bar]') would swallow every click on this
+    // block as a bar click, and the blocks inside could never be edited.
     mount(`<div data-ne-bar=""><p ${MARKER_ATTR}="0">본문</p></div>`);
 
     click(el(0)!);
@@ -1334,8 +1360,9 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
-  it('흉내 낸 data-ne-bar 로 포커스가 빠져도 확정된다', () => {
-    // 속성으로 거르면 확정이 건너뛰어져 편집이 확정도 취소도 없이 열린 채 남는다.
+  it('focus escaping into a mimicked data-ne-bar still commits', () => {
+    // Filtering by attribute would skip the commit and leave the edit open
+    // with neither commit nor cancel.
     mount(`<div data-ne-bar=""><p ${MARKER_ATTR}="0">본문</p><button id="decoy">x</button></div>`);
     click(el(0)!);
     sent = [];
@@ -1350,8 +1377,9 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(sent.some((m) => m.type === 'edit' && m.id === 0)).toBe(true);
   });
 
-  it('명단(all)에 없는 표식은 블록이 아니다 — 편집이 열리지 않는다', () => {
-    // 가짜에 편집이 열리면 그 확정은 어느 블록의 것도 아니어서 조용히 사라진다.
+  it('a marker missing from the roster (all) is not a block — no editing opens', () => {
+    // If editing opened on the impostor, its commit would belong to no block
+    // and vanish silently.
     mount(`<div ${MARKER_ATTR}="99">가짜</div><p ${MARKER_ATTR}="0">본문</p>`, {
       verified: false,
     });
@@ -1364,15 +1392,17 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(fake.getAttribute('contenteditable')).toBeNull();
     expect(sent.filter((m) => m.type === 'select' || m.type === 'edit')).toHaveLength(0);
 
-    // 진짜 블록은 여느 때처럼 열린다.
+    // The real block opens as usual.
     click(el(0)!);
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
-  it('대조 뒤에 끼워 넣은 같은 번호의 요소는 블록이 아니다 (spec §3)', () => {
-    // 명단은 번호만 가린다 — 스크립트가 대조 뒤에 같은 번호의 요소를 만들면 번호
-    // 검사는 통과한다. 그 가짜를 눌러 확정하면 가짜의 내용이 진짜 블록의 자리에
-    // 저장되므로, 대조 때 훑은 그 요소가 아니면 편집을 열지 않는다.
+  it('an element inserted after verification with the same number is not a block (spec §3)', () => {
+    // The roster screens numbers only — a script that makes an element with
+    // the same number after verification passes the number check. Clicking
+    // that impostor and committing would save the impostor's content into the
+    // real block's slot, so no editing opens on anything but the element
+    // captured at verification.
     mount(`<p ${MARKER_ATTR}="0">진짜</p>`, { verified: false });
     const real = el(0)!;
     fromHost({ type: 'locked', ids: [], all: [0] });
@@ -1387,13 +1417,14 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(fake.getAttribute('contenteditable')).toBeNull();
     expect(sent.filter((m) => m.type === 'select' || m.type === 'edit')).toHaveLength(0);
 
-    // 진짜 블록은 여느 때처럼 열린다 — 문서 앞쪽의 가짜가 밀어내지 못한다.
+    // The real block opens as usual — an impostor earlier in the document
+    // cannot push it out.
     click(real);
     expect(real.getAttribute('contenteditable')).toBe('true');
     expect(fake.getAttribute('contenteditable')).toBeNull();
   });
 
-  it('되돌리기는 문서 앞쪽의 흉내가 아니라 대조 때 훑은 그 요소에 닿는다 (spec §3)', () => {
+  it('revert reaches the element captured at verification, not the mimic earlier in the document (spec §3)', () => {
     mount(`<p ${MARKER_ATTR}="0">원래</p>`, { verified: false });
     const real = el(0)!;
     fromHost({ type: 'locked', ids: [], all: [0] });
@@ -1404,12 +1435,13 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
 
     fromHost({ type: 'revert', id: 0, html: '되돌림' });
 
-    // querySelector 로 되찾으면 앞쪽의 가짜가 먼저 잡혀, 진짜 블록은 고친 채 남는다.
+    // Re-finding by querySelector would catch the impostor first, leaving the
+    // real block edited.
     expect(real.innerHTML).toBe('되돌림');
     expect(fake.innerHTML).toBe('가짜');
   });
 
-  it('블록 안의 흉내 표식은 내용이다 — 클릭이 바깥의 진짜 블록으로 흘러간다', () => {
+  it('a mimic marker inside a block is content — the click flows to the real block outside', () => {
     mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="99">가짜</span></p>`, {
       verified: false,
     });
@@ -1422,11 +1454,12 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(fake.getAttribute('contenteditable')).toBeNull();
   });
 
-  it('확정은 편집을 연 그 요소에서 읽는다 — 뒤늦게 끼어든 흉내가 가로채지 못한다', () => {
+  it('commits read from the element editing opened on — a late-arriving mimic cannot hijack it', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(document.querySelector(`p[${MARKER_ATTR}="0"]`)!);
-    // 아티팩트 스크립트가 편집 중에 같은 id 의 표식을 문서 앞쪽에 끼워 넣는다 —
-    // id 로 되찾으면 querySelector 가 이 가짜를 먼저 돌려준다.
+    // An artifact script inserts a marker with the same id at the front of the
+    // document mid-edit — re-finding by id makes querySelector return this
+    // impostor first.
     document.body.insertAdjacentHTML('afterbegin', `<div ${MARKER_ATTR}="0">가짜</div>`);
     sent = [];
 
@@ -1436,13 +1469,15 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(String(edit?.html)).toBe('본문');
   });
 
-  it('겹친 id 는 어느 요소를 눌러도 잠금 안내로 간다 — 클릭이 아티팩트로 새지 않는다', () => {
-    // 가짜가 문서 앞쪽에 있으면 첫 요소만 남기는 훑기는 가짜를 기억한다 — 진짜 요소의
-    // 클릭이 "그 요소" 검사에서 떨어져, blocked 안내도 없이 아티팩트 핸들러로 흘러간다.
+  it('a clashing id goes to the lock notice whichever element is clicked — nothing leaks to the artifact', () => {
+    // With the impostor earlier in the document, a scan keeping only the first
+    // element remembers the impostor — the real element's click fails the
+    // "that element" check and flows to the artifact handler with no blocked
+    // notice at all.
     mount(`<div ${MARKER_ATTR}="0">가짜</div><p ${MARKER_ATTR}="0">진짜</p>`, {
       verified: false,
     });
-    // 호스트의 대조는 겹친 id 를 MARKER_CLASH 로 잠근다 (spec §3).
+    // The host's verification locks clashing ids as MARKER_CLASH (spec §3).
     fromHost({ type: 'locked', ids: [0], all: [0] });
     const artifact = vi.fn();
     document.addEventListener('click', artifact);
@@ -1452,13 +1487,15 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
 
     expect(sent).toContainEqual({ type: 'blocked', id: 0 });
     expect(artifact).not.toHaveBeenCalled();
-    // 잠금 표식도 겹친 요소 전부에 칠한다 — 진짜 요소만 비면 고칠 수 있어 보인다.
+    // The lock mark is painted on every clashing element too — with only the
+    // real one bare, it would look editable.
     expect(document.querySelector(`p[${MARKER_ATTR}="0"]`)!.hasAttribute(LOCKED_ATTR)).toBe(true);
   });
 
-  it('블록 안의 흉내에는 잠금 표식을 칠하지 않는다 — 내용에 실려 저장본으로 샌다', () => {
-    // 흉내가 미리 달고 온 data-ne-locked 를 떼면 그 변화가 바깥 블록의 innerHTML 에
-    // 실려, 그 블록을 편집하는 순간 저장본이 바뀐다 (INV-9).
+  it('a mimic inside a block gets no lock mark — it would ride the content into the save', () => {
+    // Removing the data-ne-locked a mimic brought along would ride that change
+    // in the outer block's innerHTML, changing the save the moment that block
+    // is edited (INV-9).
     mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="7" ${LOCKED_ATTR}="">가짜</span></p>`, {
       verified: false,
     });
@@ -1466,15 +1503,16 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
 
     const fake = document.querySelector(`[${MARKER_ATTR}="7"]`)!;
     expect(fake.hasAttribute(LOCKED_ATTR)).toBe(true);
-    // 진짜 블록의 표식은 여느 때처럼 관리된다 — 잠기지 않았으니 없다.
+    // The real block's mark is managed as usual — not locked, so absent.
     expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
   });
 });
 
-describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 (spec §4)', () => {
-  it('편집 중이면 확정(edit)을 먼저 보내고 flushed 로 답한다', () => {
-    // 호스트는 이 순서에 기대어 unsaved 를 판정한다 — flushed 가 먼저 가면
-    // 확정이 아직 안 닿은 채 물음이 돌아 편집이 조용히 사라진다.
+describe('previewAgent · flush — commit the open edit now (spec §4)', () => {
+  it('while editing, sends the commit (edit) first and replies flushed', () => {
+    // The host leans on this order to judge unsaved — if flushed went first,
+    // the prompt would run before the commit lands and the edit would vanish
+    // silently.
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     el(0)!.innerHTML = '고친 본문';
@@ -1487,11 +1525,11 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
     expect(sent[editAt]).toMatchObject({ type: 'edit', id: 0, html: '고친 본문' });
     expect(sent[flushedAt]).toMatchObject({ type: 'flushed', seq: 7 });
     expect(editAt).toBeLessThan(flushedAt);
-    // 편집은 닫혔다 — contenteditable 이 남으면 안 된다.
+    // The edit is closed — no contenteditable may remain.
     expect(el(0)!.hasAttribute('contenteditable')).toBe(false);
   });
 
-  it('편집 중이 아니어도 flushed 로 답한다 — 청한 쪽이 한도까지 기다리면 안 된다', () => {
+  it('replies flushed even outside editing — the requester must not wait out the timeout', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
 
     fromHost({ type: 'flush', seq: 3 });
@@ -1499,9 +1537,10 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
     expect(sent).toEqual([{ type: 'flushed', seq: 3 }]);
   });
 
-  it('조합 중이면 답을 미뤘다가, 미룬 확정이 나간 뒤에 답한다', () => {
-    // 답의 뜻은 "내보낼 확정을 전부 내보냈다" 다 (spec §4). 확정이 미뤄졌는데 답부터
-    // 보내면 호스트가 최신인 줄 알고 갈아 끼워, 조합 중이던 글자가 사라진다.
+  it('mid-composition, defers the reply and answers after the deferred commit goes out', () => {
+    // The reply means "every pending commit has been sent" (spec §4). Replying
+    // first with the commit deferred makes the host assume it is current and
+    // swap the document, losing the characters being composed.
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -1509,7 +1548,7 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
     sent = [];
 
     fromHost({ type: 'flush', seq: 11 });
-    // 확정도 답도 아직이다 — 조합 중의 innerHTML 은 읽지 않는다.
+    // Neither commit nor reply yet — mid-composition innerHTML is never read.
     expect(sent).toEqual([]);
 
     document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
@@ -1521,7 +1560,7 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
     expect(editAt).toBeLessThan(flushedAt);
   });
 
-  it('미룬 답은 편집을 버릴 때(Escape)도 나간다 — 내보낼 확정이 없어졌다', () => {
+  it('the deferred reply also goes out when the edit is dropped (Escape) — nothing is left to send', () => {
     mount(`<p ${MARKER_ATTR}="0">본문</p>`);
     click(el(0)!);
     document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -1531,7 +1570,8 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
     fromHost({ type: 'flush', seq: 12 });
     keydown('Escape');
 
-    // 버린 편집에는 확정이 없다 — edit 없이 답만 나가고, 내용은 열기 전으로 돌아간다.
+    // A dropped edit has no commit — only the reply goes out, no edit, and the
+    // content returns to what it was before editing opened.
     expect(sent.find((m) => m.type === 'edit')).toBeUndefined();
     expect(sent).toContainEqual({ type: 'flushed', seq: 12 });
     expect(el(0)!.innerHTML).toBe('본문');

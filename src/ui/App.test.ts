@@ -6,7 +6,7 @@ import { useEditor } from '@/store/editor';
 import { useUnsaved } from '@/store/unsaved';
 import { App } from './App';
 
-// react 의 act 는 이 표식이 있어야 테스트 환경으로 인정하고 경고 없이 돈다.
+// React's act only accepts this as a test environment, and runs without warnings, when this flag is set.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | null = null;
@@ -26,16 +26,17 @@ afterEach(() => {
   host = null;
 });
 
-/** 실제 탭 닫기처럼 cancelable 로 보낸다 — 막았는지 봐야 한다 */
+/** Sent cancelable like a real tab close — we must see whether it was blocked */
 function leave(): Event {
   const e = new Event('beforeunload', { cancelable: true });
   window.dispatchEvent(e);
   return e;
 }
 
-describe('App · 떠나기 전 확인은 파일과 다른가로 묻는다 (spec §4)', () => {
-  it('저장을 마친 뒤에는 패치가 남아 있어도 붙잡지 않는다', () => {
-    // 저장해도 patches 는 남는다(INV-1). 그걸로 물으면 저장한 사람까지 나갈 때마다 붙잡는다.
+describe('App · the leave confirmation asks on "differs from the file" (spec §4)', () => {
+  it('does not hold the user after a save, even with patches remaining', () => {
+    // Patches survive a save (INV-1). Asking on them would hold even someone
+    // who saved, every time they leave.
     act(() => {
       root = createRoot(host!);
       root.render(createElement(App));
@@ -48,7 +49,7 @@ describe('App · 떠나기 전 확인은 파일과 다른가로 묻는다 (spec 
     expect(leave().defaultPrevented).toBe(false);
   });
 
-  it('파일에 없는 편집이 있으면 붙잡는다', () => {
+  it('holds the user when edits are missing from the file', () => {
     act(() => {
       root = createRoot(host!);
       root.render(createElement(App));
@@ -62,10 +63,11 @@ describe('App · 떠나기 전 확인은 파일과 다른가로 묻는다 (spec 
   });
 });
 
-describe('App · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
-  it('저장만 하고 물음을 남기지 않는다 — 물음의 "저장하고 계속" 으로 답한다', () => {
-    // 저장만 하면 unsaved 가 풀린 채 물음이 남고, 그 뒤에 저장 버튼을 눌러도
-    // 저장할 것이 없다며 하려던 일(열기·갈아타기)이 취소된다.
+describe('App · Ctrl+S while the prompt is up (spec §4)', () => {
+  it('does not save and leave the prompt behind — it answers the prompt with "save and continue"', () => {
+    // Saving alone leaves the prompt up with unsaved cleared; pressing save
+    // afterwards finds nothing to save and the pending action (open, switch)
+    // gets cancelled.
     act(() => {
       root = createRoot(host!);
       root.render(createElement(App));
@@ -83,17 +85,18 @@ describe('App · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
       );
     });
 
-    // save() 를 직접 부르지 않는다 — 답이 keepEdits 로 흘러 거기서 저장이 이어진다.
+    // save() is not called directly — the answer flows into keepEdits and the save continues there.
     expect(answer).toHaveBeenCalledWith('save');
     expect(save).not.toHaveBeenCalled();
   });
 });
 
-describe('App · 물음이 떠 있는 동안 실패한 폴더 훑기 (spec §5.1)', () => {
-  it('취소해도 훑기 실패를 알린다 — 기다리는 이가 없어도 실패는 사라지지 않는다', async () => {
-    // 훑기는 묻기 전에 시작된다(항목이 이벤트 끝에 사라진다). 답을 기다린 뒤에 실패를
-    // 잡으면, 취소한 경우 아무도 그 프라미스를 기다리지 않아 실패가 알림 없이
-    // unhandled rejection 으로 사라진다 (대원칙 3).
+describe('App · a folder walk that fails while the prompt is up (spec §5.1)', () => {
+  it('reports the walk failure even on cancel — a failure no one awaits must not vanish', async () => {
+    // The walk starts before the question (entries vanish when the event
+    // ends). Catching the failure only after the answer means that on cancel
+    // no one awaits the promise, and the failure vanishes without notice as an
+    // unhandled rejection (Principle 3).
     act(() => {
       root = createRoot(host!);
       root.render(createElement(App));
@@ -102,7 +105,7 @@ describe('App · 물음이 떠 있는 동안 실패한 폴더 훑기 (spec §5.1
       useEditor.setState({ unsaved: true });
     });
 
-    // 걷다가 죽는 폴더 항목 — 접근 거부 등으로 readEntries 가 실패하는 상황.
+    // A folder entry that dies mid-walk — readEntries failing on access denial and the like.
     const entry = {
       isDirectory: true,
       name: 'deck',
@@ -118,12 +121,12 @@ describe('App · 물음이 떠 있는 동안 실패한 폴더 훑기 (spec §5.1
 
     await act(async () => {
       host!.firstElementChild!.dispatchEvent(drop);
-      // 훑기 실패와 물음이 마이크로태스크로 온다 — 물음이 뜰 때까지 걷는다.
+      // The walk failure and the prompt arrive as microtasks — step until the prompt shows.
       for (let tries = 0; useUnsaved.getState().why === null && tries < 1000; tries++) {
         await Promise.resolve();
       }
       useUnsaved.getState().reply('cancel');
-      // 취소한 뒤에도 실패 알림이 남아 있어야 한다 — 몇 태스크 더 흘려보낸다.
+      // The failure notice must still stand after cancelling — let a few more tasks pass.
       for (let tries = 0; tries < 10; tries++) await Promise.resolve();
     });
 

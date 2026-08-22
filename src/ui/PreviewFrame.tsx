@@ -7,14 +7,15 @@ import { cn } from '@/lib/utils';
 import { FORMAT_LABELS } from '@/lib/messages';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
 
-/** flush 청마다 새 번호 — 늦게 온 옛 청의 답이 새 청을 풀면 안 된다 */
+/** A fresh number per flush request — a late reply to an old request must not release a new one */
 let flushSerial = 0;
 
 /**
- * 아티팩트를 렌더하고 프리뷰 에이전트와 postMessage 로만 대화한다 (rules §4).
+ * Renders the artifact and talks to the preview agent by postMessage only (rules §4).
  *
- * `sandbox` 에 allow-same-origin 과 allow-scripts 를 함께 준다. 샌드박스로서는
- * 무력한 조합이지만 대상이 사용자 자신의 로컬 파일이고 서버가 없으므로 감수한다 (ADR-006).
+ * `sandbox` gets allow-same-origin and allow-scripts together. As a sandbox the
+ * combination is toothless, but the target is the user's own local file and
+ * there is no server, so we accept it (ADR-006).
  */
 export function PreviewFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -34,32 +35,36 @@ export function PreviewFrame() {
   const drainReverts = useEditor((s) => s.drainReverts);
   const revealId = useEditor((s) => s.revealId);
   const drainReveal = useEditor((s) => s.drainReveal);
-  // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
+  // All screen locking during replacement derives from the single reservation state (ADR-010).
   const replacing = useReplacement((s) => s.replacing);
   /**
-   * 프리뷰의 확정 답(flushed)을 기다리는 자리 — 청 번호마다 하나 (spec §4).
-   * 대기의 수명은 항목마다 하나 걸린 settle 이 끝낸다 — 답·한도·화면 내려감 중
-   * 무엇이 먼저 오든 같은 자리에서 타이머를 걷고 목록에서 지우고 프라미스를 푼다.
+   * Where the preview's commit replies (flushed) are awaited — one per request
+   * number (spec §4). Each entry's lifetime ends through its single settle —
+   * whichever comes first (reply, timeout, unmount) clears the timer, removes
+   * the entry, and resolves the promise in the same place.
    */
   const flushWaiters = useRef(new Map<number, () => void>());
 
-  // 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하는 함수를 걸어 둔다 (spec §4).
-  // 물음(keepEdits) 쪽은 iframe 을 모르므로 여기서 잇는다.
+  // Register the function that asks the preview "if editing now, commit and
+  // tell me" (spec §4). The prompt side (keepEdits) knows nothing about the
+  // iframe, so the wiring happens here.
   useEffect(() => {
     const waiters = flushWaiters.current;
     const unregister = registerPreviewFlush(
       () =>
         new Promise<void>((resolve) => {
           const win = frame.current?.contentWindow;
-          // 프리뷰가 없으면 확정시킬 편집도 없다 — 바로 푼다.
+          // No preview means no edit to commit — resolve right away.
           if (!win) {
             resolve();
             return;
           }
           const seq = ++flushSerial;
-          // 한도는 청한 쪽(flushPreviewEdits)의 race 가 이미 잡지만, 그 race 는 이
-          // 목록을 모른다 — 답 없는 프리뷰 앞에서 시간이 다 된 항목이 화면이 내려갈
-          // 때까지 남아, 청할 때마다 대기가 쌓인다. 항목 스스로 같은 한도에 정리한다.
+          // The requesting side's race (flushPreviewEdits) already enforces
+          // the timeout, but that race knows nothing of this map — facing an
+          // unresponsive preview, timed-out entries would linger until unmount
+          // and pile up with every request. Each entry cleans itself up on the
+          // same timeout.
           const settle = (): void => {
             clearTimeout(timer);
             waiters.delete(seq);
@@ -73,8 +78,9 @@ export function PreviewFrame() {
     );
     return () => {
       unregister();
-      // 내려가는 화면은 답을 더 전달할 수 없다 — 남은 대기를 지금 전부 끝낸다.
-      // settle 이 목록에서 저를 지우므로, 순회는 베낀 목록으로 한다.
+      // An unmounting screen can deliver no more replies — settle every
+      // remaining wait now. settle removes itself from the map, so iterate
+      // over a copy.
       for (const settle of [...waiters.values()]) settle();
     };
   }, []);
@@ -84,36 +90,44 @@ export function PreviewFrame() {
       if (e.source !== frame.current?.contentWindow) return;
       const msg = e.data as FromPreview | null;
       if (!msg || typeof msg !== 'object') return;
-      // 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 버린다 (spec §5) — iframe 은 재사용되어
-      // srcDoc 을 갈아도 contentWindow 신원이 그대로라 출처 검사를 통과하는데, 블록
-      // id 는 문서마다 0부터 다시 시작해 옛 문서의 내용·잠금이 새 문서를 건드린다.
+      // Drop messages from the old preview that arrive after switching
+      // (spec §5) — the iframe is reused and swapping srcDoc keeps the
+      // contentWindow identity, so they pass the source check, yet block ids
+      // restart at 0 in every document, letting the old document's content and
+      // locks touch the new one.
       if ((msg.token ?? '') !== previewToken) return;
       if (msg.type === 'ready') onReady(msg.blocks);
       else if (msg.type === 'edit') onEdit(msg.id, msg.html, msg.pristine);
       else if (msg.type === 'blocked') onBlocked(msg.id);
       else if (msg.type === 'notReady') onNotReady();
       else if (msg.type === 'select') select(msg.id);
-      // 프리뷰 안에서 누른 Ctrl+S. 호스트 창은 그 키를 보지 못한다 (spec §4).
-      // 호스트의 단축키와 같은 길을 탄다 — 저장 물음이 떠 있으면 "저장하고 계속" 이다.
+      // Ctrl+S pressed inside the preview. The host window never sees that key
+      // (spec §4). It takes the same path as the host's shortcut — with the
+      // save prompt up, it means "save and continue".
       else if (msg.type === 'save') shortcutSave();
       else if (msg.type === 'downloadCopy') downloadCopy();
       else if (msg.type === 'undo') undoLast();
-      // 확정 청의 답 — 같은 통로로 확정(edit)이 먼저 왔으므로, 여기서 풀리는 물음은
-      // 이미 그 편집을 아는 unsaved 를 본다 (spec §4). 옛 프리뷰의 답은 위 표 검사가
-      // 걸러내고, 그 청은 항목의 한도 타이머가 정리한다. settle 이 타이머·목록·풀기를
-      // 한 번에 끝낸다 — 시간이 다 돼 이미 정리된 청의 늦은 답은 조용히 지나간다.
+      // The reply to a flush request — the commit (edit) came first on the same
+      // channel, so a prompt released here reads an unsaved that already knows
+      // that edit (spec §4). Replies from old previews are filtered by the
+      // token check above, and their requests are cleaned up by the entry's
+      // timeout timer. settle finishes timer, map entry, and resolution in one
+      // step — a late reply to a request already timed out and cleaned up
+      // passes by quietly.
       else if (msg.type === 'flushed') flushWaiters.current.get(msg.seq)?.();
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
   }, [previewToken, onReady, onEdit, onBlocked, onNotReady, select, downloadCopy, undoLast]);
 
-  // 서식 막대에 붙일 문구를 건넨다. 에이전트는 언어팩을 불러올 수 없다 (ADR-007).
-  // 언어를 바꾸면 다시 보내 이미 떠 있는 막대까지 함께 바뀌게 한다.
+  // Hand over the labels for the formatting bar. The agent cannot load the
+  // language pack (ADR-007). Resend on language change so a bar already on
+  // screen changes with it.
   //
-  // 문서가 갈린 직후의 전송은 새 iframe 이 아직 에이전트를 실행하기 전이라 사라질 수
-  // 있다. 그래서 에이전트가 ready 를 보내 대조가 끝난 뒤(scanned)에도 다시 보낸다 —
-  // 그 뒤라야 리스너가 확실히 걸려 있다 (spec §4.1).
+  // A send right after the document switches can vanish — the new iframe has
+  // not run the agent yet. So send again after the agent's ready ends
+  // verification (scanned) — only then is the listener certainly attached
+  // (spec §4.1).
   useEffect(() => {
     const labels: Record<string, string> = {};
     for (const key of FORMAT_LABELS) labels[key] = t(key);
@@ -121,9 +135,10 @@ export function PreviewFrame() {
     frame.current?.contentWindow?.postMessage(msg, '*');
   }, [t, previewDoc, scanned]);
 
-  // 대조가 끝나 잠금이 확정되면 프리뷰에 알린다. UI 차단만으로는 부족하다 (INV-5).
-  // 실제 블록 id 전부(all)도 함께 보낸다 — 문서가 data-ne-id 를 흉내 낼 수 있어,
-  // 에이전트는 이 명단에 없는 표식을 블록으로 치지 않는다 (spec §3).
+  // Tell the preview once verification ends and the locks are final. Blocking
+  // in the UI alone is not enough (INV-5). Every real block id (all) goes
+  // along — the document can mimic data-ne-id, and the agent does not count
+  // markers missing from this roster as blocks (spec §3).
   useEffect(() => {
     if (!scanned) return;
     const ids = blocks.filter((b) => b.locked !== null).map((b) => b.id);
@@ -131,7 +146,7 @@ export function PreviewFrame() {
     frame.current?.contentWindow?.postMessage(msg, '*');
   }, [scanned, blocks]);
 
-  // 되돌리기는 프리뷰에도 반영해야 한다. 패치만 지우면 화면에는 고친 내용이 남는다.
+  // Reverts must reach the preview too. Deleting only the patch leaves the edited content on screen.
   useEffect(() => {
     if (revertQueue.length === 0) return;
     for (const item of revertQueue) {
@@ -141,7 +156,7 @@ export function PreviewFrame() {
     drainReverts();
   }, [revertQueue, drainReverts]);
 
-  // 변경 목록에서 고른 블록을 화면에 보여준다. 어디를 고쳤는지 목록만으로는 알기 어렵다.
+  // Show the block picked in the change list. The list alone makes it hard to tell where the edit is.
   useEffect(() => {
     if (revealId === null) return;
     const msg: ToPreview = { type: 'reveal', id: revealId };
@@ -155,9 +170,10 @@ export function PreviewFrame() {
     <iframe
       ref={frame}
       title={t('preview.title')}
-      // 갈아 끼우는 동안(replacing)은 프리뷰를 잠근다 — 화면에는 아직 이전 문서가
-      // 있지만, 여기서 시작한 편집은 새 문서가 서는 순간 사라질 자리다 (spec §4).
-      // 그래도 들어온 확정(열려 있던 블록의 blur 등)은 스토어의 onEdit 이 거절한다.
+      // Lock the preview while replacing — the previous document is still on
+      // screen, but an edit started here has nowhere to go once the new
+      // document stands (spec §4). Commits that get through anyway (blur of an
+      // already-open block, etc.) are rejected by the store's onEdit.
       className={cn('h-full w-full border-0 bg-white', replacing && 'pointer-events-none')}
       sandbox="allow-scripts allow-same-origin"
       srcDoc={previewDoc}

@@ -1,7 +1,8 @@
 /**
- * 묶음(폴더·zip) 안에 문서가 여럿일 때 무엇을 열지 고른다 (spec §5.1).
+ * Picks which document to open when a bundle (folder, zip) holds several (spec §5.1).
  *
- * 하나뿐이면 고를 것이 없으므로 아무것도 그리지 않는다 — 파일 이름은 툴바가 이미 보여준다.
+ * With only one there is nothing to pick, so it renders nothing — the toolbar
+ * already shows the file name.
  */
 import {
   Select,
@@ -17,7 +18,7 @@ import { useI18n } from '@/store/locale';
 export function DocSelect() {
   const candidates = useEditor((s) => s.candidates);
   const docPath = useEditor((s) => s.docPath);
-  // 저장이 도는 동안도, 갈아 끼우는 동안도 새 갈아타기를 시작하지 않는다 (ADR-010).
+  // No new switch starts while a save is running or a replacement is underway (ADR-010).
   const busy = useEditorBusy();
   const openFromBundle = useEditor((s) => s.openFromBundle);
   const { t } = useI18n();
@@ -29,8 +30,8 @@ export function DocSelect() {
     <Select
       value={docPath}
       disabled={busy}
-      // 문서를 바꾸면 프리뷰를 다시 그리므로 고친 내용은 사라진다.
-      // 조용히 버리지 않는다 — 묻는 것은 스토어가 한다.
+      // Switching documents redraws the preview, so edits would be lost.
+      // Never discarded silently — the store does the asking.
       onValueChange={(path) => void openFromBundle(path)}
     >
       <SelectTrigger className="h-8 w-auto max-w-64 gap-1.5" aria-label={label} title={label}>

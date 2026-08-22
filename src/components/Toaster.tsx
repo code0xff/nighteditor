@@ -1,11 +1,12 @@
 /**
- * 알림을 화면 오른쪽 위에 띄운다 (spec §4).
+ * Floats notices at the top right of the screen (spec §4).
  *
- * 배너로 두면 뜰 때마다 본문이 아래로 밀린다. 알림 하나 떴다고 읽던 자리가 움직이면
- * 안 된다. 띄우는 자리를 문서 위로 옮겨 흐름을 건드리지 않는다.
+ * As a banner, every notice would push the content down. One notice must not
+ * move the spot the user was reading. Floating above the document leaves the
+ * flow untouched.
  *
- * **할 일이 딸린 알림은 여기로 오지 않는다.** 자동으로 사라지면 버튼도 함께 사라지므로,
- * 자원을 못 붙였다는 안내는 배너로 남는다 (`ui/App.tsx`).
+ * **Notices that carry an action never come here.** Auto-dismissal would take
+ * the button with it, so the missing-assets notice stays a banner (`ui/App.tsx`).
  */
 import { useEffect } from 'react';
 import { IconClose, IconLocked, IconNotice } from '@/lib/icons';
@@ -13,7 +14,7 @@ import { useI18n } from '@/store/locale';
 import { useToasts, type Toast } from '@/store/toasts';
 import { cn } from '@/lib/utils';
 
-/** 읽는 데 걸리는 시간만큼만. 오류는 스스로 사라지지 않는다 */
+/** Just long enough to read. Errors never dismiss themselves */
 const LINGER = 4000;
 
 export function Toaster() {
@@ -24,7 +25,7 @@ export function Toaster() {
   return (
     <div
       className="pointer-events-none fixed right-3 top-14 z-50 flex w-80 flex-col gap-2"
-      // 알림은 읽던 것을 끊지 않고 전해져야 한다.
+      // Notices must be delivered without interrupting what is being read.
       aria-live="polite"
     >
       {toasts.map((toast) => (
@@ -39,7 +40,7 @@ function ToastCard({ toast }: { toast: Toast }) {
   const { tn, t } = useI18n();
 
   useEffect(() => {
-    // 오류는 놔둔다. 3초 만에 사라지면 못 본 사람은 저장된 줄 안다.
+    // Leave errors alone. Gone in three seconds, whoever missed it assumes the save succeeded.
     if (toast.tone === 'error') return;
     const timer = setTimeout(() => dismiss(toast.key), LINGER);
     return () => clearTimeout(timer);

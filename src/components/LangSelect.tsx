@@ -1,4 +1,4 @@
-/** UI 언어 선택. 목록에 뜨는 이름은 그 언어로 적혀 있다 (`LOCALE_LABEL`). */
+/** UI language picker. Each name in the list is written in its own language (`LOCALE_LABEL`). */
 import {
   Select,
   SelectContent,
@@ -19,7 +19,7 @@ export function LangSelect() {
     <Select
       value={locale}
       onValueChange={(value) => {
-        // 셀렉트는 string 을 준다. 지원하지 않는 값이면 그냥 무시한다.
+        // The select hands back a string. Unsupported values are simply ignored.
         if (isLocale(value)) setLocale(value);
       }}
     >

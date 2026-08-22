@@ -1,11 +1,12 @@
 /**
- * 저장하지 않은 편집을 두고 다른 데로 가려 할 때 뜨는 물음 (spec §4).
+ * The prompt shown when leaving with unsaved edits behind (spec §4).
  *
- * 선택지가 셋이라 브라우저의 `confirm` 으로는 만들 수 없다. 사용자가 정작 원하는
- * **저장하고 계속**이 그 둘 중에 없기 때문이다.
+ * Three choices, so the browser's `confirm` cannot build it — the one the user
+ * actually wants, **save and continue**, is not among its two.
  *
- * 저장 버튼의 문구는 지금 문서가 덮어쓸 수 있는지에 따라 갈린다 — 드롭이나 zip 으로
- * 연 문서는 되쓸 자리가 없어 사본을 내려받는다. "저장" 이라고만 적으면 거짓말이 된다.
+ * The save button's label splits on whether the current document can be
+ * overwritten — a document opened by drop or from a zip has nowhere to write
+ * back, so a copy is downloaded. Writing just "save" would be a lie.
  */
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -17,10 +18,11 @@ import { useUnsaved } from '@/store/unsaved';
 export function UnsavedDialog() {
   const why = useUnsaved((s) => s.why);
   const reply = useUnsaved((s) => s.reply);
-  // 패치 총수가 아니다 — 저장해도 패치는 남고(INV-1), 저장한 편집을 되돌리면 패치
-  // 없이도 파일과 다르다. 여기 적는 수는 **파일과 다른 블록 수**다 (spec §4).
+  // Not the total patch count — patches survive a save (INV-1), and reverting
+  // a saved edit differs from the file with no patch at all. The number shown
+  // here is **the count of blocks that differ from the file** (spec §4).
   const count = useEditor(unsavedCount);
-  // 저장이 도는 동안에는 겹쳐 답하지 않는다 — shortcutSave 와 같은 기준.
+  // No overlapping answers while a save is running — same criterion as shortcutSave.
   const saving = useEditor((s) => s.saving);
   const overwrites = useEditor((s) => Boolean(s.file?.handle));
   const { t } = useI18n();
@@ -30,17 +32,19 @@ export function UnsavedDialog() {
   return (
     <Dialog
       open
-      // 바깥을 누르거나 Escape 를 눌렀다면 아무것도 하지 말라는 뜻이다.
+      // Clicking outside or pressing Escape means "do nothing".
       onClose={() => reply('cancel')}
       title={t('confirm.title')}
       footer={
         <>
-          {/* 셋의 글자 수가 제각각이라 그대로 두면 너비가 세 배까지 벌어져 들쭉날쭉해 보인다.
-              가장 짧은 것에 바닥을 깔아 나란히 보이게 한다 — 긴 것은 제 너비를 지킨다.
+          {/* The three labels differ wildly in length; left alone, widths spread
+              up to threefold and look ragged. A floor under the shortest lines
+              them up — long ones keep their own width.
 
-              취소도 테두리를 준다. 높이는 셋 다 같지만 ghost 는 테두리도 배경도 없어
-              상자가 보이지 않아, 옆의 둘보다 낮고 작아 보인다. 무게는 채움(저장)과
-              테두리(취소·버리기)로 가른다. */}
+              Cancel gets a border too. All three are the same height, but ghost
+              has neither border nor background, so its box is invisible and it
+              looks shorter and smaller than its neighbors. Weight is split by
+              fill (save) versus border (cancel, discard). */}
           <Button variant="outline" className="min-w-24" onClick={() => reply('cancel')}>
             {t('confirm.cancel')}
           </Button>
