@@ -1,135 +1,149 @@
 # Rules
 
-## 1. 불변식
+## 1. Invariants
 
-코드로 반드시 지켜야 하는 것. 위반은 리뷰에서 무조건 반려한다.
+Things the code must uphold. A violation is an unconditional rejection in review.
 
-### INV-1 · 원본 문자열은 불변
-세션 동안 로드한 원본 문자열을 **어떤 코드도 수정하지 않는다.**
-저장은 언제나 `applyPatches(original, patches)` 라는 순수 함수의 결과다.
+### INV-1 · The original string is immutable
+For the whole session, **no code modifies** the original string that was loaded.
+Saving is always the result of a pure function: `applyPatches(original, patches)`.
 
-### INV-2 · 전체 재직렬화 금지
-아래 호출이 문서 전체를 대상으로 등장하면 안 된다.
+### INV-2 · No full re-serialization
+None of these calls may appear against the whole document.
 ```
 document.documentElement.outerHTML
 parse5.serialize(document)
 new XMLSerializer().serializeToString(document)
 ```
-블록 단위 `element.innerHTML` 읽기는 허용된다 — 그 결과는 해당 블록의 범위에만 쓰인다.
+Reading a single block's `element.innerHTML` is allowed — that result is applied
+only to that block's range.
 
-### INV-3 · offset은 항상 원본 기준
-모든 offset은 **로드된 원본 문자열**의 인덱스다. 마커 주입본이나 라이브 DOM 기준 offset을
-저장 경로로 흘려보내지 않는다. 마커 주입본의 offset이 필요하면 별도 타입으로 구분한다.
+### INV-3 · Offsets are always in original-string terms
+Every offset is an index into **the loaded original string.** Offsets based on the
+marker-injected copy or the live DOM never flow into the save path. If an offset
+into the marker-injected copy is needed, give it a distinct type.
 
-### INV-4 · 패치는 내림차순으로 적용
-`innerStart` 오름차순으로 스플라이스하면 두 번째 패치부터 offset이 어긋난다.
-적용 직전 정렬을 함수 안에서 강제하고, 호출자의 정렬을 신뢰하지 않는다.
+### INV-4 · Patches apply in descending order
+Splice in ascending `innerStart` order and every patch after the first lands on
+shifted offsets. The sort is enforced inside the applying function, immediately
+before application — callers' ordering is not trusted.
 
-### INV-5 · 잠긴 블록은 패치 목록에 들어갈 수 없다
-`locked !== null` 인 블록의 패치는 생성 단계에서 거부한다. UI 차단만으로는 부족하다.
+### INV-5 · A locked block can never enter the patch list
+Patches for blocks with `locked !== null` are rejected at creation. Blocking in the
+UI alone is not enough.
 
-### INV-6 · `core/`는 브라우저 API를 모른다
-`core/` 아래에서 `document`, `window`, `HTMLElement` 참조 금지.
-`TextDecoder`·`TextEncoder` 같은 Web Encoding 전역도 마찬가지다 — 어느 실행 환경에나
-있다고 가정하는 순간 파서가 환경을 탄다. 바이트를 글자로 푸는 일이 필요하면
-`core/` 안에서 직접 풀거나 부르는 쪽(`lib/`)이 푼 것을 받는다.
-문자열 in, 문자열 out. 이 경계가 테스트 가능성의 전부다.
+### INV-6 · `core/` knows no browser APIs
+No references to `document`, `window`, or `HTMLElement` under `core/`.
+Web Encoding globals like `TextDecoder`·`TextEncoder` are banned too — assume they
+exist in every runtime and the parser becomes environment-dependent. If bytes must
+become characters, decode them inside `core/` by hand, or accept what the caller
+(`lib/`) decoded.
+Strings in, strings out. This boundary is the entirety of testability.
 
-### INV-7 · `sourceCodeLocation`은 항상 null 가드
-parse5는 스펙에 따라 **소스에 없는 노드를 트리에 삽입한다.**
-픽스처의 테이블에 `<tbody>`가 자동 삽입되고, 이 노드의 위치 정보는 `null`이다.
-`node.sourceCodeLocation.startTag` 를 가드 없이 접근하는 코드는 반려한다.
+### INV-7 · `sourceCodeLocation` is always null-guarded
+parse5, per spec, **inserts nodes that do not exist in the source.**
+The fixture's tables get an auto-inserted `<tbody>`, and that node's location info
+is `null`. Code that touches `node.sourceCodeLocation.startTag` without a guard is
+rejected.
 
-위치 정보가 없는 노드는 **블록이 될 수 없다.** 통과시켜 자식으로 재귀할 뿐이다.
+A node without location info **cannot become a block.** It is passed through,
+recursing into its children — nothing more.
 
-### INV-8 · 비교는 디코딩 후, 저장은 인코딩 후
-HTML 엔티티 때문에 소스 문자열과 라이브 텍스트는 같은 내용이어도 다르게 보인다.
+### INV-8 · Compare after decoding, save after encoding
+Because of HTML entities, the source string and the live text look different even
+when the content is the same.
 
-- **대조 검사(ADR-005)** — 양쪽 모두 디코딩해서 비교한다.
-  원시 슬라이스로 비교하면 엔티티 포함 블록이 오탐으로 잠긴다
-- **저장** — 사용자가 입력한 `&`, `<`, `>` 는 반드시 엔티티로 인코딩해 기록한다.
-  안 하면 사용자가 `&` 를 치는 순간 문서 구조가 깨진다
+- **Comparison check (ADR-005)** — decode both sides, then compare.
+  Compare raw slices and every block containing an entity locks as a false positive
+- **Saving** — `&`, `<`, `>` typed by the user must be written encoded as entities.
+  Skip it and the document's structure breaks the moment a user types `&`
 
-디코딩/인코딩은 한 곳에 모으고 직접 구현하지 않는다.
+Decoding/encoding is gathered in one place and never hand-rolled.
 
-### INV-9 · 프리뷰 전용 산출물은 저장본에 닿지 않는다
-프리뷰 문서에는 원본에 없는 것이 들어간다 — `data-ne-id` 마커, 주입한 스타일과 에이전트,
-자원을 붙일 때 바꿔치기한 `blob:` URL. 이것들은 **프리뷰에서만** 존재한다.
+### INV-9 · Preview-only artifacts never reach the saved output
+The preview document contains things the original does not — `data-ne-id` markers,
+injected styles and the agent, `blob:` URLs swapped in when resources attach.
+These exist **in the preview only.**
 
-저장 경로가 언제나 원본 문자열에서 출발하기 때문에 성립한다(INV-1·INV-3) — 단,
-패치의 내용만은 프리뷰(innerHTML)에서 온다. 마커와 주입물은 블록 밖에만 있어 이 길로
-들어올 수 없지만, **자원 치환은 블록 안에서도 일어난다.** 그래서 프리뷰와 저장 사이의
-경계는 양방향이다 (ADR-011): 프리뷰로 나가는 원본 조각은 치환하고, 프리뷰에서 돌아온
-편집은 blob URL 을 원문 표기로 되돌린 뒤에야 패치가 된다.
-`pipeline.test.ts` 가 저장본에 `blob:` 과 마커가 없는지 매번 확인한다 —
-블록 안에 자원이 든 문서를 포함해서.
+This holds because the save path always starts from the original string
+(INV-1·INV-3) — except that patch content alone comes from the preview
+(innerHTML). Markers and injected material live outside blocks and cannot enter by
+that road, but **resource swaps happen inside blocks too.** So the boundary between
+preview and save is two-way (ADR-011): original fragments going out to the preview
+are swapped, and edits returning from the preview become patches only after their
+blob URLs are restored to the source spelling.
+`pipeline.test.ts` checks every run that the saved output holds no `blob:` and no
+markers — including documents with resources inside blocks.
 
 ---
 
-## 2. 개발 프로세스
+## 2. Development process
 
-모든 작업은 **플랜 → 구현 → 리뷰** 순서를 지킨다. 순서를 건너뛰지 않는다.
+Every task follows **plan → implement → review**, in that order. No skipping.
 
-### 2.1 플랜
+### 2.1 Plan
 
-코드를 쓰기 전에 아래를 정하고 합의한다.
+Before writing code, settle and agree on:
 
-- 무엇을 바꾸는가 (범위와 범위 밖)
-- 어떤 파일을 건드리는가
-- 어떤 불변식(§1)에 닿는가
-- 어떻게 검증하는가 (테스트 목록)
-- 커밋을 어떻게 쪼갤 것인가 (§3.2)
+- What changes (scope and out-of-scope)
+- Which files are touched
+- Which invariants (§1) it touches
+- How it is verified (list of tests)
+- How the commits will be split (§3.2)
 
-사소하지 않은 작업은 플랜 모드나 `Plan` 에이전트를 쓴다.
-**플랜 없이 시작한 구현은 리뷰에서 반려 사유가 된다.**
+Non-trivial work uses plan mode or the `Plan` agent.
+**Implementation started without a plan is grounds for rejection in review.**
 
-문서(`spec.md` / `architecture.md`)에 영향이 있으면 **문서를 먼저 고친다.** 코드가 문서를 앞서지 않는다.
+If the docs (`spec.md` / `architecture.md`) are affected, **fix the docs first.**
+Code does not get ahead of the docs.
 
-### 2.2 구현
+### 2.2 Implement
 
-- 플랜에서 합의한 범위만 건드린다. 벗어난 개선은 별도 커밋·별도 작업으로 뺀다
-- `core/` 변경은 테스트를 먼저 쓰거나 최소한 같은 커밋에 포함한다
-- 커밋 직전 `pnpm verify` 통과 (§5)
+- Touch only what the plan agreed on. Improvements beyond it go to a separate
+  commit, a separate task
+- `core/` changes write the tests first, or at minimum land them in the same commit
+- `pnpm verify` passes immediately before each commit (§5)
 
-### 2.3 리뷰
+### 2.3 Review
 
-커밋 전에 반드시 거친다.
+Mandatory before committing.
 
-| 대상 | 방법 |
+| Target | Method |
 |---|---|
-| 정확성·버그 | `/code-review` |
-| 중복·단순화·과잉설계 | `/simplify` |
-| 불변식 위반 | §1 체크리스트 수동 대조 |
-| 합격 기준 | `docs/spec.md` §6 해당 항목 |
+| Correctness · bugs | `/code-review` |
+| Duplication · simplification · overengineering | `/simplify` |
+| Invariant violations | Manual pass over the §1 checklist |
+| Acceptance criteria | The relevant items in `docs/spec.md` §6 |
 
-리뷰에서 나온 지적은 **고치거나, 안 고치는 이유를 남긴다.** 조용히 넘기지 않는다.
+Findings from review are **fixed, or the reason for not fixing is recorded.**
+Nothing is passed over silently.
 
 ---
 
-## 3. 커밋
+## 3. Commits
 
-### 3.1 형식
+### 3.1 Format
 
 ```
 type: message
 ```
 
-스코프가 의미를 더할 때만 `type(scope): message` 를 쓴다.
+Use `type(scope): message` only when the scope adds meaning.
 
-| type | 용도 |
+| type | Use |
 |---|---|
-| `feat` | 사용자가 체감하는 기능 추가 |
-| `fix` | 버그 수정 |
-| `refactor` | 동작 변화 없는 구조 개선 |
-| `test` | 테스트 추가·수정 |
-| `docs` | 문서만 변경 |
-| `chore` | 빌드·의존성·설정 |
-| `ci` | CI 워크플로 변경 |
-| `perf` | 성능 개선 |
+| `feat` | A feature users can feel |
+| `fix` | Bug fix |
+| `refactor` | Structural change with no behavior change |
+| `test` | Adding or fixing tests |
+| `docs` | Docs-only change |
+| `chore` | Build, dependencies, config |
+| `ci` | CI workflow change |
+| `perf` | Performance improvement |
 
-- 메시지는 명령형 현재시제, 소문자로 시작, 마침표 없음
-- 한 줄 요약은 72자 이내. 배경 설명이 필요하면 본문에 **왜**를 쓴다
-- 식별자·커밋 메시지는 영어, 문서는 한국어
+- Message in imperative present tense, lowercase start, no period
+- One-line summary within 72 characters. If background is needed, the body says **why**
+- Identifiers, commit messages, and docs are in English
 
 ```
 feat(core): add offset-based patch applier
@@ -137,52 +151,57 @@ fix(preview): keep markers alive after script DOM rewrite
 test(core): assert byte-identical output on zero patches
 ```
 
-### 3.2 브랜치
+### 3.2 Branches
 
-**`dev` 가 기본 브랜치이며, 관리하는 유일한 브랜치다.**
-작업은 `dev` 에 직접 쌓는다. 기능 브랜치를 따로 만들지 않고, 릴리스 브랜치도 두지 않는다.
+**`dev` is the default branch, and the only branch we manage.**
+Work stacks directly on `dev`. No feature branches, no release branches.
 
-브랜치를 나누지 않는 대신 **커밋 하나하나가 되돌릴 수 있는 단위여야 한다** (§3.3).
-`dev` 는 언제나 `pnpm verify` 가 통과하는 상태로 유지한다.
+In place of branching, **every commit must be an independently revertible unit**
+(§3.3). `dev` is kept in a state where `pnpm verify` always passes.
 
-### 3.3 기능 단위로 쪼갠다
+### 3.3 Split by feature
 
-**커밋 하나 = 되돌릴 수 있는 변경 하나.** 최대한 잘게 나눈다.
+**One commit = one revertible change.** Split as finely as possible.
 
-각 커밋은 아래를 모두 만족해야 한다.
+Every commit must satisfy all of the following:
 
-- 그 커밋만으로 `pnpm verify` 가 통과한다 (빌드가 깨진 중간 커밋 금지)
-- `dev` 에 바로 쌓이므로, 되돌릴 때 그 커밋만 revert 하면 되는 형태여야 한다
-- 한 문장으로 설명된다. `and` 가 들어가면 쪼갤 신호다
-- 되돌려도 다른 기능이 함께 죽지 않는다
+- `pnpm verify` passes on that commit alone (no broken intermediate commits)
+- It lands directly on `dev`, so reverting must take exactly one revert of that commit
+- It is describable in one sentence. An `and` is a signal to split
+- Reverting it does not take another feature down with it
 
-금지 패턴:
+Forbidden patterns:
 
-- 리팩터링과 기능 추가를 한 커밋에 — 리뷰에서 diff가 읽히지 않는다
-- 여러 모듈을 한꺼번에 — `core/` 와 `ui/` 는 따로
-- "작업 중 전부" 식 뭉치 커밋
-- 포매팅 변경을 로직 변경에 섞기 — 포매팅만 별도 `chore` 커밋으로
-
----
-
-## 4. 코드 분리
-
-기능이 다르면 파일이 다르다. `docs/architecture.md` 의 모듈 경계를 코드가 그대로 반영한다.
-
-- **한 파일은 바뀔 이유가 하나다.** 파싱과 렌더링, 패치와 UI 상태를 같은 파일에 두지 않는다
-- **의존 방향은 단방향** — `ui/` → `store/` → `core/`. 역방향 import 금지.
-  `core/` 는 아무것도 import 하지 않는다 (parse5 제외)
-- **`preview/` 는 iframe 안에서 도는 별개 번들**이다. `ui/` 와 코드를 공유하지 않고 `postMessage` 로만 통신한다
-- 파일이 200줄을 넘거나 여러 관심사가 섞이기 시작하면 쪼갠다. 줄 수는 신호일 뿐 기준은 관심사다
-- export는 필요한 것만. 모듈 내부 헬퍼를 밖으로 노출하지 않는다
+- Refactoring and a feature in one commit — the diff becomes unreadable in review
+- Several modules at once — `core/` and `ui/` go separately
+- The "everything I did today" lump commit
+- Formatting changes mixed into logic changes — formatting goes in its own `chore` commit
 
 ---
 
-## 5. 검증과 push
+## 4. Code separation
 
-### 5.1 단일 진입점
+Different feature, different file. The module boundaries in
+`docs/architecture.md` are mirrored by the code as-is.
 
-로컬과 CI가 **똑같은 명령**을 돌린다. 두 곳이 달라지면 로컬 통과가 아무 의미도 없어진다.
+- **One file has one reason to change.** Parsing and rendering, patches and UI
+  state, never share a file
+- **Dependencies point one way** — `ui/` → `store/` → `core/`. No reverse imports.
+  `core/` imports nothing (parse5 excepted)
+- **`preview/` is a separate bundle that runs inside the iframe.** It shares no
+  code with `ui/` and communicates only via `postMessage`
+- When a file passes 200 lines or starts mixing concerns, split it. Line count is a
+  signal; the criterion is concerns
+- Export only what is needed. Module-internal helpers stay unexposed
+
+---
+
+## 5. Verification and push
+
+### 5.1 A single entry point
+
+Local and CI run **the exact same command.** Let the two diverge and a local pass
+means nothing.
 
 ```jsonc
 // package.json
@@ -196,18 +215,20 @@ test(core): assert byte-identical output on zero patches
 }
 ```
 
-`guard` 는 **pnpm 이 아닌 패키지 매니저의 락파일**을 잡는다.
-`packageManager` 로 pnpm 을 못박아도 `npm install` 은 그냥 돌아가고, 그러면
-CI(`pnpm install --frozen-lockfile`)와 **다른 의존성 트리**가 로컬에만 생긴다.
-그 차이는 로컬에서만 재현되는 버그로 돌아오므로, 조용히 두지 않고 verify 에서 끊는다.
+`guard` catches **lockfiles from package managers other than pnpm.**
+Pinning pnpm via `packageManager` does not stop `npm install` from just running —
+and then a **different dependency tree** than CI's
+(`pnpm install --frozen-lockfile`) exists only locally. That difference comes back
+as bugs that reproduce only locally, so instead of staying quiet, verify cuts it off.
 
-락파일을 `.gitignore` 로 숨기지 않는다. 커밋만 막고 파일은 안 보이게 되므로
-`git status` 에서 알아챌 기회가 사라진다 (대원칙 3).
+Lockfiles are not hidden via `.gitignore`. That would block the commit but hide the
+file, erasing the chance to notice it in `git status` (core principle 3).
 
-### 5.2 CI는 `verify` 만 호출한다
+### 5.2 CI calls only `verify`
 
-`.github/workflows/ci.yml` 에 검증 로직을 직접 쓰지 않는다. `pnpm verify` 한 줄만 부른다.
-CI에만 있는 검사가 생기는 순간 로컬 사전 확인이 무력해진다.
+No verification logic is written into `.github/workflows/ci.yml` directly. It calls
+the single line `pnpm verify`. The moment a check exists only in CI, local
+pre-checking is disarmed.
 
 ```yaml
 name: CI
@@ -226,16 +247,16 @@ jobs:
       - run: pnpm verify
 ```
 
-### 5.3 push 전에 반드시 통과시킨다
+### 5.3 It must pass before push
 
-**CI에서 처음 실패를 발견하는 일이 없게 한다.** push 전에 로컬에서 끝낸다.
+**CI is never where a failure is discovered first.** Finish locally before pushing.
 
 ```bash
-pnpm verify        # 필수
-act -j verify      # 선택 — 워크플로 자체를 로컬에서 실행 (nektos/act)
+pnpm verify        # required
+act -j verify      # optional — run the workflow itself locally (nektos/act)
 ```
 
-pre-push 훅으로 강제한다. 의존성 없이 git 기본 기능만 쓴다.
+Enforced with a pre-push hook. It uses nothing but git's built-in machinery.
 
 ```bash
 # .githooks/pre-push
@@ -247,64 +268,74 @@ pnpm verify || {
 ```
 
 ```bash
-git config core.hooksPath .githooks   # 클론 후 1회
+git config core.hooksPath .githooks   # once after cloning
 ```
 
-훅을 `--no-verify` 로 우회하지 않는다. 우회해야 할 상황이면 그건 고쳐야 할 문제다.
+The hook is never bypassed with `--no-verify`. If a situation calls for bypassing
+it, that situation is the thing to fix.
 
 ---
 
-## 6. 테스트
+## 6. Tests
 
-### 필수: 패치 엔진 골든 테스트
-`core/` 의 커버리지는 타협 대상이 아니다. 최소한 아래는 있어야 한다.
+### Required: golden tests for the patch engine
+Coverage of `core/` is not up for negotiation. At minimum:
 
-- **무편집 항등성** — 파싱 후 패치 0개로 저장 → 원본과 바이트 동일.
-  픽스처 전체로 검증한다. 이게 깨지면 다른 테스트는 의미 없다
-- **단일 블록 최소 diff** — 블록 1개 수정 → diff 라인 수가 예상 범위 내
-- **다중 블록 순서** — 여러 블록 동시 수정 시 offset 어긋남 없음 (INV-4 회귀)
-- **인라인 보존** — `<b>` 포함 블록 수정 후 `<b>` 유지
-- **블록 판정 회귀** — 픽스처에서 블록 수와 태그별 분포 일치
-- **엔티티 왕복** — `&amp;` 포함 블록을 수정 후 저장 → 엔티티가 보존되고 오탐 잠금 없음 (INV-8)
-- **합성 노드** — 암시적 `<tbody>` 에서 순회가 죽지 않음 (INV-7)
-- **프리뷰 산출물 격리** — 자원을 붙인 문서를 저장 → `blob:` 도 마커도 저장본에 없음 (INV-9)
+- **No-edit identity** — parse, save with 0 patches → byte-identical to the
+  original. Verified against the whole fixture. If this breaks, every other test is
+  meaningless
+- **Single-block minimal diff** — edit 1 block → diff line count within the
+  expected range
+- **Multi-block ordering** — no offset drift when several blocks change at once
+  (INV-4 regression)
+- **Inline preservation** — a block containing `<b>` keeps the `<b>` after editing
+- **Block detection regression** — block count and per-tag distribution match on
+  the fixture
+- **Entity round-trip** — edit and save a block containing `&amp;` → entities
+  preserved, no false-positive lock (INV-8)
+- **Synthetic nodes** — traversal survives an implicit `<tbody>` (INV-7)
+- **Preview artifact isolation** — save a document with resources attached → no
+  `blob:` and no markers in the output (INV-9)
 
-픽스처는 `src/__fixtures__/` 에 둔다. 새 규칙을 만들 땐 근거가 된 구조를 픽스처에 먼저
-추가하고 테스트를 쓴다.
+Fixtures live in `src/__fixtures__/`. When creating a new rule, first add the
+structure that motivated it to the fixture, then write the test.
 
-- `artifact.html` — 한 파일로 된 합성 아티팩트
-- `bundle.zip` — 여러 파일로 흩어진 문서. `zip` 명령이 만든 **진짜 zip** 이다.
-  손으로 조립한 헤더는 만든 사람의 오해까지 그대로 베껴 담아서, 파서가 맞는지 틀리는지를
-  가리지 못한다. 다시 만드는 법은 `__fixtures__/load.ts` 에 적어 뒀다
+- `artifact.html` — the single-file synthetic artifact
+- `bundle.zip` — a document spread across files. A **real zip** made by the `zip`
+  command — a hand-assembled header copies its author's misunderstandings right
+  along with it, so it cannot tell a correct parser from a broken one. How to
+  regenerate it is written in `__fixtures__/load.ts`
 
-### UI 테스트
-`ui/` 는 스냅샷 테스트를 강요하지 않는다. IME·contenteditable 처럼 수동 확인이 빠른 영역은
-합격 기준(`spec.md` §6) 체크리스트로 대체한다.
+### UI tests
+`ui/` is not forced into snapshot tests. Areas where manual checking is faster —
+IME, contenteditable — are covered by the acceptance checklist (`spec.md` §6)
+instead.
 
 ---
 
-## 7. 컨벤션
+## 7. Conventions
 
-- TypeScript `strict`. `any` 금지, 불가피하면 `unknown` + 좁히기
-- offset을 다루는 값은 이름에 단위를 남긴다 — `innerStart`, `srcOffset` (o) / `pos`, `idx` (x)
-- 예외를 삼키지 않는다. 파싱 실패는 사용자에게 보여준다
-- 주석은 **왜**를 쓴다. 무엇을 하는지는 코드가 말한다
+- TypeScript `strict`. No `any`; where unavoidable, `unknown` + narrowing
+- Values that carry offsets keep the unit in the name — `innerStart`, `srcOffset`
+  (yes) / `pos`, `idx` (no)
+- Exceptions are not swallowed. Parse failures are shown to the user
+- Comments say **why.** What the code does, the code says
 
 ---
 
-## 8. 금지 사항
+## 8. Prohibitions
 
-| 금지 | 이유 |
+| Prohibited | Why |
 |---|---|
-| 플랜 없이 구현 시작 | §2.1 |
-| 리뷰 없이 커밋 | §2.3 |
-| `git push --no-verify` | §5.3 — 훅은 우회하라고 있는 게 아니다 |
-| 빌드가 깨진 중간 커밋 | §3.3 — bisect가 무의미해진다 |
-| dev 외 브랜치 운영 | §3.2 — 관리하지 않는다 |
-| CI에만 존재하는 검사 | §5.2 — 로컬 사전 확인이 무력해짐 |
-| 리치 텍스트 프레임워크 도입 | ADR-004 — 임의 마크업이 정규화로 소실 |
-| 백엔드·API 서버 추가 | 대원칙 5 — 보안 모델 전제가 무너짐 |
-| 원본 파일 자동 저장 | 덮어쓰기는 항상 명시적 사용자 행동으로 |
-| 잠긴 블록 강제 해제 옵션 | 대원칙 3 — 틀리게 고칠 자유를 주지 않음 |
-| 외부 전송(텔레메트리 포함) | 대원칙 5 |
-| offset 계산을 정규식으로 대체 | 파서만이 정확한 위치를 안다 |
+| Starting implementation without a plan | §2.1 |
+| Committing without review | §2.3 |
+| `git push --no-verify` | §5.3 — the hook does not exist to be bypassed |
+| Broken intermediate commits | §3.3 — bisect becomes meaningless |
+| Operating branches other than dev | §3.2 — we do not manage them |
+| Checks that exist only in CI | §5.2 — disarms local pre-checking |
+| Introducing a rich text framework | ADR-004 — arbitrary markup lost to normalization |
+| Adding a backend / API server | Core principle 5 — the security model's premise collapses |
+| Auto-saving the original file | Overwriting is always an explicit user action |
+| A force-unlock option for locked blocks | Core principle 3 — no freedom to edit wrongly |
+| Outbound transfer (telemetry included) | Core principle 5 |
+| Replacing offset math with regex | Only the parser knows the exact positions |
