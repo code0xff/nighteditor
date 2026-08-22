@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
+import { applyPatches } from './patch.js';
 import { decode, encode, normalizeText } from './entities.js';
 import { fixtureSource } from '../__fixtures__/load.js';
 
@@ -193,5 +194,28 @@ describe('parseBlocks · 리뷰 회귀 (합성 입력)', () => {
 
   it('textarea 내부는 블록이 되지 않는다 (RAW_TEXT)', () => {
     expect(only('<textarea>hello</textarea>')).toHaveLength(0);
+  });
+});
+
+describe('parseBlocks · 바이트 그대로의 원본 (대원칙 1 · spec §1 문서 인코딩)', () => {
+  it('BOM 으로 시작해도 offset 은 원본 문자열 그대로를 가리킨다', () => {
+    // 파서가 BOM 을 삼켜 offset 이 한 칸씩 밀리면 모든 패치가 한 글자씩 어긋난다.
+    const src = '\ufeff<html><head><title>t</title></head><body><p>본문</p></body></html>';
+    const blocks = parseBlocks(src);
+    for (const b of blocks) {
+      expect(src.slice(b.innerStart, b.innerEnd)).toBe(b.sourceInner);
+    }
+
+    const p = blocks.find((b) => b.tag === 'p');
+    const out = applyPatches(src, blocks, [{ id: p?.id ?? -1, newInnerHtml: '고침' }]);
+    expect(out).toBe('\ufeff<html><head><title>t</title></head><body><p>고침</p></body></html>');
+  });
+
+  it('CRLF 줄바꿈은 고친 블록 밖에서 바이트 그대로 남는다 (대원칙 2)', () => {
+    const src = '<html><body>\r\n<p>줄1</p>\r\n<p>줄2</p>\r\n</body></html>';
+    const blocks = parseBlocks(src);
+    const p = blocks.find((b) => b.sourceInner === '줄1');
+    const out = applyPatches(src, blocks, [{ id: p?.id ?? -1, newInnerHtml: '고침' }]);
+    expect(out).toBe('<html><body>\r\n<p>고침</p>\r\n<p>줄2</p>\r\n</body></html>');
   });
 });
