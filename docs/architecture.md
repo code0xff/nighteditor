@@ -1,335 +1,346 @@
 # Architecture
 
-## 기술 스택
+## Tech stack
 
-| 영역 | 선택 | 이유 |
+| Area | Choice | Why |
 |---|---|---|
-| 언어 | TypeScript (`strict`) | offset·범위 계산이 핵심이라 타입 오류가 곧 데이터 손상 |
-| 빌드 | Vite | 정적 산출물, 로컬 `file://` 실행까지 고려 |
-| UI | React | `design-ui` 스킬의 하우스 스타일과 동일 |
-| 스타일 | Tailwind CSS + shadcn/ui | UI 작업 시 `design-ui` 스킬 사용 (Pretendard / JetBrains Mono, dev-tool 톤) |
-| 상태 | Zustand | 패치 목록·선택 상태 정도라 그 이상은 과함 |
-| HTML 파서 | **parse5** (`sourceCodeLocationInfo: true`) | 소스 offset을 주는 스펙 준수 구현. 이 프로젝트의 심장 |
-| 편집기 | **네이티브 `contenteditable`** | ADR-004 참조 — 리치 텍스트 프레임워크 금지 |
-| 파일 입출력 | File System Access API + 다운로드 폴백 | 원본 파일에 그대로 저장(Chromium), 그 외 브라우저는 내려받기 |
-| 테스트 | Vitest | 패치 엔진 골든 테스트가 최우선 |
-| 패키지 | pnpm | |
-| 백엔드 | **없음** | 대원칙 5 |
+| Language | TypeScript (`strict`) | Offset and range math is the core; a type error here is data corruption |
+| Build | Vite | Static output, with local `file://` execution in mind |
+| UI | React | Matches the house style of the `design-ui` skill |
+| Styling | Tailwind CSS + shadcn/ui | Use the `design-ui` skill for UI work (Pretendard / JetBrains Mono, dev-tool tone) |
+| State | Zustand | It is just a patch list and selection state; anything more is overkill |
+| HTML parser | **parse5** (`sourceCodeLocationInfo: true`) | A spec-compliant implementation that yields source offsets. The heart of this project |
+| Editor | **Native `contenteditable`** | See ADR-004 — rich text frameworks are banned |
+| File I/O | File System Access API + download fallback | Writes the original file in place (Chromium); other browsers download |
+| Tests | Vitest | Golden tests for the patch engine come first |
+| Packages | pnpm | |
+| Backend | **None** | Core principle 5 |
 
-## 모듈 구조
+## Module structure
 
 ```
-public/                 ← 파비콘·앱 아이콘·site.webmanifest (빌드 시 dist 루트로 복사)
+public/                 ← favicon, app icons, site.webmanifest (copied to the dist root at build)
 src/
-  core/                 ← 브라우저 API 비의존. 순수 로직. 테스트 100% 대상
-    parse.ts            소스 → 블록 목록 + offset 매핑
-    blocks.ts           편집 블록 판정 규칙 (spec.md §2)
-    markers.ts          data-ne-id 주입 / 제거
-    edits.ts            offset 편집 목록을 내림차순으로 한 번에 적용
-    assets.ts           외부 자원 참조 찾기 · 경로 해석 · 프리뷰 URL 치환의 양방향 경계 (ADR-011)
-    zip.ts              zip 중앙 디렉터리 파싱 (해제는 lib/zip.ts)
-    bundle.ts           묶음(폴더·zip) 안에서 무엇을 열지 고르는 규칙
-    patch.ts            패치 목록 → 원본 문자열 스플라이스
-    verify.ts           소스-라이브 대조 검사
-  preview/              ← iframe 내부에서 실행되는 에이전트 스크립트
-    protocol.ts         호스트↔프리뷰 메시지 타입 (타입 전용, 런타임 코드 없음)
-    agent.ts            자기완결 함수 하나. 클릭·키·IME·postMessage
-  lib/                  ← 브라우저 API 래퍼와 호스트 쪽 헬퍼
-    fs.ts               파일 열기·저장·폴더 읽기 (File System Access API + 폴백)
-    assets.ts           읽은 파일 → blob URL 묶음 (수명 관리 포함)
-    zip.ts              zip 해제 (DecompressionStream)
-    icons.ts            아이콘 단일 출처 — 의미 이름 → lucide 그림, 앱 아이콘 경로
-    messages.ts         언어팩 — ko/en 사전, 키 타입, 보간. 화면 문구의 유일한 출처
-    preview.ts          프리뷰 문서 조립 (마커 + 자원 치환 + 에이전트 주입)
-    shortcuts.ts        호스트 쪽 단축키 (프리뷰 안쪽은 에이전트가 가로챈다)
-    theme.ts            밝은/어두운 테마 (localStorage + <html class>)
-    unsaved.ts          beforeunload — 저장 전 편집을 두고 탭을 닫으려 할 때
-    utils.ts            cn() — 클래스 이름 합치기
-  ui/                   ← 화면 골격: App · Toolbar · PreviewFrame · ChangeList
-  components/           ← 화면 부품. `ui/*` 는 shadcn 생성물이라 원본 형태를 지킨다
+  core/                 ← No browser APIs. Pure logic. 100% test coverage target
+    parse.ts            source → block list + offset mapping
+    blocks.ts           editable-block detection rules (spec.md §2)
+    markers.ts          data-ne-id injection / removal
+    edits.ts            applies an offset edit list in one descending pass
+    assets.ts           finding external resource references · path resolution · the two-way boundary for preview URL swaps (ADR-011)
+    zip.ts              zip central directory parsing (extraction lives in lib/zip.ts)
+    bundle.ts           rules for choosing what to open inside a bundle (folder·zip)
+    patch.ts            patch list → splices into the original string
+    verify.ts           source-vs-live comparison check
+  preview/              ← the agent script that runs inside the iframe
+    protocol.ts         host↔preview message types (types only, no runtime code)
+    agent.ts            one self-contained function. Clicks, keys, IME, postMessage
+  lib/                  ← browser API wrappers and host-side helpers
+    fs.ts               opening files, saving, reading folders (File System Access API + fallback)
+    assets.ts           read files → blob URL set (with lifetime management)
+    zip.ts              zip extraction (DecompressionStream)
+    icons.ts            single source for icons — semantic name → lucide glyph, app icon paths
+    messages.ts         language pack — ko/en dictionaries, key types, interpolation. The only source of screen copy
+    preview.ts          preview document assembly (markers + resource swaps + agent injection)
+    shortcuts.ts        host-side shortcuts (inside the preview, the agent intercepts)
+    theme.ts            light/dark theme (localStorage + <html class>)
+    unsaved.ts          beforeunload — when the tab is closing over unsaved edits
+    utils.ts            cn() — class name merging
+  ui/                   ← screen skeleton: App · Toolbar · PreviewFrame · ChangeList
+  components/           ← screen parts. `ui/*` are shadcn artifacts; keep their original shape
   store/                ← Zustand
-    editor.ts           원본·블록·패치·묶음. 알림은 문장이 아니라 메시지 키로 보관한다
-    replacement.ts      문서 갈아 끼우기 예약 — 누가 이기고 무엇이 잠기는지의 유일한 자리 (ADR-010)
-    locale.ts           UI 언어 (localStorage + <html lang>), useI18n
-    unsaved.ts          편집을 잃을 일을 하기 전에 묻는 자리 (저장 / 버림 / 취소)
+    editor.ts           original, blocks, patches, bundle. Notices are stored as message keys, not sentences
+    replacement.ts      document replacement reservations — the single place that decides who wins and what locks (ADR-010)
+    locale.ts           UI language (localStorage + <html lang>), useI18n
+    unsaved.ts          where we ask before anything that would lose edits (save / discard / cancel)
 ```
 
-`lib/unsaved.ts` 와 `store/unsaved.ts` 는 이름이 같지만 하는 일이 다르다. 앞은 **브라우저가**
-되묻게 하는 것(`beforeunload`)이고, 뒤는 **우리가** 묻는 것이다. 브라우저 쪽은 문구도 버튼도
-우리가 정할 수 없어서, 앱 안에서 일어나는 일은 뒤쪽으로 묻는다.
+`lib/unsaved.ts` and `store/unsaved.ts` share a name but not a job. The former makes
+**the browser** ask (`beforeunload`); the latter is **us** asking. We cannot choose
+the browser dialog's wording or buttons, so anything happening inside the app asks
+through the latter.
 
-`core/`는 DOM도 React도 모른다. 문자열을 받아 문자열을 돌려준다.
-이 경계가 무너지면 패치 엔진을 테스트할 수 없게 된다.
+`core/` knows neither the DOM nor React. It takes strings and returns strings.
+If this boundary collapses, the patch engine becomes untestable.
 
-## 데이터 흐름
+## Data flow
 
 ```
-원본 HTML 문자열 (불변, 끝까지 보관)
+original HTML string (immutable, kept to the end)
    │
-   ├─ parse5 파싱 ──→ 블록 목록 [{ id, tag, innerStart, innerEnd, sourceText }]
+   ├─ parse5 parse ──→ block list [{ id, tag, innerStart, innerEnd, sourceText }]
    │
-   ├─ 마커 주입 ──→ 프리뷰용 HTML (각 블록에 data-ne-id="N")
+   ├─ marker injection ──→ preview HTML (each block gets data-ne-id="N")
    │                  │
-   │                  └─→ iframe 렌더 → 아티팩트 스크립트 실행 → DOM 재구성됨
+   │                  └─→ iframe render → artifact scripts run → DOM restructured
    │                        │
-   │                        └─→ 소스-라이브 대조 → 불일치 블록 자동 잠금
+   │                        └─→ source-vs-live comparison → mismatched blocks auto-locked
    │                              │
-   │                              └─→ 사용자 편집 → postMessage
+   │                              └─→ user edits → postMessage
    │
-   └─ 패치 목록 [{ id, newInnerHtml }]
+   └─ patch list [{ id, newInnerHtml }]
          │
-         └─→ offset 역순 스플라이스 ──→ 저장본
+         └─→ splice in descending offset order ──→ saved output
 ```
 
-외부 자원을 붙일 때도 원본은 그대로다 (ADR-009). 마커와 같은 목록에 실려 프리뷰에만 닿는다.
+Attaching external resources leaves the original untouched too (ADR-009). The swaps
+ride the same edit list as the markers and reach only the preview.
 
 ```
-폴더 · zip ──→ 파일 묶음 ──→ blob URL 묶음
+folder · zip ──→ file bundle ──→ blob URL set
                                 │
-원본 HTML 문자열 ──→ 자원 참조 [{ path, valueStart, valueEnd }]
+original HTML string ──→ resource references [{ path, valueStart, valueEnd }]
                                 │
-                    마커 편집 + 자원 편집 ──→ 내림차순 한 번에 적용 ──→ 프리뷰용 HTML
-                                                                        (저장 경로는 지나지 않는다)
+                    marker edits + resource edits ──→ one descending-order pass ──→ preview HTML
+                                                                        (never passes through the save path)
 ```
 
-**원본 문자열은 세션 내내 수정되지 않는다.** 저장 시점에 원본 + 패치로 결과를 새로 만든다.
-따라서 되돌리기는 패치 목록에서 항목을 빼는 것이고, 원본은 언제나 복원 가능하다.
+**The original string is never modified during a session.** At save time, the result
+is built fresh from the original plus the patches. Reverting is therefore just
+removing an entry from the patch list, and the original is always recoverable.
 
 ---
 
-## 설계 결정
+## Design decisions
 
-### ADR-001 · DOM 재직렬화 대신 offset 패치
+### ADR-001 · Offset patches instead of DOM re-serialization
 
-**결정** 편집을 `{ blockId, newInnerHtml }` 패치로 모으고, 저장 시 원본 문자열의 해당 범위만 교체한다.
+**Decision** Collect edits as `{ blockId, newInnerHtml }` patches and, at save time, replace only those ranges in the original string.
 
-**이유** 브라우저가 DOM을 재직렬화하면 정규화 규칙에 따라 들여쓰기·속성 순서·엔티티가 전부 다시 쓰인다.
-한 문단 고쳤는데 diff가 파일 전체로 뜨고, 수정본을 Claude에 다시 넣을 때 컨텍스트가 낭비된다.
+**Why** When the browser re-serializes the DOM, normalization rewrites indentation, attribute order, and entities wholesale.
+You fix one paragraph and the diff spans the entire file — and feeding the edited copy back to Claude wastes context.
 
-**검증** 실측 아티팩트(110KB)의 `<h1>` 12바이트 수정 → `diff` 결과 **1줄**, 나머지 바이트 동일.
+**Validation** A 12-byte edit to an `<h1>` in the measured artifact (110KB) → `diff` shows **1 line**; every other byte identical.
 
-**대안** 전체 재직렬화 — 구현은 쉽지만 대원칙 1·2를 정면으로 위반. 기각.
-
----
-
-### ADR-002 · 편집 단위는 텍스트 노드가 아니라 블록
-
-**결정** `p` / `h2` / `li` / `td` 같은 블록에 `contenteditable`을 걸고, 그 블록의 inner 범위를 통째로 패치한다.
-
-**이유** 실측 아티팩트 분석 — 원시 텍스트 노드 1,674개, **길이 중앙값 10자**.
-`<b>` 때문에 한 문장이 3개 노드로 쪼개진다. 텍스트 노드 단위로 하면 사용자는 문장의 일부만 고칠 수 있고
-인라인 태그 경계가 편집 장벽이 된다. 블록 단위로 묶으면 867개(`<title>` 포함)였고, 인라인 마크업은 DOM에 남아 자연히 보존된다.
-
-**트레이드오프** 블록의 innerHTML을 그대로 쓰므로, 사용자가 편집 중 인라인 구조를 망가뜨리면 그대로 저장된다.
-붙여넣기 정제와 `plaintext-only` 옵션으로 완화한다.
+**Alternative** Full re-serialization — easy to implement, but a head-on violation of core principles 1 and 2. Rejected.
 
 ---
 
-### ADR-003 · 구조 경로 대신 마커 주입
+### ADR-002 · The unit of editing is the block, not the text node
 
-**결정** 렌더링 **전에** 소스 문자열의 각 블록 여는 태그에 `data-ne-id="N"`을 삽입한다.
+**Decision** Put `contenteditable` on blocks like `p` / `h2` / `li` / `td`, and patch that block's entire inner range.
 
-**이유** 아티팩트 스크립트가 DOM을 재구성한다. 실측 아티팩트의 `wrapSheets()`는 각 `.slide`의 자식 전체를
-새 `<div class="sheet">`로 옮긴다. 즉 **live DOM ≠ source DOM**이고,
-라이브에서 뽑은 `section:nth-child(3) > h2` 같은 경로는 소스 트리에서 해석되지 않는다.
-`appendChild`는 노드를 *이동*시키므로 속성은 그대로 따라간다 — 마커는 DOM을 어떻게 휘저어도 살아남는다.
+**Why** Analysis of the measured artifact — 1,674 raw text nodes, **median length 10 characters**.
+A `<b>` splits one sentence into 3 nodes. At text-node granularity the user can only edit part of a sentence,
+and inline tag boundaries become editing barriers. Grouped by block there were 867 (including `<title>`),
+and inline markup stays in the DOM, preserved naturally.
 
-**주의** 마커는 프리뷰 전용이다. 저장 경로는 원본 문자열에서 출발하므로 마커가 산출물에 섞일 수 없다.
-
----
-
-### ADR-004 · 리치 텍스트 프레임워크 사용 금지
-
-**결정** ProseMirror / Tiptap / Lexical / Slate 를 쓰지 않는다. 네이티브 `contenteditable`을 직접 다룬다.
-
-**이유** 이들은 전부 **자체 문서 모델로 정규화**한다. 스키마에 없는 태그·속성·클래스는 조용히 버려진다.
-아티팩트의 임의 인라인 마크업(`<span class="h">`, 인라인 `style`)을 원형 그대로 보존해야 하는
-이 프로젝트와 근본적으로 충돌한다. 편의를 얻고 대원칙 1을 잃는 교환이다.
-
-**비용** 실행취소 스택, 붙여넣기 정제, IME 처리를 직접 구현해야 한다. 감수한다.
+**Trade-off** Since the block's innerHTML is used verbatim, inline structure the user breaks mid-edit is saved broken.
+Mitigated by paste sanitization and the `plaintext-only` option.
 
 ---
 
-### ADR-005 · 소스-라이브 대조로 편집 가능 여부를 판정
+### ADR-003 · Marker injection instead of structural paths
 
-**결정** iframe 렌더 직후, 마커가 붙은 각 블록의 라이브 `textContent`를 소스 텍스트와 비교한다.
-불일치하면 그 블록을 **자동으로 잠근다.**
+**Decision** **Before** rendering, insert `data-ne-id="N"` into each block's opening tag in the source string.
 
-**이유** 스크립트가 어떤 텍스트를 생성·변조하는지 정적으로 알아내는 건 일반해가 없다.
-하지만 "결과가 소스와 다른가"는 렌더 한 번으로 확실히 알 수 있다.
-실측 아티팩트의 `#cnt`, `.pg` 40개가 이 규칙으로 자동 걸러졌다.
+**Why** Artifact scripts restructure the DOM. The measured artifact's `wrapSheets()` moves every child of each `.slide`
+into a new `<div class="sheet">`. That is, **live DOM ≠ source DOM**, and a path taken from the live tree,
+like `section:nth-child(3) > h2`, does not resolve in the source tree.
+`appendChild` *moves* nodes, so attributes travel with them — markers survive however the DOM gets churned.
 
-**효과** 처음 보는 아티팩트에도 안전하다. 스크립트를 이해하지 못해도 잘못 고칠 일이 없다 (대원칙 3).
-
----
-
-### ADR-007 · 에이전트는 문서 맨 앞에 주입하고 버블 단계에서 가로챈다
-
-**결정** 프리뷰 에이전트를 `<head>` 맨 앞 인라인 스크립트로 주입하고,
-이벤트는 **버블 단계**에서 `stopImmediatePropagation()` 으로 막는다.
-
-**이유** 캡처 단계가 직관적으로 보이지만 틀렸다. 캡처에서 전파를 끊으면 이벤트가
-대상 요소에 **도달하지 못해** `contenteditable` 의 캐럿 배치가 일어나지 않는다.
-클릭해도 커서가 안 생긴다.
-
-버블 단계에서는 이벤트가 대상에 먼저 도달해 캐럿이 정상 배치되고, 그 뒤 document 로
-올라온다. 같은 단계·같은 대상의 리스너는 **등록 순서**로 실행되므로, 아티팩트보다
-먼저 등록되기만 하면 우리 핸들러가 먼저 돌고 `stopImmediatePropagation()` 으로
-아티팩트 핸들러를 막을 수 있다.
-
-그래서 주입 위치가 곧 정확성 조건이다 — 아티팩트 스크립트는 `<body>` 끝에 있고,
-에이전트는 `<head>` 맨 앞에서 파싱되며 즉시 리스너를 건다.
-
-**알려진 한계** 리스너가 `document` 에 걸리므로 `stopImmediatePropagation()` 은
-`document`·`window` 에 등록된 핸들러만 앞지른다. 아티팩트가 중간 조상(슬라이드 컨테이너,
-카드 래퍼 등)에 핸들러를 걸어두면 그쪽이 버블 경로에서 먼저이므로 우리보다 먼저 실행된다.
-그런 아티팩트에서는 텍스트를 클릭할 때 편집이 열리면서 아티팩트 동작도 함께 일어난다.
-
-캡처 단계로 옮기면 막을 수 있지만 캐럿 배치를 잃는다. 실측 아티팩트를 포함해
-전역 핸들러를 쓰는 경우가 대부분이라 현재 선택을 유지한다.
-
-**결과** 에이전트는 **자기완결 함수**여야 한다. import 가 없고 외부 스코프를
-참조하지 않는다. 호스트가 `previewAgent.toString()` 으로 문자열화해 주입하기 때문이다.
-이 제약이 "preview 는 ui 와 코드를 공유하지 않는다"(rules §4)를 구조적으로 강제한다.
+**Caution** Markers are preview-only. The save path starts from the original string, so a marker can never leak into the output.
 
 ---
 
-### ADR-006 · 백엔드 없음, File System Access API
+### ADR-004 · No rich text frameworks
 
-**결정** 서버를 두지 않는다. 저장은 File System Access API로 **원본 파일에 직접** 쓰고,
-미지원 브라우저는 다운로드로 폴백한다.
+**Decision** No ProseMirror / Tiptap / Lexical / Slate. Drive native `contenteditable` directly.
 
-**이유** 본인 아티팩트를 본인이 고치는 도구다. 서버가 생기는 순간 신뢰할 수 없는 HTML을 호스팅하게 되고
-저장형 XSS·오리진 격리·인증이 전부 따라온다. 없애는 편이 싸고 안전하다.
+**Why** All of them **normalize into their own document model**. Tags, attributes, and classes outside the schema are silently dropped.
+That fundamentally conflicts with this project, which must preserve an artifact's arbitrary inline markup
+(`<span class="h">`, inline `style`) verbatim. It trades away core principle 1 for convenience.
 
-**배포** GitHub Pages(정적 호스팅)에 올린다. HTTPS 라 secure context 조건을 만족하므로
-덮어쓰기 저장이 그대로 동작한다. PWA 로 설치하면 앱 전체가 프리캐시되어 오프라인에서도 돌고,
-manifest 의 `file_handlers` 로 OS 에서 HTML 을 바로 열 수 있다. 이때 `launchQueue` 로
-`FileSystemFileHandle` 이 넘어오므로 대화상자 없이도 덮어쓰기가 된다.
-
-**폴더** 폴더를 열 때는 편집 권한(`readwrite`)까지 함께 받는다. 그래야 그 안의 문서에도
-되쓸 핸들이 생겨 "열기로 연 것은 덮어쓴다"가 폴더에서도 성립한다. 자원만 붙이러 가는
-길(폴더 연결)은 `read` 로 남긴다 — 필요 없는 권한을 묻지 않는다.
-드롭으로 받은 폴더는 옛 API 라 권한을 주지 않으므로 같은 폴더라도 사본으로 간다.
-
-**제약** 원본 덮어쓰기는 Chromium 계열에서만 된다. Firefox·Safari는 다운로드 폴백이라
-"열었던 파일에 그대로 저장"이 안 된다. **Chromium 우선**으로 간다.
-zip 은 어느 브라우저에서도 덮어쓸 수 없다 — 압축을 풀어 봐야 메모리 안의 바이트라
-되쓸 자리가 없다.
-
-**결과** 프리뷰 iframe에 `allow-scripts allow-same-origin`을 준다.
-샌드박스로서는 무력한 조합이지만, 대상이 사용자 자신의 로컬 파일이고 서버가 없으므로 감수한다.
-이 전제는 대원칙 5에 묶여 있다 — 서버가 생기면 이 결정부터 뒤집어야 한다.
+**Cost** Undo stack, paste sanitization, and IME handling must be built by hand. Accepted.
 
 ---
 
-### ADR-009 · 외부 자원은 프리뷰에서만 blob URL 로 바꿔 붙인다
+### ADR-005 · Editability decided by source-vs-live comparison
 
-**결정** 옆 파일을 참조하는 문서는 폴더·zip 으로 자원을 함께 받아 `blob:` URL 을 만들고,
-**프리뷰 문서 안의 상대 경로만** 바꾼다. 원본 문자열과 패치 경로는 그대로다.
+**Decision** Right after the iframe renders, compare each marked block's live `textContent` against its source text.
+On mismatch, **auto-lock** that block.
 
-**이유** `srcdoc` 프리뷰의 기준 URL 은 이 앱이라 상대 경로가 앱 폴더에서 404 로 끝난다.
-`<base href>` 로는 못 고친다 — 원본은 `file://` 이고 `https://` 페이지는 그것을 읽지 못한다.
-파일 하나를 열면 권한도 그 하나뿐이라, 형제 파일을 보려면 사용자가 폴더를 열어 주거나
-zip 을 통째로 줘야 한다. 곧 iframe 이 아니라 **권한**의 문제이고, 해법도 권한 쪽에 있다.
+**Why** Statically figuring out which text a script generates or mutates has no general solution.
+But "does the result differ from the source" is answered definitively by a single render.
+The measured artifact's `#cnt` and 40 `.pg` elements were filtered out automatically by this rule.
 
-**제약** 치환은 마커 주입과 **같은 자리**에서 한다. 둘 다 원본 offset 기준이라
-따로 적용하면 앞선 삽입이 뒤쪽 offset 을 밀어 엉뚱한 곳을 자른다. 그래서 편집 목록을
-한데 모아 내림차순으로 한 번에 적용한다 (`core/edits.ts`, INV-4 와 같은 규칙).
-
-blob URL 에는 디렉터리가 없다. 스타일시트를 그대로 붙이면 그 안의 `url(글꼴)` 이
-기준을 잃어 깨지므로, CSS 텍스트의 `url()` 도 그 파일의 위치를 기준으로 다시 푼다.
-
-**결과** 저장본에는 `blob:` 이 한 글자도 들어가지 않는다. 자원을 못 붙인 상태에서도
-편집과 저장은 정확하다 — 화면이 깨져 보이는 것과 diff 의 정확성은 서로 무관하다.
-
-### ADR-008 · 초기 번들에 파서를 싣지 않는다
-
-**결정** parse5(+엔티티 표)와 프리뷰 조립기를 `store/editor.ts` 가 **파일을 열 때**
-동적으로 불러온다. vendor 청크는 react / radix / 앱 코드로 쪼갠다.
-
-**이유** 첫 화면은 드롭 영역과 툴바뿐이다. 파일을 열기 전까지 HTML 파서는 한 줄도
-쓰이지 않는데, 한 청크에 묶어두면 초기 로드가 파서를 기다린다. 실측으로 초기 청크가
-**502kB → 336kB (gzip 158 → 109kB)** 로 줄고, 파서 163kB 는 파일을 여는 순간 받는다.
-
-청크 경계는 **바뀌는 주기**로 잡는다. 앱 코드를 고쳐 배포해도 react·radix 청크의
-해시는 그대로라 사용자는 60kB 만 다시 받는다.
-
-**제약** 동적 import 는 실패할 수 있다. `load()` 호출은 전부 `try` 안에 있고
-`finally` 에서 `busy` 를 내린다 — 밖에 두면 청크를 못 받았을 때 화면이 잠긴 채 굳는다.
-`core/patch.ts` 는 0.9kB 라 나눌 이유가 없어 정적으로 둔다. `core/verify.ts` 를
-나눠 봐도 0.16kB 뿐이라 두지 않는다 (측정 후 되돌림).
-
-**결과** `parseBlocks` 는 여전히 동기 순수 함수다. 비동기가 된 것은 스토어의 `load()`
-하나이고, `core/` 는 코드 분할을 모른다 (INV-6).
+**Effect** Safe even on artifacts never seen before. No script comprehension needed to avoid a wrong edit (core principle 3).
 
 ---
 
-### ADR-010 · 문서 갈아 끼우기는 예약으로만 한다
+### ADR-007 · The agent is injected at the top of the document and intercepts in the bubble phase
 
-**결정** 문서를 바꾸려는 모든 흐름(파일 열기·드롭·폴더 열기·묶음 갈아타기·폴더
-연결·OS 열기)은 `store/replacement.ts` 의 **예약**을 먼저 받고, 이후의 모든 단계에서
-자기 예약이 아직 최신인지 확인한다. 화면 잠금(`replacing`)과 설치 세대(`installed`,
-늦게 끝난 비동기의 claim 기준)는 이 모듈만이 바꾼다.
+**Decision** Inject the preview agent as an inline script at the very start of `<head>`,
+and stop events in the **bubble phase** with `stopImmediatePropagation()`.
 
-**이유** 이전까지 경합 방지는 `busy` · `replacing` · `doc`(claim) · `replaceGen` 네
-표시로 흩어져 있었고, 진입점 일곱이 제각기 조합해 썼다. 표시를 조합하는 자리마다
-틈이 났다 — 드롭한 폴더를 훑는 동안, 물음에 저장으로 답하고 돌아온 뒤, 저장이
-끝나기를 기다리는 사이, 앞선 저장이 끝나며 잠금을 푸는 순간. 표시를 하나 더 늘려
-막으면 다음 조합에서 같은 자리에 또 난다. 그래서 "문서를 바꾸는 일"을 하나의
-개념으로 세우고, 이기는 규칙과 잠그는 규칙을 그 개념에 붙였다 (spec §5 · 갈아
-끼우기 예약).
+**Why** The capture phase looks intuitive but is wrong. Cut propagation during capture and the event
+**never reaches** the target element, so `contenteditable` caret placement does not happen.
+You click, and no cursor appears.
 
-**규칙**
+In the bubble phase the event reaches the target first, the caret is placed normally, and only then does it
+rise to the document. Listeners on the same phase and target run in **registration order**, so as long as
+we register before the artifact does, our handler runs first and `stopImmediatePropagation()` blocks
+the artifact's handler.
 
-- 예약은 사용자 행동의 순간에 — 오래 걸리는 일(훑기·대화상자·묻기·저장) **전에**
-- 오래 걸리는 단계는 예약의 `guarded` 를 지난다 — 기다린 뒤 밀려났으면 `Superseded`
-  를 던지고, 진입점의 try/finally 가 조용한 물러남으로 받는다. 단계마다 확인을
-  손으로 적는 방식은 아홉 번 같은 자리(await 뒤의 확인 누락)를 틀렸다 — 확인은
-  기억이 아니라 통로가 강제한다
-- 겹치면 마지막 예약이 이긴다. 밀려난 예약은 제가 만든 것만 정리하고 물러난다 —
-  설치도, 알림도, 잠금 해제도 하지 않는다
-- 잠금은 물음에 답한 순간(`engage`)부터 설치·실패까지, `replacing` 하나에서 화면
-  전체(프리뷰·제목 칸·변경 목록·툴바)로 파생된다
-- 설치 세대(`installed`)가 옛 `doc` 을 대신한다 — 뒤늦게 끝난 저장의 claim 도
-  같은 세대를 본다
-- 저장 중 표시(`saving`)는 저장의 것이다 — 예약과 서로를 건드리지 않는다
+Injection position is therefore a correctness condition — artifact scripts sit at the end of `<body>`,
+while the agent is parsed at the top of `<head>` and registers its listeners immediately.
 
-**결과** `busy` 는 상태에서 사라지고 화면은 `saving ∨ replacing` 을 파생해 쓴다.
-"문서를 바꾸는 동안 무엇이 잠기고 누가 이기는가"는 `replacement.ts` 한 파일에서
-읽을 수 있다.
+**Known limitation** Our listeners sit on `document`, so `stopImmediatePropagation()` only outruns
+handlers registered on `document` and `window`. If the artifact hangs a handler on an intermediate
+ancestor (a slide container, a card wrapper), that ancestor comes earlier on the bubble path and runs
+before us. In such artifacts, clicking text opens the edit and triggers the artifact behavior together.
+
+Moving to the capture phase would block it, but loses caret placement. Global handlers are the common
+case — the measured artifact included — so the current choice stands.
+
+**Consequence** The agent must be a **self-contained function**: no imports, no references to outer
+scope. The host injects it by stringifying with `previewAgent.toString()`.
+This constraint structurally enforces "preview shares no code with ui" (rules §4).
 
 ---
 
-### ADR-011 · 프리뷰 자원 치환은 양방향 경계 하나로 지킨다
+### ADR-006 · No backend, File System Access API
 
-**결정** 자원 치환(ADR-009)의 짝 목록(`AssetSwap[]` — 원문 표기 ↔ 프리뷰 표기)을
-`core/assets.ts` 의 `assetSwaps()` **한 곳**에서 만들고, 프리뷰 문서 조립·되돌리기로
-나가는 원본 조각·프리뷰에서 돌아오는 편집이 전부 이 목록에서 파생된 경계
-(`assetBoundary`)를 지난다.
+**Decision** No server. Saving writes **directly to the original file** via the File System Access API,
+with a download fallback for unsupported browsers.
 
-- **나가는 길** `toPreview(text, offset)` — 원본 offset 이 조각 범위 안에 드는 짝만
-  골라 원문 표기를 프리뷰 표기로 치환한다 (되돌리기의 `sourceInner`)
-- **들어오는 길** `fromPreview(html)` — 프리뷰 표기를 원문 표기로 되돌린다.
-  브라우저가 innerHTML 직렬화로 갈아 끼운 표기(`&`→`&amp;` 등 최소 인코딩)의 짝도
-  함께 들어, 어느 표기로 돌아와도 잡는다. 직렬화 짝의 원문 쪽도 원본 슬라이스에서
-  나온다 — 디코딩된 값을 재인코딩하면 표준이 아닌 원문 엔티티(`&#32;` 등)가 최소
-  표기로 갈려 손대지 않은 속성의 diff 가 생긴다. 직렬화 문맥(큰따옴표 속성)에서
-  값을 조기 종료시키는 `"` 만 `&quot;` 로 바꾼다
+**Why** This is a tool for fixing your own artifacts. The moment a server exists, we are hosting untrusted HTML,
+and stored XSS, origin isolation, and authentication all follow. Removing it is cheaper and safer.
 
-**이유** 마커는 블록이 겹치지 않아 블록 안으로 들어올 일이 없지만, 자원 치환은
-블록 **안**에서도 일어난다 (`<p>` 속의 `<img src>`). 나가는 길에만 있는 변환은
-들어오는 길(편집 확정)로 blob URL 이 패치에 실리는 것을 못 막고, 들어오는 길에만
-있는 변환은 되돌리기가 프리뷰의 치환을 푸는 것을 못 막는다. 두 방향의 표기가 서로
-다른 자리에서 계산되면 반드시 어긋나는 짝이 생기므로, 목록을 한 곳에서 만들고
-양쪽이 그것만 쓴다.
+**Deployment** Hosted on GitHub Pages (static). HTTPS satisfies the secure-context requirement,
+so overwrite saving just works. Installed as a PWA, the whole app is precached and runs offline,
+and the manifest's `file_handlers` lets the OS open HTML with it directly. In that path `launchQueue`
+delivers a `FileSystemFileHandle`, so overwriting works without any dialog.
 
-**제약** 치환했다 되돌린 결과는 원본과 **바이트 단위로 같아야** 한다 — 되돌릴 값은
-디코딩·재인코딩한 값이 아니라 **원본 문자열의 그 자리 슬라이스**다. 같은 프리뷰
-표기에 원문 표기가 여럿이면(`logo.png` 와 `./logo.png`) 먼저 나온 표기로 되돌린다 —
-어느 쪽이든 같은 파일을 가리킨다. blob URL 은 탭마다 새로 만든 무작위 이름이라
-문서에 원래 있던 텍스트와 충돌하지 않고, 원래부터 `blob:` 로 적힌 참조는 외부
-참조라 치환 목록에 들지 않으므로 어느 방향으로도 건드리지 않는다.
+**Folders** Opening a folder requests edit permission (`readwrite`) up front. That is what produces a
+writable handle for the documents inside, so "what you opened via Open, you can overwrite" holds for
+folders too. The path that only attaches resources (Link a folder) stays at `read` — do not ask for
+permissions you do not need. A dropped folder comes through the old API, which grants no permission,
+so even the same folder goes the copy route.
 
-**결과** `core/` 는 여전히 문자열 in/out 이다 (INV-6). 스토어는 편집을 받는 자리
-(`onEdit`)와 되돌림을 내보내는 자리 두 군데에서만 경계를 부른다.
+**Constraint** Overwriting the original works only in Chromium-based browsers. Firefox and Safari get
+the download fallback, so "save straight back to the file you opened" is unavailable there.
+We go **Chromium-first**. A zip can be overwritten in no browser — once unpacked it is bytes in
+memory, with no place to write back to.
+
+**Consequence** The preview iframe gets `allow-scripts allow-same-origin`.
+As a sandbox that combination is toothless, but the target is the user's own local file and there is
+no server, so we accept it. This premise is tied to core principle 5 — if a server ever appears,
+this decision is the first to revisit.
+
+---
+
+### ADR-009 · External resources are swapped to blob URLs in the preview only
+
+**Decision** For documents that reference neighboring files, take the resources in via folder or zip,
+make `blob:` URLs, and rewrite **only the relative paths inside the preview document**.
+The original string and the patch path stay untouched.
+
+**Why** The `srcdoc` preview's base URL is this app, so relative paths 404 against the app's folder.
+`<base href>` cannot fix it — the originals are `file://` and an `https://` page cannot read them.
+Opening one file grants permission for that one file only, so seeing siblings requires the user to
+open a folder or hand over a whole zip. In other words this is a **permissions** problem, not an
+iframe problem, and the fix lives on the permissions side.
+
+**Constraint** The swap happens **in the same place** as marker injection. Both are keyed to original
+offsets, so applying them separately would let earlier insertions shift later offsets and cut the
+wrong places. Hence all edits are gathered into one list and applied in a single descending pass
+(`core/edits.ts`, the same rule as INV-4).
+
+Blob URLs have no directories. Attach a stylesheet as-is and the `url(font)` references inside it
+lose their base and break, so `url()` inside CSS text is re-resolved relative to that file's location.
+
+**Consequence** Not one character of `blob:` enters the saved output. Even with resources unattached,
+editing and saving stay exact — how broken the screen looks and how precise the diff is are unrelated.
+
+### ADR-008 · The parser ships outside the initial bundle
+
+**Decision** parse5 (plus its entity table) and the preview assembler are loaded dynamically by
+`store/editor.ts` **when a file is opened**. Vendor chunks are split into react / radix / app code.
+
+**Why** The first screen is a drop zone and a toolbar. Until a file is opened, not one line of the
+HTML parser runs — but bundled into one chunk, initial load waits on the parser. Measured, the
+initial chunk dropped **502kB → 336kB (gzip 158 → 109kB)**, and the parser's 163kB downloads the
+moment a file is opened.
+
+Chunk boundaries follow **rate of change**. Ship a fix to app code and the react/radix chunk hashes
+stay put, so users re-download only 60kB.
+
+**Constraint** Dynamic import can fail. Every `load()` call sits inside a `try`, with `busy` lowered
+in `finally` — outside it, a failed chunk fetch leaves the screen locked solid.
+`core/patch.ts` is 0.9kB — no reason to split, so it stays static. Splitting `core/verify.ts` was
+measured at 0.16kB and reverted.
+
+**Consequence** `parseBlocks` remains a synchronous pure function. The only thing that went async is
+the store's `load()`, and `core/` knows nothing about code splitting (INV-6).
+
+---
+
+### ADR-010 · Document replacement happens only through reservations
+
+**Decision** Every flow that changes the document (open file, drop, open folder, switch within a
+bundle, link a folder, OS open) first takes a **reservation** from `store/replacement.ts`, and at
+every later step checks that its reservation is still the newest. The screen lock (`replacing`) and
+the install generation (`installed`, the claim baseline for late-finishing async work) are changed by
+this module alone.
+
+**Why** Race prevention used to be scattered across four flags — `busy` · `replacing` · `doc` (claim)
+· `replaceGen` — combined ad hoc by seven entry points. Every place that combined flags leaked:
+while a dropped folder was being scanned, after answering the prompt with save, while waiting for a
+save to finish, at the instant an earlier save lifted the lock. Adding one more flag plugs one hole
+and opens the same hole in the next combination. So "changing the document" was made a single
+concept, and the winner rule and the lock rule were attached to that concept (spec §5 · replacement
+reservations).
+
+**Rules**
+
+- Reserve at the moment of user action — **before** anything slow (scanning, dialogs, prompts, saves)
+- Slow steps pass through the reservation's `guarded` — after waiting, if superseded, it throws
+  `Superseded`, which the entry point's try/finally receives as a quiet retreat. Writing the check by
+  hand at each step got the same spot wrong nine times (a missed check after an await) — the check is
+  enforced by the pipeline, not by memory
+- When reservations overlap, the last one wins. A superseded flow cleans up only what it created and
+  steps aside — no installing, no notices, no unlocking
+- The lock runs from the moment the prompt is answered (`engage`) until install or failure, and the
+  whole screen (preview, title field, change list, toolbar) derives from the single `replacing` flag
+- The install generation (`installed`) replaces the old `doc` — a save that finishes late checks its
+  claim against the same generation
+- The saving indicator (`saving`) belongs to the save — it and the reservation never touch each other
+
+**Consequence** `busy` is gone from the state; the screen derives `saving ∨ replacing`.
+"What locks while the document is changing, and who wins" reads from the single file `replacement.ts`.
+
+---
+
+### ADR-011 · Preview resource swaps are guarded by one two-way boundary
+
+**Decision** The swap pair list for resource substitution (ADR-009) — `AssetSwap[]`, source spelling
+↔ preview spelling — is built in **one place**, `assetSwaps()` in `core/assets.ts`, and everything
+crosses a boundary derived from that list (`assetBoundary`): preview document assembly, original
+fragments going out for revert, and edits coming back from the preview.
+
+- **Outbound** `toPreview(text, offset)` — picks only the pairs whose fragment range contains the
+  original offset and swaps source spelling to preview spelling (the `sourceInner` used by revert)
+- **Inbound** `fromPreview(html)` — turns preview spellings back into source spellings. It also
+  carries the pairs for spellings the browser rewrote during innerHTML serialization (`&`→`&amp;` and
+  other minimal encodings), so whichever spelling comes back is caught. Even the serialized pair's
+  source side comes from the original slice — re-encoding a decoded value would collapse
+  non-canonical source entities (`&#32;` and the like) into minimal spellings, creating diffs in
+  attributes never touched. Only `"`, which would end the value early in the serialized context
+  (double-quoted attributes), is turned into `&quot;`
+
+**Why** Markers never land inside a block — blocks do not overlap — but resource swaps do happen
+**inside** blocks (`<img src>` within a `<p>`). A transform that exists only outbound cannot stop a
+blob URL from riding an inbound edit (commit) into a patch, and a transform that exists only inbound
+cannot stop a revert from undoing the preview's swaps. If the two directions compute their spellings
+in different places, mismatched pairs are inevitable — so the list is built once and both sides use
+only it.
+
+**Constraint** Swapping and then unswapping must reproduce the original **byte for byte** — the value
+to restore is **the original string's slice at that position**, not a decode/re-encode of it. When
+one preview spelling maps to several source spellings (`logo.png` and `./logo.png`), restore to the
+first-seen spelling — either way it names the same file. Blob URLs are random names minted per tab,
+so they cannot collide with text the document already had, and references originally written as
+`blob:` are external references that never enter the swap list — untouched in either direction.
+
+**Consequence** `core/` remains strings in, strings out (INV-6). The store calls the boundary in
+exactly two places: where edits arrive (`onEdit`) and where reverts go out.
