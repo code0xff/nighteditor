@@ -23,6 +23,7 @@ import {
   claimDocument,
   refuseWhileReplacing,
   reserveReplacement,
+  Superseded,
   useReplacement,
   type Replacement,
 } from './replacement';
@@ -607,12 +608,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
       // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
-      const picked = await pickFile();
+      // 열려 있는 사이에도 더 새 흐름(드롭·OS 열기)은 시작된다 — guarded 가 돌아온
+      // 순간 밀려났으면 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      const picked = await mine.guarded(pickFile());
       if (!picked) return;
-      // 대화상자가 열려 있는 사이에도 더 새 흐름(드롭·OS 열기)은 시작된다. 밀려난
-      // 채 물으면 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면 밀려난
-      // 흐름이 save() 를 불러 사용자의 마지막 선택이 사라진다 — 묻기 전에 물러난다 (spec §5).
-      if (!mine.current()) return;
       // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
       // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
@@ -654,11 +653,11 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 답한 순간부터 잠근다 — 읽기가 끝나기를 기다리는 사이의 편집도 새 상태가
       // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
       mine.engage();
-      const opened = await reading;
+      // 읽기를 기다리는 사이 밀려났으면 guarded 가 Superseded 로 물러난다 —
+      // 설치도 알림도 남(최신 흐름)의 몫이다 (spec §5).
+      const opened = await mine.guarded(reading);
       // 읽다 실패한 것은 위에서 이미 알렸다. 여기서 또 알리면 두 번 뜬다.
       if (opened === readFailed) return;
-      // 읽기를 기다리는 사이도 마찬가지다 — 밀려났으면 설치도 알림도 남의 몫이다.
-      if (!mine.current()) return;
       set({ notice: null });
       await replace(get, set, mine, load(opened));
     } catch (e) {
@@ -690,16 +689,20 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 답한 순간부터 잠근다 — 훑기가 끝나기를 기다리는 사이의 편집도 새 상태가
       // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
       mine.engage();
-      const read = await scanned;
+      // 훑기를 기다리는 사이 밀려났으면 guarded 가 Superseded 로 물러난다 —
+      // 설치도 알림도 남(최신 흐름)의 몫이다 (spec §5).
+      const read = await mine.guarded(scanned);
       // 훑다 실패한 것은 위에서 이미 알렸다. 파일 열기로 넘어가지 않는다 —
       // 놓은 것이 폴더였을 수 있고, 폴더를 문서로 여는 것은 오류를 덧씌우는 일이다.
       if (read === scanFailed) return;
-      // 훑기를 기다리는 사이도 마찬가지다 — 밀려났으면 설치도 알림도 남의 몫이다.
-      if (!mine.current()) return;
       // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
       // 같은 예약을 들려 보낸다 — 새로 예약하면 이 흐름이 저 자신을 밀어내는
       // 모양이 되고, 그 사이의 틈은 주석이 아니라 예약이 막아야 한다 (ADR-010).
       if (!(await get().loadFolder(read, mine)) && file) await get().loadDropped(file, mine);
+    } catch (e) {
+      // 밀려난 흐름의 표식은 조용한 물러남이다 (spec §5) — 여기서 받지 않으면 진입점
+      // 밖(unhandled rejection)으로 샌다. 다른 실패는 지금까지처럼 부른 쪽으로 흐른다.
+      if (!(e instanceof Superseded)) throw e;
     } finally {
       mine.release();
     }
@@ -925,12 +928,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
     let read: FolderRead | null = null;
     try {
-      // 파일 열기와 같은 이유로 대화상자가 먼저다.
-      read = await pickFolder(null, 'readwrite');
+      // 파일 열기와 같은 이유로 대화상자가 먼저다. 열려 있는 사이 밀려났으면
+      // guarded 가 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      read = await mine.guarded(pickFolder(null, 'readwrite'));
       if (!read) return;
-      // 대화상자에서 돌아오면 묻기 전에 최신인지부터 — 밀려난 물음은 최신 흐름의
-      // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다 (spec §5).
-      if (!mine.current()) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;
@@ -963,12 +964,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 예약은 사용자 행동의 순간에 — 대화상자·훑기·물음을 기다리기 전에 (spec §5).
     const mine = reserveReplacement();
     try {
-      // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다.
-      const read = await pickFolder(file.handle);
+      // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다. 열려 있는
+      // 사이 밀려났으면 guarded 가 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      const read = await mine.guarded(pickFolder(file.handle));
       if (!read) return;
-      // 대화상자에서 돌아오면 묻기 전에 최신인지부터 — 밀려난 물음은 최신 흐름의
-      // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다 (spec §5).
-      if (!mine.current()) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }, mine))) return;
       // 대화상자·물음·저장을 기다리는 사이 더 새 흐름이 시작됐으면 물러난다.
       if (!mine.current()) return;

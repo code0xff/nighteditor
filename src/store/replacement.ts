@@ -9,10 +9,16 @@
  * 걸리는 일을 시작하기 전에. 늦게 받으면, 먼저 시작했지만 늦게 준비를 마친 흐름이
  * 더 새 예약을 받아 사용자의 마지막 선택을 덮는다.
  *
- * 겹치면 마지막 예약이 이긴다 — 그것이 사용자의 마지막 선택이다. 흐름은 오래
- * 걸리는 단계를 마칠 때마다 `current()` 로 자기 예약이 아직 최신인지 확인하고,
- * 밀려났으면 **제가 만든 것만 정리하고 물러난다** — 설치도, 알림도, 잠금 해제도
- * 하지 않는다. 그건 전부 최신 예약의 몫이다.
+ * 겹치면 마지막 예약이 이긴다 — 그것이 사용자의 마지막 선택이다. 밀려난 흐름은
+ * **제가 만든 것만 정리하고 물러난다** — 설치도, 알림도, 잠금 해제도 하지 않는다.
+ * 그건 전부 최신 예약의 몫이다.
+ *
+ * 긴 단계(대화상자·훑기·묻기·저장·읽기)는 `guarded` 를 지난다. 그래야 확인을 잊을
+ * 수 없다 — 단계를 마칠 때마다 `current()` 를 손으로 적는 방식은 같은 자리(await
+ * 뒤의 확인 누락)를 아홉 번 틀렸다. `guarded` 는 기다린 뒤 밀려났으면 `Superseded`
+ * 를 던지고, 진입점의 try/finally 가 그것을 조용한 물러남으로 받는다 — 밀려난
+ * 예약의 `current()` 는 다시 참이 되지 않으므로, `current()` 로 거른 알림 경로에는
+ * 닿지 않는다.
  *
  * ## 무엇이 잠기는가 — replacing 하나
  *
@@ -52,9 +58,28 @@ export const useReplacement = create<ReplacementState>(() => ({
 /** 마지막으로 받은 예약 번호. 화면이 볼 일이 없어 상태 밖에 둔다 */
 let reserved = 0;
 
+/**
+ * 밀려난 흐름의 표식 — `guarded` 가 던지고, 진입점의 try/finally 가 조용한
+ * 물러남으로 받는다. 알림(notice·토스트)으로 바꾸지 않는다 — 밀려난 흐름의 말은
+ * 남(최신 흐름)이 세운 화면에 대한 말이 된다 (spec §5 · 갈아 끼우기 예약).
+ */
+export class Superseded extends Error {
+  constructor() {
+    super('superseded');
+    this.name = 'Superseded';
+  }
+}
+
 export interface Replacement {
   /** 이 예약이 아직 최신인가 — 오래 걸리는 단계를 마칠 때마다 이것 하나로 판정한다 */
   current(): boolean;
+  /**
+   * 긴 단계는 이것을 지난다 — 기다린 뒤 이 예약이 밀려났으면 `Superseded` 를
+   * 던진다. 확인을 단계마다 손으로 적으면 하나쯤은 반드시 잊는다 — 잊을 수 없는
+   * 자리(통로)에서 강제한다. 원래 실패는 그대로 흘려보낸다 — 표식으로 바꾸면
+   * 취소로 끝난 흐름의 실패 알림(대원칙 3)까지 사라진다.
+   */
+  guarded<T>(p: Promise<T>): Promise<T>;
   /** 갈아 끼우기 확정(물음까지 통과) — 화면을 잠근다. 밀려난 흐름이 불러도 아무 일 없다 */
   engage(): void;
   /** 새 상태가 설치됐다 — 세대를 올려 이전 문서 몫의 늦은 비동기를 끊는다 */
@@ -78,6 +103,11 @@ export function reserveReplacement(): Replacement {
   const current = (): boolean => gen === reserved;
   return {
     current,
+    guarded: async (p) => {
+      const value = await p;
+      if (!current()) throw new Superseded();
+      return value;
+    },
     engage: () => {
       if (current()) useReplacement.setState({ replacing: true });
     },

@@ -11,7 +11,7 @@
 import { create } from 'zustand';
 import type { Notice } from '@/lib/messages';
 import { useEditor } from './editor';
-import { refuseWhileReplacing, type Replacement } from './replacement';
+import { refuseWhileReplacing, Superseded, type Replacement } from './replacement';
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
@@ -95,32 +95,40 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
  *   홀로 도는 저장과 다르다 — 그쪽 편집은 살아남으므로 잠그지 않는다.
  */
 export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolean> {
-  // 프리뷰에서 편집 중이던 블록의 확정(focusout)은 postMessage 로 떠 있을 뿐이라
-  // 아직 도착 전일 수 있다 — 그대로 unsaved 를 읽으면 묻지 않고 갈아 끼우고, 늦게
-  // 온 확정은 프리뷰가 내려가며 조용히 사라진다 (대원칙 3). 판정 전에 확정을 청해
-  // 그 답까지 기다린다. 이미 unsaved 여도 청한다 — "저장하고 계속" 이 열려 있던
-  // 편집까지 담아야 하기 때문이다 (spec §4).
-  await flushPreviewEdits();
-  // 확정 답(또는 한도)을 기다리는 사이에도 더 새 흐름은 예약한다 — 밀려난 채 물으면
-  // 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를
-  // 불러 사용자의 마지막 선택이 사라진다 (spec §5 · 갈아 끼우기 예약). 묻기 전에 물러난다.
-  if (mine && !mine.current()) return false;
-  const { unsaved, save } = useEditor.getState();
-  // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
-  if (!unsaved) return true;
+  // 예약이 딸린 흐름의 긴 단계는 guarded 를 지난다 (spec §5 · 갈아 끼우기 예약) —
+  // 기다리는 사이에도 더 새 흐름은 예약하고, 밀려난 채 물으면 이 물음이 최신 흐름의
+  // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 불러 사용자의 마지막
+  // 선택이 사라진다. 예약 없이 부르면 판정할 것이 없어 그대로 기다린다.
+  const pass = <T>(p: Promise<T>): Promise<T> => (mine ? mine.guarded(p) : p);
+  try {
+    // 프리뷰에서 편집 중이던 블록의 확정(focusout)은 postMessage 로 떠 있을 뿐이라
+    // 아직 도착 전일 수 있다 — 그대로 unsaved 를 읽으면 묻지 않고 갈아 끼우고, 늦게
+    // 온 확정은 프리뷰가 내려가며 조용히 사라진다 (대원칙 3). 판정 전에 확정을 청해
+    // 그 답까지 기다린다. 이미 unsaved 여도 청한다 — "저장하고 계속" 이 열려 있던
+    // 편집까지 담아야 하기 때문이다 (spec §4).
+    await pass(flushPreviewEdits());
+    const { unsaved, save } = useEditor.getState();
+    // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
+    if (!unsaved) return true;
 
-  const choice = await useUnsaved.getState().ask(why);
-  if (choice === 'cancel') return false;
-  if (choice === 'save') {
-    mine?.engage();
-    // 물음이 떠 있는 사이에도 상태는 움직인다 — 단축키로 부른 저장이 그 사이 끝났거나,
-    // 마지막 편집을 되돌려 이미 파일과 같아졌을 수 있다. 그때 save() 는 "쓸 것 없음"
-    // 으로 false 를 돌려주는데, 그것을 실패로 읽으면 청한 저장이 이미 충족됐는데도
-    // 하려던 일이 조용히 취소된다. 깨끗하면 저장된 것으로 치고 계속한다 (spec §4).
-    if (!useEditor.getState().unsaved) return true;
-    return save();
+    const choice = await useUnsaved.getState().ask(why);
+    if (choice === 'cancel') return false;
+    if (choice === 'save') {
+      mine?.engage();
+      // 물음이 떠 있는 사이에도 상태는 움직인다 — 단축키로 부른 저장이 그 사이 끝났거나,
+      // 마지막 편집을 되돌려 이미 파일과 같아졌을 수 있다. 그때 save() 는 "쓸 것 없음"
+      // 으로 false 를 돌려주는데, 그것을 실패로 읽으면 청한 저장이 이미 충족됐는데도
+      // 하려던 일이 조용히 취소된다. 깨끗하면 저장된 것으로 치고 계속한다 (spec §4).
+      if (!useEditor.getState().unsaved) return true;
+      return await save();
+    }
+    return true;
+  } catch (e) {
+    // 이 함수의 답은 불리언이다 — 밀려남의 표식을 그대로 던지면 예약 없이 부르는
+    // 쪽까지 try 를 갖춰야 한다. 여기서 "계속하지 않는다" 로 접는다 (조용한 물러남).
+    if (e instanceof Superseded) return false;
+    throw e;
   }
-  return true;
 }
 
 /**
