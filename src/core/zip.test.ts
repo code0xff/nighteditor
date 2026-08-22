@@ -4,7 +4,7 @@ import { crc32 } from 'node:zlib';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readZip, ZipError } from './zip.js';
+import { crc32 as ourCrc32, readZip, ZipError } from './zip.js';
 import { fixtureBundle } from '../__fixtures__/load.js';
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
@@ -63,6 +63,14 @@ describe('readZip · 픽스처 회귀', () => {
 
   it('압축된 항목은 deflate 로 표시된다', () => {
     expect(find('deck/index.html')?.method).toBe(8);
+  });
+
+  it('풀었을 때의 CRC 를 중앙 디렉터리에서 읽는다', () => {
+    // 크기만으로는 같은 크기로 깨진 바이트를 못 가린다 — 내용 검사는 이 값으로 한다.
+    const stored = find('deck/js/deck.js');
+    expect(stored?.method).toBe(0);
+    // 그대로 담긴 항목은 data 가 곧 풀린 바이트다. 기준은 node 의 crc32 다.
+    expect(stored?.crc).toBe(crc32(stored?.data ?? new Uint8Array()));
   });
 
   it('끝이 잘리면 이유를 들고 던진다', () => {
@@ -356,5 +364,16 @@ describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () =
     expect(() => readZip(zip)).toThrow(
       expect.objectContaining({ code: 'encrypted', params: { name: 'deck.html' } })
     );
+  });
+});
+
+describe('crc32 · 기준 구현과의 대조', () => {
+  it('IEEE CRC-32 와 같고, 조각으로 이어 재도 같다', () => {
+    // 압축 해제는 스트림 조각으로 나온다 — 이어 재는 seed 가 틀리면 멀쩡한 zip 이
+    // 전부 깨졌다며 거절된다. 기준은 node 의 crc32 다.
+    const bytes = fixtureBundle();
+    expect(ourCrc32(bytes)).toBe(crc32(bytes));
+    const mid = Math.floor(bytes.length / 3);
+    expect(ourCrc32(bytes.subarray(mid), ourCrc32(bytes.subarray(0, mid)))).toBe(crc32(bytes));
   });
 });

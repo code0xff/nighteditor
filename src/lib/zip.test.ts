@@ -124,3 +124,69 @@ describe('unzip · 조작된 크기 (spec §6)', () => {
     await expect(unzip(new Blob([forged as BlobPart]))).rejects.toMatchObject({ code: 'tooBig' });
   });
 });
+
+describe('unzip · 깨진 내용은 목차의 CRC 로 잡는다 (spec §6)', () => {
+  /** 목차에서 항목을 찾아 [로컬 헤더 위치, 압축된 크기, 목차의 CRC 칸 위치]를 돌려준다 */
+  function centralOf(bytes: Uint8Array, name: string): { localAt: number; compressed: number; crcAt: number } {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let eocd = -1;
+    for (let at = bytes.length - 22; at >= 0; at--) {
+      if (dv.getUint32(at, true) === 0x06054b50) {
+        eocd = at;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error('EOCD 가 없다');
+    const count = dv.getUint16(eocd + 10, true);
+    let at = dv.getUint32(eocd + 16, true);
+    const decoder = new TextDecoder();
+    for (let i = 0; i < count; i++) {
+      const nameLength = dv.getUint16(at + 28, true);
+      const extraLength = dv.getUint16(at + 30, true);
+      const commentLength = dv.getUint16(at + 32, true);
+      const entryName = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
+      if (entryName === name) {
+        return {
+          localAt: dv.getUint32(at + 42, true),
+          compressed: dv.getUint32(at + 20, true),
+          crcAt: at + 16,
+        };
+      }
+      at += 46 + nameLength + extraLength + commentLength;
+    }
+    throw new Error(`목차에 없다: ${name}`);
+  }
+
+  it('그대로 담긴 항목의 바이트가 한 개만 뒤집혀도 거부한다', async () => {
+    // 크기 검사는 이 경우를 절대 못 잡는다 — 뒤집힌 바이트도 크기는 그대로다.
+    const out = fixtureBundle().slice();
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    // deck/js/deck.js 는 그대로 담긴(method 0) 항목이다 — 로컬 헤더 뒤의 데이터를 뒤집는다.
+    const { localAt } = centralOf(out, 'deck/js/deck.js');
+    const dataAt = localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
+    out[dataAt] = (out[dataAt] as number) ^ 0xff;
+
+    await expect(unzip(new Blob([out as BlobPart]))).rejects.toMatchObject({
+      code: 'crcMismatch',
+      params: { name: 'deck/js/deck.js' },
+    });
+  });
+
+  it('압축된 항목도 실제로 풀린 바이트를 목차의 CRC 와 견준다', async () => {
+    // 목차의 CRC 를 바꿔치기하면 내용과 어긋난다 — 풀린 바이트로 재지 않으면 못 잡는다.
+    const out = fixtureBundle().slice();
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    const { crcAt } = centralOf(out, 'deck/index.html');
+    dv.setUint32(crcAt, dv.getUint32(crcAt, true) ^ 0xffffffff, true);
+
+    await expect(unzip(new Blob([out as BlobPart]))).rejects.toMatchObject({
+      code: 'crcMismatch',
+      params: { name: 'deck/index.html' },
+    });
+  });
+
+  it('멀쩡한 zip 은 그대로 통과한다', async () => {
+    const files = await unzip(zip());
+    expect(files.has('deck/index.html')).toBe(true);
+  });
+});

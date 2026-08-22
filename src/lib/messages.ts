@@ -124,6 +124,7 @@ const ko = {
   'zip.tooBig': '풀면 너무 커져요',
   'zip.unknownMethod': '처음 보는 압축 방식이에요 ({method} · {name})',
   'zip.sizeMismatch': '목차에 적힌 크기와 실제 크기가 달라요 ({name})',
+  'zip.crcMismatch': '내용이 목차의 검사값과 달라요 — 파일이 깨졌어요 ({name})',
 
   'theme.toLight': '밝은 테마로 바꾸기',
   'theme.toDark': '어두운 테마로 바꾸기',
@@ -235,6 +236,7 @@ const en: Record<MessageKey, string> = {
   'zip.tooBig': 'Inflates too large',
   'zip.unknownMethod': 'Unknown compression method ({method} · {name})',
   'zip.sizeMismatch': "The index size doesn't match the actual size ({name})",
+  'zip.crcMismatch': "The data doesn't match the index checksum — the file is corrupted ({name})",
 
   'theme.toLight': 'Switch to the light theme',
   'theme.toDark': 'Switch to the dark theme',
@@ -282,6 +284,7 @@ const ZIP_KEY: Record<ZipErrorCode, MessageKey> = {
   tooBig: 'zip.tooBig',
   unknownMethod: 'zip.unknownMethod',
   sizeMismatch: 'zip.sizeMismatch',
+  crcMismatch: 'zip.crcMismatch',
 };
 
 export function lockNotice(reason: LockReason): Notice {

@@ -20,7 +20,8 @@ export type ZipErrorCode =
   | 'tooManyFiles'
   | 'tooBig'
   | 'unknownMethod'
-  | 'sizeMismatch';
+  | 'sizeMismatch'
+  | 'crcMismatch';
 
 /**
  * zip 거부. `message` 는 개발자용 진단이고, 사용자에게 보이는 문장은
@@ -44,6 +45,8 @@ export interface ZipEntry {
   data: Uint8Array;
   /** 풀었을 때의 크기 */
   size: number;
+  /** 풀었을 때의 CRC-32 — 크기만으로는 같은 크기로 깨진 바이트를 못 가린다 */
+  crc: number;
 }
 
 const EOCD_SIGNATURE = 0x06054b50;
@@ -138,13 +141,23 @@ function decodeUtf8(bytes: Uint8Array, fatal: boolean): string | null {
   return out;
 }
 
-/** IEEE CRC-32 — Unicode Path 필드가 표준 이름과 같은 판인지 확인하는 데만 쓴다 */
-function crc32(bytes: Uint8Array): number {
-  let crc = ~0;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
+/** 바이트마다 비트 루프를 도는 대신 미리 계산해 두는 표 — 항목 내용(수십 MB)도 검사한다 */
+const CRC_TABLE = new Uint32Array(256);
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let bit = 0; bit < 8; bit++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  CRC_TABLE[n] = c >>> 0;
+}
+
+/**
+ * IEEE CRC-32. Unicode Path 필드의 검증과 항목 내용의 검사에 쓴다.
+ *
+ * `seed` 에 앞 조각의 결과를 넣으면 이어서 잰다 — 압축 해제는 스트림 조각으로
+ * 나오므로, 이어 재지 못하면 조각을 한 버퍼로 다시 모으는 복사가 생긴다.
+ */
+export function crc32(bytes: Uint8Array, seed = 0): number {
+  let crc = ~seed;
+  for (const byte of bytes) crc = (crc >>> 8) ^ (CRC_TABLE[(crc ^ byte) & 0xff] as number);
   return ~crc >>> 0;
 }
 
@@ -270,6 +283,7 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
     }
     const flags = dv.getUint16(at + 8, true);
     const method = dv.getUint16(at + 10, true);
+    const crc = dv.getUint32(at + 16, true);
     const compressed = dv.getUint32(at + 20, true);
     const size = dv.getUint32(at + 24, true);
     const nameLength = dv.getUint16(at + 28, true);
@@ -312,7 +326,7 @@ export function readZip(bytes: Uint8Array, maxFiles = Number.POSITIVE_INFINITY):
       throw new ZipError('dataTruncated', { name }, `data is cut off: ${name}`);
     }
 
-    entries.push({ name, method, size, data: bytes.subarray(dataAt, dataAt + compressed) });
+    entries.push({ name, method, size, crc, data: bytes.subarray(dataAt, dataAt + compressed) });
   }
   return entries;
 }
