@@ -1227,6 +1227,36 @@ describe('previewAgent · 크기 조절은 고른 범위로 가려낸다 (spec �
       'rgb(1, 2, 3)',
     ]);
   });
+
+  it('갈라도 앞자리의 주석은 남는다 — 사용자가 쓴 것이 사라지면 안 된다 (대원칙 1·2)', () => {
+    // 고른 범위 앞이 주석뿐이면 textContent 로만 재는 빈자리 판정이 host 를 지워,
+    // 고르지도 않은 주석이 저장본에서 사라진다.
+    document.execCommand = (() => true) as typeof document.execCommand;
+    mount(
+      `<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large"><!--메모-->가나다마</span></p>`
+    );
+    click(el(0)!);
+    const text = el(0)!.querySelector('span')!.lastChild!;
+    selectIn(text, 0, 3);
+
+    click(sizeButton('A-'));
+
+    expect(el(0)!.innerHTML).toContain('<!--메모-->');
+    expect(el(0)!.textContent).toBe('가나다마');
+  });
+
+  it('갈라도 뒷자리의 주석은 남는다', () => {
+    document.execCommand = (() => true) as typeof document.execCommand;
+    mount(`<p ${MARKER_ATTR}="0"><span style="font-size: xxx-large">가나다<!--끝--></span></p>`);
+    click(el(0)!);
+    const text = el(0)!.querySelector('span')!.firstChild!;
+    selectIn(text, 1, 3);
+
+    click(sizeButton('A-'));
+
+    expect(el(0)!.innerHTML).toContain('<!--끝-->');
+    expect(el(0)!.textContent).toBe('가나다');
+  });
 });
 
 describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', () => {

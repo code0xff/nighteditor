@@ -353,12 +353,19 @@ export function previewAgent(token = ''): () => void {
     const mid = shell(picked);
     mid.style.fontSize = times;
     host.parentNode?.insertBefore(mid, host.nextSibling);
-    // 글자도 요소도 없는 조각으로는 껍데기를 만들지 않는다 — 고치지 않은 구조에
-    // 빈 요소가 생겨 diff 가 사용자의 편집 범위를 넘는다 (대원칙 2).
-    if ((rest.textContent ?? '').length > 0 || rest.querySelector('*') !== null) {
-      mid.parentNode?.insertBefore(shell(rest), mid.nextSibling);
-    }
-    if ((host.textContent ?? '').length === 0 && host.querySelector('*') === null) host.remove();
+    // "빈 조각" 은 빈 텍스트 노드뿐인 조각이다 — textContent 와 요소만 보면 주석
+    // 같은 비텍스트 노드뿐인 조각이 빈 것으로 읽혀, 사용자가 고르지도 않은 주석이
+    // 저장본에서 사라진다 (대원칙 1·2).
+    const hollow = (node: Node): boolean => {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType !== Node.TEXT_NODE || (child.nodeValue ?? '').length > 0) return false;
+      }
+      return true;
+    };
+    // 빈 조각으로는 껍데기를 만들지 않는다 — 고치지 않은 구조에 빈 요소가 생겨
+    // diff 가 사용자의 편집 범위를 넘는다 (대원칙 2).
+    if (!hollow(rest)) mid.parentNode?.insertBefore(shell(rest), mid.nextSibling);
+    if (hollow(host)) host.remove();
 
     // 고친 자리를 다시 골라 둔다 — 막대가 따라오고, 잇단 명령이 같은 글자에 걸린다.
     const sel = getSelection();
