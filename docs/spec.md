@@ -377,8 +377,13 @@ lives:
 - the **title field**, at the head. Fitted into the toolbar it comes out around 20px
   wide, which is a field in name only. One instance either way, never two — its label
   points at an id, and two of those point at whichever came first
-- **language, theme, the source link, and download-a-copy**, at the foot. In the
-  toolbar they take about 140px
+- **the source link and download-a-copy**, at the foot
+
+**Language and theme stay in the toolbar at every width.** They are what the whole
+screen is written in and lit by, and they are looked for in the corner. Everything in
+the panel needs a document open to reach — which is exactly not the moment someone
+picks the language they read in. Below `sm` the toolbar's gaps tighten instead
+(`gap-1`), which is what buys them the room.
 
 Every toolbar item but the title field is `shrink-0`. Without that the row never
 reports an overflow at all — the controls quietly squash instead, and the 28px app

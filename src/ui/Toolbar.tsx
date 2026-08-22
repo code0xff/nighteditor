@@ -37,7 +37,7 @@ export function Toolbar() {
     // reports an overflow — the controls just squash, and a 28px app mark ends
     // up 19px wide and out of shape. Squashed icons are the harder thing to
     // notice, so the flexible element is the one that gives.
-    <header className="sticky top-0 z-10 flex h-12 items-center gap-1.5 border-b border-border bg-background/80 px-2 backdrop-blur sm:gap-3 sm:px-3">
+    <header className="sticky top-0 z-10 flex h-12 items-center gap-1 border-b border-border bg-background/80 px-2 backdrop-blur sm:gap-3 sm:px-3">
       <Brand />
 
       <OpenButton />
@@ -118,19 +118,15 @@ export function Toolbar() {
             <IconChangeList />
           </Button>
         )}
-        {/* Below `md` these leave the header for the foot of the change list
-            (SideControls). Kept here they take about 140px, and everything on
-            the left — the wordmark, the open buttons — squashes to make room:
-            a flex child shrinks below its width before the row overflows, so
-            the 28px app mark ends up 19px wide and out of shape. The header
-            is what you do to the document; the rest lives one press away. */}
-        {roomy && (
-          <>
-            <LangSelect />
-            <RepoLink />
-            <ThemeToggle />
-          </>
-        )}
+        {/* Language and theme stay at every width. They are what the whole
+            screen is written in and lit by, and they are looked for in the
+            corner — not somewhere a document has to be open to reach. The
+            source link goes to the foot of the change list below `md`
+            (SideControls); reading the source is not something you do
+            mid-edit on a phone. */}
+        <LangSelect />
+        {roomy && <RepoLink />}
+        <ThemeToggle />
       </div>
     </header>
   );

@@ -170,9 +170,9 @@ the toolbar gains a button that opens it. Press beside the panel to close it —
 pressing a change card also closes it, since the spot it takes you to is underneath.
 
 Under about 768px the panel holds more than the list. The toolbar keeps only what
-acts on the document — open, close, save — so the **title field** moves to the top of
-the panel, and **language, theme, the source link, and Download a copy** to the
-bottom of it.
+acts on the document — open, close, save — plus the language and theme buttons, so
+the **title field** moves to the top of the panel and **Download a copy** and the
+source link to the bottom of it.
 
 ## 5. Saving and getting the result
 
