@@ -856,6 +856,11 @@ export function previewAgent(token = ''): () => void {
   const scan = (): void => {
     const blocks: { id: number; text: string }[] = [];
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
+      // 다른 마커 안의 마커는 흉내 — 내용이지 블록이 아니다 (spec §3). 여기서
+      // snapshotMarkers 와 다른 기준을 쓰면 호스트의 대조가 같은 id 를 둘로 보고
+      // 멀쩡한 바깥 블록을 MARKER_CLASH 로 잠근다. 흉내가 아닌 같은 id 겹침
+      // (나란한 가짜)은 그대로 담아, 그 판정은 여전히 호스트(core)의 몫이다.
+      if (mimicked(el)) continue;
       blocks.push({ id: idOf(el), text: el.textContent ?? '' });
     }
     // 대조의 근거가 된 요소들을 지금 적어 둔다 — 호스트가 검사하는 것은 이 순간의

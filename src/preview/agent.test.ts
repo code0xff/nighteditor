@@ -587,6 +587,18 @@ describe('previewAgent · 렌더 후 대조 (ADR-005)', () => {
 
     expect(sent).toContainEqual({ type: 'ready', blocks: [{ id: 9, text: '원본' }] });
   });
+
+  it('블록 안의 흉내 표식은 보고에 싣지 않는다 — 내용이지 블록이 아니다 (spec §3)', async () => {
+    // snapshotMarkers 는 흉내를 거르는데 보고만 겹침째로 실으면, 호스트의 대조가
+    // 같은 id 를 둘로 보고 멀쩡한 바깥 블록을 MARKER_CLASH 로 잠근다.
+    mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="0">흉내</span></p>`);
+
+    window.dispatchEvent(new Event('load'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // 흉내의 글자는 바깥 블록의 내용으로서 함께 실린다.
+    expect(sent).toContainEqual({ type: 'ready', blocks: [{ id: 0, text: '본문 흉내' }] });
+  });
 });
 
 describe('previewAgent · 리뷰 회귀', () => {
