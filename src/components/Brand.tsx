@@ -26,7 +26,9 @@ export function Brand({
           <Icon className="h-4 w-4" />
         </span>
       )}
-      <span className="text-sm font-semibold tracking-tight">{name}</span>
+      {/* On a narrow screen the mark alone carries the identity. The name is the
+          first thing to go — everything beside it is something you act with. */}
+      <span className="hidden text-sm font-semibold tracking-tight sm:inline">{name}</span>
     </div>
   );
 }

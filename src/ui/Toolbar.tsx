@@ -33,14 +33,21 @@ export function Toolbar() {
   const titleValue = (title && patches.get(title.id)) ?? title?.sourceText ?? '';
 
   return (
-    <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-border bg-background/80 px-3 backdrop-blur">
+    // `min-w-0` on every shrinkable child, so nothing here can push the header
+    // wider than the window. An overflowing header does not merely look cramped:
+    // opening the language select scrolls the page sideways to bring the popup
+    // into view, and the whole document jumps with it.
+    <header className="sticky top-0 z-10 flex h-12 items-center gap-1.5 border-b border-border bg-background/80 px-2 backdrop-blur sm:gap-3 sm:px-3">
       <Brand />
 
       <OpenButton />
 
       {file && (
         <>
-          <span className="truncate font-mono text-xs text-muted-foreground">{file.name}</span>
+          {/* The name yields first when space runs out — the document is on screen anyway */}
+          <span className="hidden min-w-0 truncate font-mono text-xs text-muted-foreground md:inline">
+            {file.name}
+          </span>
           <DocSelect />
 
           {/* Changes the document, so it locks like opening does — unpressable while saving or replacing */}
@@ -55,14 +62,17 @@ export function Toolbar() {
             <IconCloseDoc />
           </Button>
 
+          {/* The title field absorbs whatever room is left. With one flexible element
+              the header cannot overflow at any width, however narrow the window gets. */}
           {title && (
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="doc-title" className="text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <Label htmlFor="doc-title" className="hidden text-muted-foreground sm:inline">
                 {t('toolbar.title')}
               </Label>
               <Input
                 id="doc-title"
-                className="h-8 w-56"
+                placeholder={t('toolbar.title')}
+                className="h-8 w-full min-w-0 sm:w-56 sm:flex-none"
                 value={titleValue}
                 // An edit made while replacing has nowhere to go once the new
                 // document stands. Lock the field instead of pretending to
@@ -86,9 +96,12 @@ export function Toolbar() {
         </>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-2">
+        {/* A whole sentence is the widest thing here. On a narrow screen the same
+            fact is still told — by the save button's wording and by the notice
+            after saving — so it goes first. */}
         {file && !file.handle && (
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="hidden truncate text-xs text-muted-foreground lg:inline">
             {t(canOverwrite() ? 'toolbar.droppedNoOverwrite' : 'toolbar.noOverwriteSupport')}
           </span>
         )}
@@ -113,7 +126,8 @@ export function Toolbar() {
           // would mean saving the previous document.
           <Button size="sm" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
-            {t('toolbar.save')} {patches.size > 0 && `(${patches.size})`}
+            <span className="hidden sm:inline">{t('toolbar.save')}</span>
+            {patches.size > 0 && `(${patches.size})`}
           </Button>
         )}
         <LangSelect />

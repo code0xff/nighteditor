@@ -37,7 +37,8 @@ export function OpenButton() {
         onClick={() => void openFile()}
       >
         <IconOpen />
-        {t('toolbar.openFile')}
+        {/* The label goes when space runs out; the icon and the tooltip carry it */}
+        <span className="hidden sm:inline">{t('toolbar.openFile')}</span>
       </Button>
 
       {/* In a browser that cannot open folders, don't leave a button that cannot be pressed */}
@@ -50,7 +51,7 @@ export function OpenButton() {
           onClick={() => void openFolder()}
         >
           <IconOpenFolder />
-          {t('toolbar.openFolder')}
+          <span className="hidden sm:inline">{t('toolbar.openFolder')}</span>
         </Button>
       )}
     </div>
