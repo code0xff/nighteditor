@@ -32,6 +32,8 @@ export function OpenButton() {
       <Button
         variant="outline"
         size="sm"
+        // Same 32px as the rest of the header row (Toolbar)
+        className="h-8"
         disabled={busy}
         title={t('toolbar.openFileHint')}
         onClick={() => void openFile()}
@@ -46,6 +48,7 @@ export function OpenButton() {
         <Button
           variant="outline"
           size="sm"
+          className="h-8"
           disabled={busy}
           title={t('toolbar.openFolderHint')}
           onClick={() => void openFolder()}

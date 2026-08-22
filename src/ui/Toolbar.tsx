@@ -99,7 +99,12 @@ export function Toolbar() {
           // Also lock while a save runs and while replacing (useEditorBusy) —
           // the former to avoid overlapping writes, the latter because it
           // would mean saving the previous document.
-          <Button size="sm" onClick={() => void save()} disabled={busy || !unsaved}>
+          // `h-8` because the row is 32px tall — that is what every icon button
+          // and select here measures. `sm` only supplies the compact padding;
+          // its own 28px would leave this button sitting low among them, which
+          // is plainest on a phone, where the label is gone and the neighbours
+          // on both sides are icon buttons.
+          <Button size="sm" className="h-8" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
             <span className="hidden lg:inline">{t('toolbar.save')}</span>
             {patches.size > 0 && `(${patches.size})`}
