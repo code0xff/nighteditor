@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PatchError } from '@/core/patch';
 import { ZipError } from '@/core/zip';
 import {
+  ERROR_NOTICES,
   LOCALES,
   LOCALE_LABEL,
   isLocale,
@@ -110,5 +111,21 @@ describe('언어팩 · core 코드 번역', () => {
     expect(rendered[0]).not.toBe(rendered[1]);
     // 영어 문장에 한글이 남아 있으면 언어팩으로 옮긴 의미가 없다.
     expect(rendered[1]).not.toMatch(/[가-힣]/);
+  });
+});
+
+describe('언어팩 · 오류 알림의 잔류 (spec §4)', () => {
+  it('파일을 못 연 이유는 스스로 사라지지 않는다 — UTF-8 아님 포함 (대원칙 3)', () => {
+    // notUtf8 이 이 집합에서 빠지면 info 토스트로 흘러 4초 만에 사라진다 —
+    // 못 여는 유일한 설명이 없어져, 왜 안 열리는지 알 길이 없다.
+    for (const key of [
+      'notice.openFailed',
+      'notice.openFailedDetail',
+      'notice.notUtf8',
+      'notice.saveFailed',
+      'notice.saveRejected',
+    ] as const) {
+      expect(ERROR_NOTICES.has(key)).toBe(true);
+    }
   });
 });

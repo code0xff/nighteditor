@@ -338,6 +338,8 @@ export const FORMAT_LABELS = [
 export const ERROR_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   'notice.openFailed',
   'notice.openFailedDetail',
+  // 파일을 못 연 이유다 — 4초 만에 사라지면 왜 안 열리는지 알 길이 없다 (대원칙 3).
+  'notice.notUtf8',
   'notice.saveFailed',
   'notice.saveRejected',
   'notice.folderUnsupported',
