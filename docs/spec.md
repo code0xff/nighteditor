@@ -360,13 +360,20 @@ change card (which jumps to a spot the panel would be covering). From `lg` up
 nothing changes: the list stands beside the preview and the button is not there
 (ADR-012).
 
-The header keeps only what you act with. As the window narrows, the wordmark, the
-open-button labels, the file name, the save label, and the overwrite hint drop away
-in that order, the language picker becomes its icon, and the title field takes
-whatever room is left. This is not only about looks: **a header wider than the
-window scrolls the whole document sideways** the moment a popup inside it opens,
-and `body { overflow: hidden }` then keeps it there. Nothing in the header may
-overflow at any width.
+The header keeps only what you act with. Below `lg` every label drops away and the
+controls stand as icons — the open buttons, the save button, the language picker,
+and the bundle's document picker (its path stays in the tooltip). The file name and
+the overwrite hint return only at `xl`, being the two things the screen already says
+elsewhere. This is not only about looks: **a header wider than the window scrolls
+the whole document sideways** the moment a popup inside it opens, and
+`body { overflow: hidden }` then keeps it there. Nothing in the header may overflow
+at any width — measured with a five-document bundle open, which is the widest the
+header ever gets.
+
+**The title field is not a control, so below `md` it is not in the header.** Fitted
+there it comes out around 20px wide, which is a field in name only; it moves to the
+top of the change list instead. One instance either way, never two — the label
+points at an id, and two of those point at whichever came first.
 
 Anything off-screen must also be **out of reach** — the closed panel is `inert`, so
 it cannot be tabbed into from the preview.

@@ -23,12 +23,12 @@ export function LangSelect() {
         if (isLocale(value)) setLocale(value);
       }}
     >
-      {/* On a narrow screen only the icon is left. The chosen language is still
+      {/* Until `lg` only the icon is left. The chosen language is still
           visible — it is the language everything on screen is written in.
           The `!` is needed: the trigger's own `[&>span]:line-clamp-1` sets a
           display of its own, and without it that rule wins over `hidden`. */}
       <SelectTrigger
-        className="w-auto gap-1.5 [&>span]:!hidden [&>svg:last-child]:hidden sm:[&>span]:!block sm:[&>svg:last-child]:block"
+        className="w-auto gap-1.5 [&>span]:!hidden [&>svg:last-child]:hidden lg:[&>span]:!block lg:[&>svg:last-child]:block"
         aria-label={label}
         title={label}
       >

@@ -25,3 +25,6 @@ export function useMediaQuery(query: string): boolean {
 
 /** A finger, not a mouse pointer — the device cannot hover, and cannot drag a file onto a window. */
 export const TOUCH = '(pointer: coarse)';
+
+/** Tailwind's `md` — from here the toolbar has room for more than actions. */
+export const MD = '(min-width: 768px)';

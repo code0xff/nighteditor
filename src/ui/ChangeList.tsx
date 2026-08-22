@@ -1,3 +1,4 @@
+import { TitleField } from '@/components/TitleField';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -10,6 +11,7 @@ import {
   IconScanning,
 } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
+import { useMediaQuery, MD } from '@/lib/media';
 import { cn } from '@/lib/utils';
 import { lockSummary, useEditor } from '@/store/editor';
 import { usePanel } from '@/store/panel';
@@ -35,6 +37,8 @@ export function ChangeList() {
   // the new document stands (spec §4 · ADR-010).
   const replacing = useReplacement((s) => s.replacing);
   const closePanel = usePanel((s) => s.close);
+  // Where the toolbar has no room for it, the title is edited here (TitleField).
+  const titleInHeader = useMediaQuery(MD);
   const { t, tn } = useI18n();
 
   // On a narrow screen this list is a panel over the preview. Jumping to a spot
@@ -51,6 +55,8 @@ export function ChangeList() {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
+      {!titleInHeader && <TitleField stacked />}
+
       <section>
         <h2 className="mb-2 text-xs font-semibold">{t('changes.blocks')}</h2>
         <div className="flex flex-wrap gap-1.5">

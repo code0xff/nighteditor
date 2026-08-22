@@ -34,7 +34,16 @@ export function DocSelect() {
       // Never discarded silently — the store does the asking.
       onValueChange={(path) => void openFromBundle(path)}
     >
-      <SelectTrigger className="h-8 w-auto max-w-64 gap-1.5" aria-label={label} title={label}>
+      {/* Until `lg` only the icon is left — the path would take the room the title
+          field needs and push the header past the window. Which document is open
+          still reads from the title field beside it, from this button's tooltip,
+          and from the check mark in the list. (The `!` is needed: the trigger's own
+          `[&>span]:line-clamp-1` sets a display that otherwise beats `hidden`.) */}
+      <SelectTrigger
+        className="h-8 w-auto max-w-64 gap-1.5 [&>span]:!hidden [&>svg:last-child]:hidden lg:[&>span]:!block lg:[&>svg:last-child]:block"
+        aria-label={label}
+        title={`${label} · ${docPath}`}
+      >
         <IconDocument className="h-3.5 w-3.5 shrink-0 opacity-70" />
         <SelectValue />
       </SelectTrigger>
