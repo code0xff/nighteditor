@@ -61,14 +61,42 @@ export function previewAgent(): () => void {
    */
   let known: Set<number> | null = null;
   /**
+   * 대조 때 훑은 id → **그 요소**. 명단(known)은 번호만 가려서, 스크립트가 대조
+   * 뒤에 같은 번호의 요소를 하나 더 만들면 번호 검사는 통과한다 — 그 가짜를 눌러
+   * 확정하면 가짜의 내용이 진짜 블록의 자리에 저장된다 (spec §3). 여기 기억해 둔
+   * 그 요소가 아니면 번호가 맞아도 블록으로 치지 않는다. null 이면 아직 안 훑었다.
+   */
+  let verifiedEl: Map<number, HTMLElement> | null = null;
+  /**
    * 대조(ADR-005)가 끝나 잠금 목록을 받았는가. 그 전에는 편집을 열지 않는다 —
    * 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져 화면과 저장본이
    * 갈라지고, 어느 블록이 잠길지도 아직 몰라 잠긴 블록의 편집까지 열린다 (spec §4).
    */
   let verified = false;
 
+  /**
+   * 지금 문서의 진짜 표식들을 id → 요소로 적어 둔다. 같은 id 가 겹치면 첫 요소를
+   * 남긴다 — 겹침은 호스트의 대조가 MARKER_CLASH 로 잠그므로 어차피 편집이 안 열린다.
+   */
+  const snapshotMarkers = (): Map<number, HTMLElement> => {
+    const map = new Map<number, HTMLElement>();
+    for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
+      // 다른 마커 안의 마커는 흉내다 — 진짜 블록은 겹치지 않는다 (spec §3).
+      if (mimicked(el)) continue;
+      const id = Number(el.getAttribute(MARKER));
+      if (!map.has(id)) map.set(id, el);
+    }
+    return map;
+  };
+
+  /**
+   * id 로 문서를 다시 뒤지지 않는다 — 흉내(spec §3)가 문서 앞쪽에 있으면
+   * querySelector 가 가짜를 먼저 돌려줘, 복원·짚기가 가짜에 닿는다.
+   */
   const elementFor = (id: number): HTMLElement | null =>
-    document.querySelector<HTMLElement>('[' + MARKER + '="' + id + '"]');
+    verifiedEl
+      ? (verifiedEl.get(id) ?? null)
+      : document.querySelector<HTMLElement>('[' + MARKER + '="' + id + '"]');
 
   /** 짚어둔 표시를 지운다 */
   const clearReveal = (): void => {
@@ -92,12 +120,16 @@ export function previewAgent(): () => void {
   const blockOf = (target: EventTarget | null): HTMLElement | null => {
     let el = target instanceof Element ? target : null;
     while (el) {
-      if (
-        el.hasAttribute(MARKER) &&
-        !mimicked(el) &&
-        (known === null || known.has(Number(el.getAttribute(MARKER))))
-      ) {
-        return el as HTMLElement;
+      if (el.hasAttribute(MARKER) && !mimicked(el)) {
+        const id = Number(el.getAttribute(MARKER));
+        // 번호만으로는 모자란다 — 대조 뒤에 끼워 넣은 같은 번호의 요소는 명단
+        // 검사를 통과한다. 대조 때 훑은 **그 요소**여야 블록이다 (spec §3).
+        if (
+          (verifiedEl === null || verifiedEl.get(id) === el) &&
+          (known === null || known.has(id))
+        ) {
+          return el as HTMLElement;
+        }
       }
       el = el.parentElement;
     }
@@ -679,19 +711,21 @@ export function previewAgent(): () => void {
       for (const id of msg.ids) locked.add(id);
       // 실제 블록 id 명단 — 여기 없는 표식은 문서의 흉내라 블록으로 치지 않는다 (spec §3).
       if (msg.all) known = new Set(msg.all);
+      // 대조의 근거가 된 요소들은 scan 이 적어 둔다. 없으면(대조 신호가 훑기 없이
+      // 온 드문 순서) 지금 적는다 — 이 뒤에 끼워 넣은 요소는 블록으로 치지 않는다 (spec §3).
+      if (verifiedEl === null) verifiedEl = snapshotMarkers();
       // 잠금 표식을 DOM 에도 붙인다. 주입된 스타일이 이걸 보고 커서와 테두리를 바꾼다.
       // 매번 전체를 다시 칠한다 — 이전 목록이 남으면 풀린 블록이 잠긴 척한다.
       //
       // 화면에 글자가 보이는 자리에만 칠한다. 소스에도 화면에도 아무것도 없는 요소
       // (CSS 로 그린 막대 등)까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
       // 칠하지 않아도 잠금은 그대로라 눌러 보면 이유는 뜬다.
-      for (const el of document.querySelectorAll('[' + MARKER + ']')) {
-        // 다른 마커 안의 마커는 흉내다 — 진짜 블록은 겹치지 않는다 (spec §3). 여기에
-        // 표식을 붙이거나 떼면 그 변화가 바깥 블록의 innerHTML 에 실려, 그 블록을
-        // 편집하는 순간 저장본으로 샌다 (INV-9). 블록 밖 흉내는 어느 블록의 내용도
-        // 아니라 칠해도 새지 않는다.
-        if (mimicked(el)) continue;
-        const show = locked.has(Number(el.getAttribute(MARKER))) && (el.textContent ?? '').trim();
+      //
+      // 칠하는 대상은 대조 때 훑은 요소들이다. 문서 전체를 다시 뒤지면 그 사이
+      // 끼워 넣은 흉내에도 표식을 칠하게 된다 — 흉내에 붙는 표식은 화면만 어지럽히지만,
+      // 편집 판정과 같은 명단을 쓰는 쪽이 어긋날 자리가 없다 (spec §3).
+      for (const [id, el] of verifiedEl) {
+        const show = locked.has(id) && (el.textContent ?? '').trim();
         if (show) el.setAttribute(LOCKED, '');
         else el.removeAttribute(LOCKED);
       }
@@ -777,6 +811,9 @@ export function previewAgent(): () => void {
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
       blocks.push({ id: idOf(el), text: el.textContent ?? '' });
     }
+    // 대조의 근거가 된 요소들을 지금 적어 둔다 — 호스트가 검사하는 것은 이 순간의
+    // 요소들이라, 이 뒤에 같은 번호로 끼워 넣은 요소는 블록이 아니다 (spec §3).
+    verifiedEl = snapshotMarkers();
     // 아티팩트 CSS 와 스크립트가 색을 다 칠한 뒤라야 제대로 잰다.
     paintContrast();
     post({ type: 'ready', blocks });

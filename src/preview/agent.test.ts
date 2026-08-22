@@ -1304,6 +1304,46 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(el(0)?.getAttribute('contenteditable')).toBe('true');
   });
 
+  it('대조 뒤에 끼워 넣은 같은 번호의 요소는 블록이 아니다 (spec §3)', () => {
+    // 명단은 번호만 가린다 — 스크립트가 대조 뒤에 같은 번호의 요소를 만들면 번호
+    // 검사는 통과한다. 그 가짜를 눌러 확정하면 가짜의 내용이 진짜 블록의 자리에
+    // 저장되므로, 대조 때 훑은 그 요소가 아니면 편집을 열지 않는다.
+    mount(`<p ${MARKER_ATTR}="0">진짜</p>`, { verified: false });
+    const real = el(0)!;
+    fromHost({ type: 'locked', ids: [], all: [0] });
+    sent = [];
+    const fake = document.createElement('p');
+    fake.setAttribute(MARKER_ATTR, '0');
+    fake.textContent = '가짜';
+    document.body.prepend(fake);
+
+    click(fake);
+
+    expect(fake.getAttribute('contenteditable')).toBeNull();
+    expect(sent.filter((m) => m.type === 'select' || m.type === 'edit')).toHaveLength(0);
+
+    // 진짜 블록은 여느 때처럼 열린다 — 문서 앞쪽의 가짜가 밀어내지 못한다.
+    click(real);
+    expect(real.getAttribute('contenteditable')).toBe('true');
+    expect(fake.getAttribute('contenteditable')).toBeNull();
+  });
+
+  it('되돌리기는 문서 앞쪽의 흉내가 아니라 대조 때 훑은 그 요소에 닿는다 (spec §3)', () => {
+    mount(`<p ${MARKER_ATTR}="0">원래</p>`, { verified: false });
+    const real = el(0)!;
+    fromHost({ type: 'locked', ids: [], all: [0] });
+    const fake = document.createElement('p');
+    fake.setAttribute(MARKER_ATTR, '0');
+    fake.textContent = '가짜';
+    document.body.prepend(fake);
+
+    fromHost({ type: 'revert', id: 0, html: '되돌림' });
+
+    // querySelector 로 되찾으면 앞쪽의 가짜가 먼저 잡혀, 진짜 블록은 고친 채 남는다.
+    expect(real.innerHTML).toBe('되돌림');
+    expect(fake.innerHTML).toBe('가짜');
+  });
+
   it('블록 안의 흉내 표식은 내용이다 — 클릭이 바깥의 진짜 블록으로 흘러간다', () => {
     mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="99">가짜</span></p>`, {
       verified: false,
