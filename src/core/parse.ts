@@ -19,7 +19,7 @@ function attr(el: Element, name: string): string | undefined {
   return el.attrs.find((a) => a.name === name)?.value;
 }
 
-/** 자기 자신이 직접 가진 텍스트 — 인라인 자손 것은 세지 않는다 */
+/** Text the node holds directly — text in inline descendants does not count */
 function hasDirectText(node: Node): boolean {
   return childrenOf(node).some(
     (c) => c.nodeName === '#text' && 'value' in c && c.value.trim().length > 0
@@ -27,11 +27,11 @@ function hasDirectText(node: Node): boolean {
 }
 
 /**
- * 하위 텍스트를 모은 결과. RAW_TEXT 내부는 텍스트로 치지 않는다.
+ * Collected descendant text. Content inside RAW_TEXT does not count as text.
  *
- * parse5 는 `#text` 노드의 문자 참조를 **이미 디코딩해서** 넘겨준다.
- * 여기서 또 디코딩하면 `&amp;amp;` 가 `&` 까지 풀려 라이브 textContent 와
- * 어긋나고, ADR-005 대조 검사에서 멀쩡한 블록이 오탐 잠금된다.
+ * parse5 hands over `#text` nodes with character references **already decoded**.
+ * Decoding again here resolves `&amp;amp;` all the way to `&`, diverging from the
+ * live textContent, and the ADR-005 comparison then false-positive-locks a healthy block.
  */
 function textOf(node: Node): string {
   if (node.nodeName === '#text') {
@@ -46,14 +46,15 @@ function ownLockReason(el: Element): LockReason | null {
 }
 
 /**
- * 원본 HTML 문자열에서 편집 블록을 추출한다.
+ * Extracts editing blocks from the source HTML string.
  *
- * 반환되는 offset 은 전부 `source` 기준이며, `source.slice(innerStart, innerEnd)` 가
- * 언제나 그 블록의 원본 innerHTML 과 정확히 일치한다 (INV-3).
+ * Every returned offset is relative to `source`, and `source.slice(innerStart, innerEnd)`
+ * always matches that block's original innerHTML exactly (INV-3).
  *
- * 알려진 한계 — 직접 텍스트와 블록 자식이 함께 있는 요소(`<div>글<p>단락</p></div>`)에서
- * 그 직접 텍스트는 편집 대상이 되지 않는다. 부모는 블록 자식 때문에 블록이 될 수 없고,
- * 텍스트만 따로 떼어낼 경계도 없기 때문이다.
+ * Known limitation — in an element mixing direct text with block children
+ * (`<div>text<p>para</p></div>`), that direct text never becomes editable. The parent
+ * cannot be a block because of its block children, and there is no boundary that could
+ * carve out the text on its own.
  */
 export function parseBlocks(source: string): Block[] {
   const doc = parse(source, { sourceCodeLocationInfo: true });
@@ -64,7 +65,7 @@ export function parseBlocks(source: string): Block[] {
     if (isElement(node) && RAW_TEXT_TAGS.has(node.tagName)) return;
 
     const elementChildren = childrenOf(node).filter(isElement);
-    // 잠금은 자손에게 상속된다. .code 안의 중첩 요소가 편집 가능해지면 안 된다.
+    // Locks are inherited by descendants. Nested elements inside .code must not become editable.
     const lock = isElement(node) ? (inheritedLock ?? ownLockReason(node)) : inheritedLock;
 
     if (isElement(node)) {
@@ -73,12 +74,13 @@ export function parseBlocks(source: string): Block[] {
       const endTag = loc?.endTag;
       const hasBlockChild = elementChildren.some((c) => !isInline(c.tagName));
 
-      // INV-7 · parse5 는 소스에 없는 노드를 삽입한다 (테이블의 <tbody> 등).
-      // 위치 정보가 없으면 블록이 될 수 없다. 통과시켜 자식으로 내려간다.
+      // INV-7 · parse5 inserts nodes that are not in the source (a table's <tbody> etc.).
+      // Without location info a node cannot be a block. Pass through and descend into children.
       if (startTag && !hasBlockChild && textOf(node).trim().length > 0) {
         const innerStart = startTag.endOffset;
-        // 닫는 태그가 생략되면(`<li>a<li>b`) inner 범위를 확정할 수 없다.
-        // 조용히 버리지 않고 AMBIGUOUS 로 잠가 이유를 남긴다 (대원칙 3).
+        // With the closing tag omitted (`<li>a<li>b`), the inner range cannot be pinned
+        // down. Instead of dropping it silently, lock it as AMBIGUOUS and keep the reason
+        // (Principle 3).
         const innerEnd = endTag ? endTag.startOffset : (loc?.endOffset ?? innerStart);
         blocks.push({
           id: nextId++,
@@ -93,22 +95,26 @@ export function parseBlocks(source: string): Block[] {
         return;
       }
 
-      // 소스에서 비어 있는 잎 요소. 스크립트가 채우면 화면에는 글자가 보이지만
-      // 그 글자는 소스 어디에도 없어 되짚을 수 없다. 텍스트가 없다고 빼 버리면
-      // 눌러도 아무 일이 없어 왜 안 되는지 알 길이 없다 — 잡아 두고 잠근다 (대원칙 3).
+      // A leaf element that is empty in the source. When a script fills it, characters
+      // show on screen but exist nowhere in the source, so they cannot be traced back.
+      // Dropping it for having no text means clicks do nothing with no way to learn why —
+      // so capture it and lock it (Principle 3).
       //
-      // 닫는 태그를 요구해 void 요소(`<br>`·`<img>`)를 걸러낸다. 그 안에는 내용이 올 수 없다.
-      // 자식 요소가 있으면 컨테이너이므로 여기서 멈추지 않고 그 안으로 내려간다.
+      // Requiring a closing tag filters out void elements (`<br>`, `<img>`) — no content
+      // can go inside them. An element with element children is a container, so instead
+      // of stopping here we descend into it.
       if (startTag && endTag && elementChildren.length === 0) {
         const innerStart = startTag.endOffset;
         const innerEnd = endTag.startOffset;
         const sourceInner = source.slice(innerStart, innerEnd);
-        // 주석만 든 요소는 비어 있지 않다 — 지우면 사용자가 쓴 것이 사라진다.
+        // An element holding only a comment is not empty — erasing it destroys something
+        // the user wrote.
         if (sourceInner.trim().length === 0) {
-          // <title> 같은 RCDATA 는 예외다 (spec §2.1) — 프리뷰에 렌더되지 않아 별도
-          // 입력 칸으로 편집하고, 그 값은 라이브 DOM 이 아니라 소스에서 온다. 여기서
-          // 잠그면 제목이 빈 문서는 제목을 새로 지을 길이 없다. 스크립트가 채운
-          // 제목은 렌더 후 대조(ADR-005)가 따로 잠근다.
+          // RCDATA like <title> is the exception (spec §2.1) — it does not render in the
+          // preview, is edited through a separate input, and its value comes from the
+          // source, not the live DOM. Locking it here leaves a document with an empty
+          // title no way to get one. A script-filled title is locked separately by the
+          // post-render comparison (ADR-005).
           const emptyLock = RCDATA_TAGS.has(node.tagName) ? null : 'EMPTY_IN_SOURCE';
           blocks.push({
             id: nextId++,
@@ -125,13 +131,13 @@ export function parseBlocks(source: string): Block[] {
       }
     }
 
-    // 인라인 자식으로 내려갈지 판단한다 (spec §2).
+    // Decide whether to descend into inline children (spec §2).
     //
-    // 부모가 직접 텍스트를 가지면 인라인은 그 문장의 일부다. 승격시키면
-    // 한 문장이 쪼개지므로 내려가지 않는다.
-    // 부모에 직접 텍스트가 없으면 인라인은 독립 라벨이다
-    // (`<div><span class="codelabel">제목</span><ul>…</ul></div>`).
-    // 이때 내려가지 않으면 멀쩡히 보이는 텍스트가 편집 불가가 된다.
+    // If the parent has direct text, the inline is part of that sentence. Promoting it
+    // would split one sentence, so do not descend.
+    // If the parent has no direct text, the inline is a standalone label
+    // (`<div><span class="codelabel">title</span><ul>…</ul></div>`).
+    // Not descending there makes perfectly visible text uneditable.
     const descendIntoInline = !hasDirectText(node);
     for (const child of elementChildren) {
       if (!isInline(child.tagName) || descendIntoInline) visit(child, lock);

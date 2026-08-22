@@ -7,12 +7,12 @@ import { fixtureSource } from '../__fixtures__/load.js';
 const source = fixtureSource();
 const blocks = parseBlocks(source);
 
-describe('parseBlocks · 픽스처 회귀', () => {
-  it('블록 27개를 인식한다 (docs/spec.md §6)', () => {
+describe('parseBlocks · fixture regression', () => {
+  it('recognizes 27 blocks (docs/spec.md §6)', () => {
     expect(blocks).toHaveLength(27);
   });
 
-  it('태그별 분포가 사양과 일치한다', () => {
+  it('the per-tag distribution matches the spec', () => {
     const counts: Record<string, number> = {};
     for (const b of blocks) counts[b.tag] = (counts[b.tag] ?? 0) + 1;
     expect(counts).toEqual({
@@ -29,13 +29,13 @@ describe('parseBlocks · 픽스처 회귀', () => {
     });
   });
 
-  it('모든 블록의 offset 이 원본과 정확히 일치한다 (INV-3)', () => {
+  it('every block offset matches the source exactly (INV-3)', () => {
     for (const b of blocks) {
       expect(source.slice(b.innerStart, b.innerEnd)).toBe(b.sourceInner);
     }
   });
 
-  it('블록 범위가 서로 겹치지 않는다', () => {
+  it('block ranges do not overlap', () => {
     const sorted = [...blocks].sort((a, b) => a.innerStart - b.innerStart);
     for (let i = 1; i < sorted.length; i++) {
       const prev = sorted[i - 1];
@@ -46,24 +46,24 @@ describe('parseBlocks · 픽스처 회귀', () => {
   });
 });
 
-describe('parseBlocks · 잠금과 특례', () => {
-  it('<title> 을 블록으로 인식하고 rcdata 로 표시한다 (spec §2.1)', () => {
+describe('parseBlocks · locks and special cases', () => {
+  it('recognizes <title> as a block and marks it rcdata (spec §2.1)', () => {
     const title = blocks.find((b) => b.tag === 'title');
     expect(title?.sourceText).toBe('합성 아티팩트');
     expect(title?.rcdata).toBe(true);
     expect(title?.locked).toBeNull();
   });
 
-  it('.code 블록을 CODE_BLOCK 으로 잠그고 자손까지 상속한다 (spec §3)', () => {
+  it('locks .code blocks as CODE_BLOCK and inherits down to descendants (spec §3)', () => {
     const locked = blocks.filter((b) => b.locked === 'CODE_BLOCK');
     expect(locked).toHaveLength(2);
-    // 하나는 .code 자신, 하나는 그 안에 중첩된 div 다.
+    // One is .code itself, the other a div nested inside it.
     expect(locked.some((b) => b.sourceInner.includes('중첩된 요소'))).toBe(true);
   });
 
-  it('소스에서 비어 있는 #cnt 를 잠긴 블록으로 잡는다 (spec §3)', () => {
-    // 스크립트가 채우면 화면에는 글자가 보인다. 블록으로 잡지 않으면 눌러도 아무 일이 없어
-    // 왜 못 고치는지 알 길이 없다.
+  it('captures the source-empty #cnt as a locked block (spec §3)', () => {
+    // When a script fills it, characters show on screen. Without capturing it as a
+    // block, clicks do nothing and there is no way to learn why it cannot be edited.
     expect(source).toContain('<div id="cnt"></div>');
     const cnt = blocks.filter((b) => b.locked === 'EMPTY_IN_SOURCE');
 
@@ -72,10 +72,11 @@ describe('parseBlocks · 잠금과 특례', () => {
     expect(cnt[0]?.sourceText).toBe('');
   });
 
-  it('빈 <title> 은 잠그지 않는다 — 제목을 새로 지을 수 있어야 한다 (spec §2.1)', () => {
-    // 빈 잎 요소 잠금은 "화면의 글자를 소스로 되짚을 수 없다" 는 프리뷰 클릭 편집의
-    // 사정이다. 제목 칸은 소스에서 값을 얻으므로 그 사정이 없고, 여기서 잠그면
-    // 제목이 빈 문서는 제목을 지을 길이 없다. 스크립트가 채운 제목은 대조가 잠근다.
+  it('does not lock an empty <title> — a new title must be possible (spec §2.1)', () => {
+    // The empty-leaf lock exists because preview click editing cannot trace on-screen
+    // characters back to the source. The title field takes its value from the source,
+    // so that concern does not apply; locking here leaves a document with an empty
+    // title no way to get one. A script-filled title is locked by the comparison.
     const list = parseBlocks(
       '<!doctype html><html><head><title></title></head><body><p>본문</p></body></html>'
     );
@@ -85,58 +86,59 @@ describe('parseBlocks · 잠금과 특례', () => {
     expect(title?.locked).toBeNull();
   });
 
-  it('.pg 는 부모가 직접 텍스트를 가져 블록이 되지 않는다', () => {
-    // 인라인은 부모 문장의 일부라 내려가지 않는다 (spec §2). 여기서 마커를 붙이면
-    // 부모 블록의 innerHTML 에 섞여 저장본까지 따라간다.
-    // 대신 부모 .foot 이 대조에서 잠겨 이유를 대신 말한다.
+  it('.pg does not become a block because its parent has direct text', () => {
+    // An inline is part of its parent's sentence, so we do not descend (spec §2).
+    // A marker attached here would mix into the parent block's innerHTML and follow
+    // it into the save. Instead the parent .foot gets locked by the comparison,
+    // which states the reason on its behalf.
     expect(source.match(/class="pg"/g)).toHaveLength(4);
     expect(blocks.some((b) => b.sourceInner === '' && b.tag === 'span')).toBe(false);
   });
 
-  it('void 요소는 블록이 되지 않는다 — 안에 내용이 올 수 없다', () => {
+  it('void elements do not become blocks — no content can go inside', () => {
     const empty = parseBlocks('<p>글</p><br><img src="a.png"><hr>');
 
     expect(empty.map((b) => b.tag)).toEqual(['p']);
   });
 
-  it('주석만 든 요소는 비어 있지 않다', () => {
-    // 지우면 사용자가 쓴 것이 사라진다.
+  it('an element holding only a comment is not empty', () => {
+    // Erasing it destroys something the user wrote.
     expect(parseBlocks('<div><!-- 여기 --></div>')).toHaveLength(0);
   });
 
-  it('자식 요소가 있는 빈 컨테이너는 블록이 아니라 안으로 내려간다', () => {
+  it('an empty container with element children is not a block; descend into it', () => {
     const nested = parseBlocks('<div class="wrap"><div class="pg"></div></div>');
 
-    // 컨테이너까지 블록으로 잡으면 안쪽이 통째로 가려진다.
+    // Capturing the container as a block would hide everything inside.
     expect(nested).toHaveLength(1);
     expect(nested[0]?.locked).toBe('EMPTY_IN_SOURCE');
     expect(nested[0]?.innerStart).toBe('<div class="wrap"><div class="pg">'.length);
   });
 
-  it('빈 요소도 .code 안에서는 코드 영역으로 잠긴다', () => {
+  it('an empty element inside .code is still locked as a code area', () => {
     const inCode = parseBlocks('<div class="code"><span></span></div>');
 
     expect(inCode[0]?.locked).toBe('CODE_BLOCK');
   });
 
-  it('script / style 내부는 블록이 되지 않는다', () => {
+  it('the insides of script / style do not become blocks', () => {
     for (const b of blocks) {
       expect(b.sourceInner).not.toContain('addEventListener');
       expect(b.sourceInner).not.toContain('font-family');
     }
   });
 
-  it('합성 <tbody> 를 통과해 td/th 를 찾는다 (INV-7)', () => {
-    // parse5 는 소스에 없는 tbody 를 끼워 넣는다. 그 노드에는 위치 정보가 없다.
-    // td/th 가 전부 잡혔다면 통과해 내려갔다는 뜻이다.
+  it('passes through the synthesized <tbody> to find td/th (INV-7)', () => {
+    // parse5 inserts a tbody absent from the source. That node has no location info.
+    // If every td/th was captured, the traversal passed through and descended.
     expect(source.match(/<table/g)).toHaveLength(1);
     expect(source).not.toContain('<tbody');
     expect(blocks.filter((b) => b.tag === 'td' || b.tag === 'th')).toHaveLength(6);
   });
 });
 
-describe('엔티티 (INV-8)', () => {
-  it('sourceText 는 디코딩된 값이라 라이브 텍스트와 비교할 수 있다', () => {
+describe('entities (INV-8)', () => {
+  it('sourceText is decoded, so it can be compared with live text', () => {
     const withEntity = blocks.find((b) => b.sourceInner.includes('&amp;'));
     expect(withEntity).toBeDefined();
     expect(withEntity?.sourceInner).toContain('&amp;');
@@ -144,7 +146,7 @@ describe('엔티티 (INV-8)', () => {
     expect(withEntity?.sourceText).not.toContain('&amp;');
   });
 
-  it('원시 슬라이스로 비교하면 오탐이 난다 — 디코딩이 필요한 이유', () => {
+  it('comparing raw slices produces false positives — why decoding is needed', () => {
     const withEntity = blocks.find((b) => b.sourceInner.includes('&amp;'));
     if (!withEntity) throw new Error('엔티티 블록 없음');
     const liveText = withEntity.sourceText;
@@ -152,54 +154,56 @@ describe('엔티티 (INV-8)', () => {
     expect(normalizeText(decode(withEntity.sourceInner))).toBe(liveText);
   });
 
-  it('encode 는 & < > 를 엔티티화한다', () => {
+  it('encode turns & < > into entities', () => {
     expect(encode('a & b < c > d')).toBe('a &amp; b &lt; c &gt; d');
     expect(decode(encode('a & b'))).toBe('a & b');
   });
 });
 
-describe('parseBlocks · 리뷰 회귀 (합성 입력)', () => {
+describe('parseBlocks · review regressions (synthetic input)', () => {
   const only = (html: string) => parseBlocks(html);
 
-  it('parse5 가 이미 디코딩하므로 두 번 디코딩하지 않는다', () => {
-    // 이중 디코딩하면 '& and <b>' 가 되어 라이브 textContent 와 어긋나고,
-    // ADR-005 대조에서 멀쩡한 블록이 오탐 잠금된다.
+  it('parse5 already decodes, so do not decode twice', () => {
+    // Double-decoding would produce '& and <b>', diverging from the live
+    // textContent, and the ADR-005 comparison would false-positive-lock a healthy block.
     const [block] = only('<p>&amp;amp; and &amp;lt;b&amp;gt;</p>');
     expect(block?.sourceText).toBe('&amp; and &lt;b&gt;');
   });
 
-  it('CODE_BLOCK 잠금이 자손까지 상속된다', () => {
+  it('the CODE_BLOCK lock inherits down to descendants', () => {
     const blocks = only('<div class="code"><div>let x = 1;</div><div>y</div></div>');
     expect(blocks).toHaveLength(2);
     for (const b of blocks) expect(b.locked).toBe('CODE_BLOCK');
   });
 
-  it('닫는 태그가 생략되면 버리지 않고 AMBIGUOUS 로 잠근다', () => {
+  it('locks as AMBIGUOUS instead of dropping when the closing tag is omitted', () => {
     const blocks = only('<ul><li>one<li>two</ul>');
     expect(blocks).toHaveLength(2);
     for (const b of blocks) expect(b.locked).toBe('AMBIGUOUS');
     expect(blocks.map((b) => b.sourceText)).toEqual(['one', 'two']);
   });
 
-  it('부모에 직접 텍스트가 있으면 인라인을 블록으로 승격하지 않는다', () => {
+  it('does not promote an inline to a block when the parent has direct text', () => {
     const blocks = only('<div>직접 텍스트 <a href="#">링크</a><p>단락</p></div>');
     expect(blocks.map((b) => b.tag)).toEqual(['p']);
   });
 
-  it('부모에 직접 텍스트가 없으면 인라인 라벨을 승격한다', () => {
-    // 실측 아티팩트의 .codelabel 구조. 승격하지 않으면 편집 불가가 된다.
+  it('promotes an inline label when the parent has no direct text', () => {
+    // The .codelabel structure from the measured artifact. Without promotion it
+    // becomes uneditable.
     const blocks = only('<div><span class="codelabel">제목</span><ul><li>항목</li></ul></div>');
     expect(blocks.map((b) => b.tag)).toEqual(['span', 'li']);
   });
 
-  it('textarea 내부는 블록이 되지 않는다 (RAW_TEXT)', () => {
+  it('the inside of textarea does not become a block (RAW_TEXT)', () => {
     expect(only('<textarea>hello</textarea>')).toHaveLength(0);
   });
 });
 
-describe('parseBlocks · 바이트 그대로의 원본 (대원칙 1 · spec §1 문서 인코딩)', () => {
-  it('BOM 으로 시작해도 offset 은 원본 문자열 그대로를 가리킨다', () => {
-    // 파서가 BOM 을 삼켜 offset 이 한 칸씩 밀리면 모든 패치가 한 글자씩 어긋난다.
+describe('parseBlocks · the source byte for byte (Principle 1 · spec §1 document encoding)', () => {
+  it('offsets still point into the source string when it starts with a BOM', () => {
+    // If the parser swallowed the BOM, offsets would shift by one and every patch
+    // would land one character off.
     const src = '\ufeff<html><head><title>t</title></head><body><p>본문</p></body></html>';
     const blocks = parseBlocks(src);
     for (const b of blocks) {
@@ -211,7 +215,7 @@ describe('parseBlocks · 바이트 그대로의 원본 (대원칙 1 · spec §1 
     expect(out).toBe('\ufeff<html><head><title>t</title></head><body><p>고침</p></body></html>');
   });
 
-  it('CRLF 줄바꿈은 고친 블록 밖에서 바이트 그대로 남는다 (대원칙 2)', () => {
+  it('CRLF line endings outside the edited block stay byte for byte (Principle 2)', () => {
     const src = '<html><body>\r\n<p>줄1</p>\r\n<p>줄2</p>\r\n</body></html>';
     const blocks = parseBlocks(src);
     const p = blocks.find((b) => b.sourceInner === '줄1');

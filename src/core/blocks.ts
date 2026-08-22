@@ -1,14 +1,16 @@
 /**
- * 편집 블록 판정 규칙. (docs/spec.md §2)
+ * Rules for deciding what counts as an editing block. (docs/spec.md §2)
  *
- * "텍스트를 담은 가장 바깥 요소이면서, 그 안이 인라인 마크업뿐인 것"이 블록이다.
+ * A block is "the outermost element that holds text, containing nothing but
+ * inline markup inside".
  */
 
 /**
- * 블록 경계를 만들지 않는 태그 — 블록 안에 내용물로 보존된다.
+ * Tags that do not create a block boundary — they are preserved as content inside a block.
  *
- * 옛 표현 태그(`font`·`strike`·`big`·`tt`)도 넣는다. 우리는 만들지 않지만(§4.1)
- * 남이 만든 문서에는 있고, 빠져 있으면 그것을 품은 문단이 통째로 편집 불가가 된다.
+ * Legacy presentational tags (`font`, `strike`, `big`, `tt`) are included. We never
+ * emit them (§4.1), but documents made by others do contain them, and leaving one out
+ * makes the whole paragraph that holds it uneditable.
  */
 export const INLINE_TAGS: ReadonlySet<string> = new Set([
   'b',
@@ -46,13 +48,13 @@ export const INLINE_TAGS: ReadonlySet<string> = new Set([
   'tt',
 ]);
 
-/** 내부가 텍스트가 아니라 코드인 태그 — 순회에서 통째로 제외 */
+/** Tags whose contents are code, not text — excluded from traversal entirely */
 export const RAW_TEXT_TAGS: ReadonlySet<string> = new Set(['script', 'style', 'textarea']);
 
-/** 내부에 태그를 넣을 수 없는 태그 — 평문 전용으로 편집 (spec §2.1) */
+/** Tags that cannot contain tags — edited as plain text only (spec §2.1) */
 export const RCDATA_TAGS: ReadonlySet<string> = new Set(['title']);
 
-/** 기본 잠금 대상 클래스 — 수동 하이라이팅된 코드/JSON 영역 (spec §3) */
+/** Classes locked by default — manually highlighted code/JSON areas (spec §3) */
 export const CODE_BLOCK_CLASSES: readonly string[] = ['code', 'codebox'];
 
 export function isInline(tag: string): boolean {

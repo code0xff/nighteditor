@@ -1,11 +1,13 @@
 /**
- * 문서가 옆에 두고 참조하는 외부 자원 (spec §5.1).
+ * External assets the document keeps beside it and references (spec §5.1).
  *
- * 여기서 하는 일은 **찾기와 치환 목록 만들기**까지다. 파일을 읽는 것도 blob URL 을
- * 만드는 것도 브라우저 쪽 일이라 `lib/assets.ts` 가 한다 (INV-6).
+ * The work here stops at **finding and building the substitution list**. Reading
+ * files and creating blob URLs are browser-side jobs, so `lib/assets.ts` does them
+ * (INV-6).
  *
- * 치환 결과는 **프리뷰 전용**이다. 원본 문자열은 언제나 그대로이므로 저장본에는
- * blob URL 이 한 글자도 들어가지 않는다 (대원칙 1 · ADR-009).
+ * Substitution results are **preview only**. The source string always stays as it
+ * is, so not a single blob URL character reaches the saved file (Principle 1 ·
+ * ADR-009).
  */
 import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 import { applyEdits, type Edit } from './edits.js';
@@ -16,8 +18,8 @@ type Element = DefaultTreeAdapterTypes.Element;
 type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 
 /**
- * 자원을 **가리키는** 속성만 바꾼다.
- * `<a href>` 는 없다 — 이동할 곳이지 붙일 자원이 아니다.
+ * Only attributes that **point at** an asset are rewritten.
+ * `<a href>` is absent — it is a place to navigate to, not an asset to attach.
  */
 const ASSET_ATTRS: Record<string, readonly string[]> = {
   link: ['href'],
@@ -35,25 +37,25 @@ const ASSET_ATTRS: Record<string, readonly string[]> = {
 };
 
 export interface AssetRef {
-  /** 문서에 적힌 그대로 */
+  /** exactly as written in the document */
   url: string;
-  /** 문서 위치를 기준으로 푼 정규 경로. 자원 묶음의 키가 된다 */
+  /** canonical path resolved against the document's location. The bundle key */
   path: string;
   /**
-   * 경로 뒤에 붙어 있던 질의·조각 (`?v=3`, `#icon`).
+   * Query and fragment that trailed the path (`?v=3`, `#icon`).
    *
-   * 파일을 찾을 때는 떼어낸다. 붙일 때 다시 다는 것은 **조각뿐**이다 —
-   * `<use href="sprite.svg#icon">` 에서 `#icon` 을 잃으면 스프라이트에서 무엇을
-   * 꺼낼지가 사라져 아무것도 그리지 않는다. 질의까지 달면 반대로 전부 잃는다
-   * (`blobSuffix` 참조).
+   * Stripped when looking up the file. When reattaching, only the **fragment**
+   * goes back on — losing `#icon` in `<use href="sprite.svg#icon">` loses what to
+   * pull from the sprite, so nothing draws. Reattaching the query loses everything
+   * instead (see `blobSuffix`).
    */
   suffix: string;
-  /** 원본에서 **값만** 가리키는 범위 (따옴표는 포함하지 않는다) */
+  /** the range in the source covering **only the value** (quotes excluded) */
   valueStart: number;
   valueEnd: number;
 }
 
-/** 자원 경로 → 붙일 URL. 없으면 undefined 를 돌려주면 그 자리는 그대로 둔다 */
+/** Asset path → URL to attach. Returning undefined leaves that spot untouched */
 export type Resolve = (path: string) => string | undefined;
 
 function isElement(node: Node): node is Element {
@@ -64,29 +66,30 @@ function childrenOf(node: Node): Node[] {
   return 'childNodes' in node ? (node as ParentNode).childNodes : [];
 }
 
-/** `a/b/c.html` → `a/b`. 디렉터리가 없으면 빈 문자열 */
+/** `a/b/c.html` → `a/b`. Empty string when there is no directory */
 export function dirOf(path: string): string {
   const at = path.lastIndexOf('/');
   return at < 0 ? '' : path.slice(0, at);
 }
 
 /**
- * 문서 위치를 기준으로 상대 경로를 푼다.
+ * Resolves a relative path against the document's location.
  *
- * 밖으로 나가는 참조(`https:`, `//cdn`, `data:`, `#anchor`)는 null 이다 —
- * 그대로 두는 것이 맞다. 이미 브라우저가 알아서 가져올 수 있거나, 자원이 아니다.
+ * References that leave the bundle (`https:`, `//cdn`, `data:`, `#anchor`) are
+ * null — leaving them alone is correct. Either the browser can already fetch them
+ * on its own, or they are not assets.
  */
 export function splitSuffix(url: string): { path: string; suffix: string } {
   const at = url.search(/[?#]/);
   return at < 0 ? { path: url, suffix: '' } : { path: url.slice(0, at), suffix: url.slice(at) };
 }
 
-/** 바깥으로 나가는 참조인가 — `scheme:` 과 프로토콜 상대 URL. 윈도 경로(`C:\`)도 걸린다 */
+/** Is this a reference going outside — `scheme:` and protocol-relative URLs. Windows paths (`C:\`) match too */
 function isExternal(url: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//');
 }
 
-/** 풀 수 있으면 푼다. 잘못된 인코딩은 적힌 그대로 둔다 */
+/** Decode when possible. Invalid encodings stay written as-is */
 function decodePart(part: string): string {
   try {
     return decodeURIComponent(part);
@@ -96,12 +99,12 @@ function decodePart(part: string): string {
 }
 
 /**
- * 조각 하나의 퍼센트 인코딩을 푼다.
+ * Decodes the percent-encoding of a single segment.
  *
- * `%2F` 만은 풀지 않고 적힌 그대로 둔다 (spec §5.1) — 디스크의 파일 이름에는
- * 슬래시가 있을 수 없으므로, 푸는 순간 이름의 일부가 경로 구분자로 변해
- * `a%2Fb.png` 라는 실제 파일 대신 `a/b.png` 라는 없는 자리를 찾는다.
- * 표기(대소문자)도 그대로 남긴다 — 묶음의 키는 디스크의 이름이다.
+ * `%2F` alone is left written as-is, not decoded (spec §5.1) — a file name on disk
+ * cannot contain a slash, so the moment it decodes, part of the name turns into a
+ * path separator and we look for a nonexistent `a/b.png` instead of the real file
+ * `a%2Fb.png`. Its spelling (case) is kept too — the bundle key is the name on disk.
  */
 function decodeSegment(segment: string): string {
   return segment
@@ -110,18 +113,21 @@ function decodeSegment(segment: string): string {
     .join('');
 }
 
-/** `.`·`..` 을 접고 퍼센트 인코딩을 푼 정규 경로. 뿌리는 빈 문자열이다 */
+/** Canonical path with `.`/`..` collapsed and percent-encoding decoded. The root is the empty string */
 function collapse(baseDir: string, path: string): string {
-  // 절대 경로는 문서가 아니라 묶음의 뿌리를 기준으로 본다 — 폴더/zip 의 최상단이다.
+  // Absolute paths resolve against the bundle root, not the document — the top of
+  // the folder/zip.
   const fromRoot = path.startsWith('/');
   const joined = fromRoot ? path.slice(1) : `${baseDir ? `${baseDir}/` : ''}${path}`;
 
   const out: string[] = [];
   for (const raw of joined.split('/')) {
-    // 접기 **전에** 푼다 (spec §5.1). URL 사양은 %2e/%2e%2e 조각도 점 조각으로
-    // 접는다 — 접은 뒤에 풀면 `%2e%2e/logo.png` 가 한 단계 올라가지 못해,
-    // 브라우저는 찾는 파일을 우리만 없다고 센다. 파일 이름의 %20 이 실제 공백이
-    // 되는 것도 같은 자리다. 묶음의 키는 문서의 표기가 아니라 디스크의 이름이다.
+    // Decode **before** collapsing (spec §5.1). The URL spec collapses %2e/%2e%2e
+    // segments as dot segments too — decoding after collapsing leaves
+    // `%2e%2e/logo.png` unable to climb one level, so the browser finds the file
+    // while only we count it as missing. A file name's %20 becoming a real space
+    // happens at the same spot. The bundle key is the name on disk, not the
+    // document's spelling.
     const segment = decodeSegment(raw);
     if (!segment || segment === '.') continue;
     if (segment === '..') {
@@ -147,14 +153,16 @@ export function resolvePath(baseDir: string, url: string): string | null {
 }
 
 /**
- * `<base href>` 가 정한 실효 기준 디렉터리 (spec §5.1).
+ * The effective base directory set by `<base href>` (spec §5.1).
  *
- * 문서가 기준을 옮겨 두면 브라우저는 상대 참조를 거기서 푼다. 문서 자리만 보고
- * 찾으면 실제로 옆에 있는 파일을 없다고 세고, 프리뷰도 붙일 것을 안 붙인다.
- * href 가 있는 **첫** `<base>` 하나만 유효하다 — HTML 사양과 같다.
+ * When the document moves the base, the browser resolves relative references
+ * there. Looking only at the document's own location counts files that really sit
+ * next to it as missing, and the preview skips what it should attach.
+ * Only the **first** `<base>` with an href is effective — same as the HTML spec.
  *
- * @returns 묶음 안 기준 디렉터리 (뿌리는 빈 문자열). base 가 바깥(절대 URL)을
- *   가리키면 null — 그 문서의 상대 참조는 로컬 파일이 아니다.
+ * @returns The base directory inside the bundle (the root is the empty string).
+ *   null when base points outside (an absolute URL) — that document's relative
+ *   references are not local files.
  */
 export function documentBaseDir(source: string, docDir: string): string | null {
   const doc = parse(source);
@@ -175,29 +183,34 @@ export function documentBaseDir(source: string, docDir: string): string | null {
   if (isExternal(trimmed)) return null;
 
   const { path } = splitSuffix(trimmed);
-  // 질의·조각만 있는 base(`?v=2`·`#top`)는 자리를 옮기지 않는다 — URL 해석에서
-  // 문서 제 주소에 질의만 갈아 끼운 것이라 기준 디렉터리는 문서 자리 그대로다.
+  // A base with only a query or fragment (`?v=2`, `#top`) does not move the
+  // location — in URL resolution it is the document's own address with the query
+  // swapped, so the base directory stays the document's location.
   if (!path) return docDir;
-  // base 는 디렉터리가 아니라 URL 이다. `/` 로 끝나거나 마지막 조각이 `.`·`..`
-  // (인코딩 포함)이면 그 자체가 자리 표시라 통째로 접는다 — 풀기 전에 떼면
-  // `..`·`foo/..` 의 마지막 조각이 접히는 대신 잘려 나가, deck/sub 의 `..` 가
-  // deck 이 아니라 deck/sub 로 남는다 (spec §5.1).
+  // base is a URL, not a directory. Ending in `/`, or with a last segment of `.`
+  // or `..` (encoded forms included), it is itself a location marker, so collapse
+  // it whole — stripping before decoding cuts off the last segment of `..` and
+  // `foo/..` instead of collapsing it, leaving deck/sub's `..` at deck/sub
+  // instead of deck (spec §5.1).
   const segments = path.split('/');
   const last = decodeSegment(segments[segments.length - 1] ?? '');
   if (path.endsWith('/') || last === '.' || last === '..') return collapse(docDir, path);
-  // 마지막 조각은 파일 이름이다 — **인코딩된 조각째로** 떼어낸다. 조각 안의 %2F 는
-  // 구분자가 아니라 이름의 일부라, 푼 뒤에 떼면 이름 속 슬래시에서 잘린다.
+  // The last segment is a file name — strip it **as the encoded segment**. A %2F
+  // inside the segment is part of the name, not a separator, so stripping after
+  // decoding would cut at the slash inside the name.
   const dir = segments.slice(0, -1).join('/');
   if (dir) return collapse(docDir, `${dir}/`);
-  // 조각 하나짜리 base — 이름만 갈렸다. 절대면 뿌리, 아니면 문서 자리다.
+  // A single-segment base — only the name changed. Absolute means the root,
+  // otherwise the document's location.
   return path.startsWith('/') ? '' : docDir;
 }
 
 /**
- * 속성 위치에서 **값만** 잘라낸다.
+ * Carves **only the value** out of an attribute location.
  *
- * parse5 가 주는 범위는 `href="deck.css"` 전체다. 따옴표까지 바꾸면 다음 속성과
- * 붙어버리므로 `=` 뒤의 따옴표 안쪽만 골라낸다. 따옴표 없는 값도 받는다.
+ * The range parse5 gives covers all of `href="deck.css"`. Replacing the quotes too
+ * would fuse the value with the next attribute, so pick out just the inside of the
+ * quotes after `=`. Unquoted values are accepted as well.
  */
 function valueSpan(
   source: string,
@@ -218,9 +231,10 @@ function valueSpan(
 }
 
 /**
- * 문서가 참조하는 외부 자원을 모은다.
+ * Collects the external assets the document references.
  *
- * @param baseDir 문서가 놓인 디렉터리 (묶음 안에서의 경로). 루트면 빈 문자열
+ * @param baseDir The directory the document sits in (its path inside the bundle).
+ *   Empty string at the root
  */
 export function parseAssetRefs(source: string, baseDir = ''): AssetRef[] {
   const doc = parse(source, { sourceCodeLocationInfo: true });
@@ -232,9 +246,10 @@ export function parseAssetRefs(source: string, baseDir = ''): AssetRef[] {
       const attrs = node.sourceCodeLocation?.attrs;
       if (names && attrs) {
         for (const attr of node.attrs) {
-          // parse5 는 `xlink:href` 를 `{ name: 'href', prefix: 'xlink' }` 로 쪼개 두고
-          // 위치만 `xlink:href` 키로 남긴다. 이름만 보면 xlink 참조를 놓치거나,
-          // 둘 다 있는 문서에서 엉뚱한 쪽 값을 집는다.
+          // parse5 splits `xlink:href` into { name: 'href', prefix: 'xlink' } and
+          // keeps the location only under the `xlink:href` key. Looking at the name
+          // alone either misses xlink references or, in a document with both forms,
+          // grabs the wrong one's value.
           const key = attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name;
           const loc = attrs[key];
           if (!names.includes(key) || !loc) continue;
@@ -262,11 +277,12 @@ export function parseAssetRefs(source: string, baseDir = ''): AssetRef[] {
 }
 
 /**
- * 붙일 URL 에 다시 달 수 있는 것은 **조각뿐**이다.
+ * Of the suffix, only the **fragment** can go back onto the attached URL.
  *
- * 조각(`#icon`)은 지켜야 한다 — 잃으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
- * 질의(`?v=3`)는 버려야 한다 — blob URL 은 질의가 붙는 순간 만들어 둔 객체와
- * 다른 이름이 되어 브라우저가 아예 열지 못한다. 캐시 무력화는 blob 에는 의미도 없다.
+ * The fragment (`#icon`) must be kept — losing it loses what to pull from the
+ * sprite. The query (`?v=3`) must be dropped — the moment a query is appended, a
+ * blob URL names a different object than the one created, and the browser cannot
+ * open it at all. Cache busting means nothing for blobs anyway.
  */
 function blobSuffix(suffix: string): string {
   const hash = suffix.indexOf('#');
@@ -274,22 +290,25 @@ function blobSuffix(suffix: string): string {
 }
 
 /**
- * 참조 하나가 프리뷰에서 갖는 표기. 붙일 자원이 없으면 null — 그 자리는 그대로 둔다.
+ * One reference's spelling in the preview. null when there is no asset to attach —
+ * that spot stays as it is.
  *
- * 조각만 다시 붙인다. 없으면 스프라이트에서 무엇을 꺼낼지가 사라진다.
- * 조각은 디코딩된 값이라 되적기 전에 인코딩한다 (INV-8) — 엔티티로 적힌 따옴표가
- * 풀린 채 들어가면 속성이 조기 종료되어, 조각의 나머지가 프리뷰에서 새 속성
- * (onerror= 등)으로 승격된다.
+ * Only the fragment is reattached. Without it, what to pull from the sprite is lost.
+ * The fragment is a decoded value, so it is encoded before being written back
+ * (INV-8) — a quote written as an entity, inserted back decoded, terminates the
+ * attribute early and the rest of the fragment gets promoted to a new attribute
+ * (onerror= etc.) in the preview.
  *
- * 나가는 치환(assetEdits)과 되돌림 짝(assetSwaps)이 **여기 하나**를 쓴다 (ADR-011) —
- * 두 자리에서 따로 계산하면 반드시 어긋나는 짝이 생긴다.
+ * The outgoing substitution (assetEdits) and the reverse pair (assetSwaps) both use
+ * **this one function** (ADR-011) — computed separately in two places, a mismatched
+ * pair is guaranteed to appear.
  */
 function previewValue(ref: AssetRef, resolve: Resolve): { url: string; text: string } | null {
   const url = resolve(ref.path);
   return url ? { url, text: url + encodeAttribute(blobSuffix(ref.suffix)) } : null;
 }
 
-/** 붙일 자원이 있는 참조만 치환 목록으로 만든다 */
+/** Turns only the references with an attachable asset into a substitution list */
 export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] {
   const edits: Edit[] = [];
   for (const ref of refs) {
@@ -300,37 +319,41 @@ export function assetEdits(refs: readonly AssetRef[], resolve: Resolve): Edit[] 
 }
 
 /**
- * 프리뷰 치환 하나의 짝 — 나갈 때 `from`→`to`, 돌아올 때 `to`→`from` (ADR-011).
- * offset 은 전부 원본 문자열 기준이다 (INV-3).
+ * One preview substitution's pair — `from`→`to` going out, `to`→`from` coming back
+ * (ADR-011). All offsets are relative to the source string (INV-3).
  */
 export interface AssetSwap {
   start: number;
   end: number;
-  /** 원본에 적힌 그대로의 표기 (엔티티 포함) — 되돌릴 때 이 바이트로 돌아간다 */
+  /** the spelling exactly as in the source (entities included) — reversal restores these bytes */
   from: string;
-  /** 프리뷰 문서에 들어가는 표기 */
+  /** the spelling that goes into the preview document */
   to: string;
   /**
-   * 브라우저가 innerHTML 로 직렬화했을 때의 표기 짝. 원문 쪽(`serializedFrom`)까지
-   * `from`/`to` 와 같으면 생략한다.
+   * The pair's spelling when the browser serializes via innerHTML. Omitted when
+   * the source side (`serializedFrom`) also equals `from`/`to`.
    *
-   * 내보낸 보수적 인코딩(`&#32;` 등)은 브라우저를 한 바퀴 돌면 최소 인코딩으로
-   * 갈아 끼워져 돌아온다 — 내보낸 표기만 들고 있으면 그 편집에서 blob 이 샌다.
+   * The conservative encoding we send out (`&#32;` etc.) comes back swapped for
+   * the minimal encoding after a round trip through the browser — holding only
+   * the outgoing spelling leaks the blob in that edit.
    */
   serializedTo?: string;
   /**
-   * 직렬화 문맥으로 되돌릴 원문 표기 — `from` 에서 `"` 만 `&quot;` 로 잠근 것.
-   * 디코딩된 값을 재인코딩하면 원문의 엔티티 표기가 갈려 손대지 않은 속성의
-   * diff 가 생긴다 (대원칙 2).
+   * The source spelling to restore into the serialized context — `from` with only
+   * `"` locked as `&quot;`. Re-encoding the decoded value would grind down the
+   * source's entity spelling, creating a diff in an attribute the user never
+   * touched (Principle 2).
    */
   serializedFrom?: string;
 }
 
 /**
- * 문서 전체의 치환 짝 목록 — 속성 값과 `<style>` 본문 (spec §5.1 · ADR-011).
+ * The whole document's substitution pairs — attribute values and `<style>` bodies
+ * (spec §5.1 · ADR-011).
  *
- * 프리뷰 문서 조립도, 블록 단위의 양방향 경계(assetBoundary)도 이 목록 하나에서
- * 나온다. 붙일 자원이 없는 참조는 목록에 들지 않아 어느 방향으로도 건드리지 않는다.
+ * Both preview document assembly and the per-block two-way boundary
+ * (assetBoundary) come from this one list. References with no attachable asset
+ * never enter the list, so neither direction touches them.
  */
 export function assetSwaps(
   source: string,
@@ -342,14 +365,17 @@ export function assetSwaps(
   for (const ref of refs) {
     const value = previewValue(ref, resolve);
     if (value === null) continue;
-    // 되돌릴 값은 디코딩·재인코딩한 값이 아니라 **원본의 그 자리 슬라이스**다 —
-    // 치환했다 되돌린 결과가 바이트 단위로 같아야 한다 (대원칙 1·2).
+    // The value to restore is the **source slice at that position**, not a
+    // decoded-and-re-encoded value — substituting and reversing must be
+    // byte-identical (Principles 1 and 2).
     const from = source.slice(ref.valueStart, ref.valueEnd);
     const serializedTo = value.url + encodeAttributeSerialized(blobSuffix(ref.suffix));
-    // 직렬화 짝의 원문 쪽도 같은 원칙이다 — 디코딩된 값(ref.url)을 재인코딩하면
-    // 표준이 아닌 원문 엔티티(`&#32;` 등)가 최소 표기로 갈려, 그 블록을 고치는
-    // 순간 손대지 않은 속성의 표기가 바뀐다 (대원칙 2). 원본 슬라이스를 그대로
-    // 쓰되, 직렬화 문맥(큰따옴표)에서 값을 조기 종료시키는 `"` 만 바꾼다.
+    // The serialized pair's source side follows the same principle — re-encoding
+    // the decoded value (ref.url) grinds non-standard source entities (`&#32;`
+    // etc.) into the minimal spelling, and the moment that block is edited, the
+    // spelling of untouched attributes changes (Principle 2). Use the source
+    // slice as-is, changing only the `"` that terminates a value early in the
+    // serialized (double-quoted) context.
     const serializedFrom = requoteAttribute(from);
     const swap: AssetSwap = { start: ref.valueStart, end: ref.valueEnd, from, to: value.text };
     if (serializedTo !== value.text || serializedFrom !== from) {
@@ -358,7 +384,8 @@ export function assetSwaps(
     }
     swaps.push(swap);
   }
-  // <style> 본문은 rawtext 라 직렬화가 표기를 바꾸지 않는다 — 짝이 하나로 충분하다.
+  // <style> bodies are rawtext, so serialization does not change their spelling —
+  // one pair is enough.
   for (const edit of styleEdits(source, baseDir, resolve)) {
     swaps.push({
       start: edit.start,
@@ -371,52 +398,62 @@ export function assetSwaps(
 }
 
 /**
- * 프리뷰와 저장 사이의 양방향 경계 (ADR-011).
+ * The two-way boundary between preview and save (ADR-011).
  *
- * 마커는 블록이 겹치지 않아 블록 안으로 들어올 일이 없지만, 자원 치환은 블록
- * **안**에서도 일어난다. 나가는 조각은 치환하고, 돌아온 편집은 원문 표기로 되돌린다.
+ * Markers never land inside a block because blocks do not overlap, but asset
+ * substitution does happen **inside** blocks. Outgoing fragments get substituted;
+ * returning edits get restored to the source spelling.
  */
 export interface AssetBoundary {
   /**
-   * 원본 조각(블록 `sourceInner` 등)을 프리뷰용으로 — 조각 범위 안의 참조를
-   * 프리뷰 표기로 치환한다. @param textStart 조각이 원본에서 시작하는 offset (INV-3)
+   * A source fragment (a block's `sourceInner` etc.) for the preview — substitutes
+   * the references inside the fragment's range with the preview spelling.
+   * @param textStart the offset where the fragment starts in the source (INV-3)
    */
   toPreview(text: string, textStart: number): string;
   /**
-   * 프리뷰에서 돌아온 HTML 을 저장용으로 — 프리뷰 표기를 원문 표기로 되돌린다.
+   * HTML returned from the preview, for saving — restores preview spellings to the
+   * source spellings.
    *
-   * @param textStart/textEnd 이 HTML 이 나온 블록의 원본 범위 (INV-3). 주면 범위 안의
-   *   치환을 원문에 나온 순서대로 **각자 제 표기**로 되돌린다 — 같은 파일을 다르게
-   *   적은 참조(`logo.png` 와 `./logo.png`)는 프리뷰 표기가 같아, 표 하나로 되돌리면
-   *   손대지 않은 참조의 표기가 다른 자리의 표기로 갈린다 (대원칙 2). 자리에 맬 수
-   *   없는 표기는 먼저 나온 원문 표기로 되돌린다 (spec §5.1).
+   * @param textStart/textEnd the source range of the block this HTML came from
+   *   (INV-3). When given, substitutions inside the range are restored **each to
+   *   its own spelling**, in source order — references spelling the same file
+   *   differently (`logo.png` and `./logo.png`) share one preview spelling, and
+   *   restoring via a single table would grind an untouched reference's spelling
+   *   into another position's (Principle 2). Spellings that cannot be tied to a
+   *   position restore to the first source spelling seen (spec §5.1).
    */
   fromPreview(html: string, textStart?: number, textEnd?: number): string;
 }
 
 export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
-  // 자리에 맬 수 없는 표기의 되돌림 표. 같은 프리뷰 표기에 원문 표기가 여럿이면
-  // (`logo.png` 와 `./logo.png`) 먼저 나온 표기로 되돌린다 — 어느 쪽이든 같은 파일을
-  // 가리킨다. 자리를 아는 표기는 아래 fromPreview 가 치환 목록에서 직접 되돌린다.
+  // The restore table for spellings that cannot be tied to a position. When one
+  // preview spelling has several source spellings (`logo.png` and `./logo.png`),
+  // restore to the first one seen — either way it names the same file. Spellings
+  // whose position is known are restored directly from the swap list in
+  // fromPreview below.
   const back = new Map<string, string>();
   for (const swap of swaps) {
-    // 직렬화 짝이 먼저다 — fromPreview 가 받는 것은 브라우저가 직렬화한 HTML 이라,
-    // 두 표기가 같으면(to === serializedTo) 그 문맥에 맞는 쪽(serializedFrom,
-    // `"` 가 &quot; 로 잠긴 원본 슬라이스)으로 되돌려야 속성이 조기 종료되지 않는다.
+    // The serialized pair goes first — what fromPreview receives is HTML the
+    // browser serialized, so when the two spellings coincide (to === serializedTo)
+    // it must restore to the side that fits that context (serializedFrom, the
+    // source slice with `"` locked as &quot;) or the attribute terminates early.
     if (swap.serializedTo !== undefined && swap.serializedFrom !== undefined) {
       if (!back.has(swap.serializedTo)) back.set(swap.serializedTo, swap.serializedFrom);
     }
     if (!back.has(swap.to)) back.set(swap.to, swap.from);
   }
-  // 긴 표기부터 되돌린다 — 조각 없는 표기(`blob:u`)는 조각 있는 표기(`blob:u#icon`)의
-  // 접두사라, 짧은 쪽을 먼저 바꾸면 긴 쪽이 영영 안 잡혀 조각이 blob 이름에 남는다.
+  // Restore longer spellings first — a fragmentless spelling (`blob:u`) is a
+  // prefix of a fragmented one (`blob:u#icon`), and replacing the short one first
+  // means the long one never matches, leaving the fragment stuck to the blob name.
   const pairs = [...back].sort((a, b) => b[0].length - a[0].length);
 
-  /** 이 치환이 프리뷰 표기 `spelled` 로 나간 것이면 되돌릴 원문 표기, 아니면 null */
+  /** If this swap went out as preview spelling `spelled`, the source spelling to restore; otherwise null */
   const ownSpelling = (swap: AssetSwap, spelled: string): string | null => {
-    // 직렬화 짝이 먼저다 — fromPreview 가 받는 것은 브라우저가 직렬화한 HTML 이라,
-    // 두 표기가 같으면(to === serializedTo) 그 문맥에 맞는 쪽(serializedFrom,
-    // `"` 가 &quot; 로 잠긴 원본 슬라이스)으로 되돌려야 속성이 조기 종료되지 않는다.
+    // The serialized pair goes first — what fromPreview receives is HTML the
+    // browser serialized, so when the two spellings coincide (to === serializedTo)
+    // it must restore to the side that fits that context (serializedFrom, the
+    // source slice with `"` locked as &quot;) or the attribute terminates early.
     if (swap.serializedTo !== undefined && spelled === swap.serializedTo) {
       return swap.serializedFrom ?? swap.from;
     }
@@ -428,15 +465,17 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
       const inside: Edit[] = [];
       for (const swap of swaps) {
         if (swap.start < textStart || swap.end > textStart + text.length) continue;
-        // 자리의 내용까지 원문 표기와 맞아야 한다 — 다르면 이 조각은 원본의 그
-        // 자리가 아니므로 추측으로 바꾸지 않는다 (대원칙 3).
+        // The content at the position must match the source spelling too — if it
+        // differs, this fragment is not that spot in the source, so do not change
+        // it on a guess (Principle 3).
         if (text.slice(swap.start - textStart, swap.end - textStart) !== swap.from) continue;
         inside.push({ start: swap.start - textStart, end: swap.end - textStart, text: swap.to });
       }
       return applyEdits(text, inside);
     },
     fromPreview(html, textStart, textEnd) {
-      // 이 블록 범위 안의 치환 — 되돌림의 기준은 표가 아니라 자리다 (spec §5.1).
+      // The substitutions inside this block's range — restoration is anchored to
+      // positions, not the table (spec §5.1).
       const local =
         textStart === undefined || textEnd === undefined
           ? []
@@ -444,22 +483,26 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
               .filter((s) => s.start >= textStart && s.end <= textEnd)
               .sort((a, b) => a.start - b.start);
       if (local.length === 0) {
-        // 자리를 모르거나(범위 없이 불렸다) 범위 안에 치환이 없다 — 표로 되돌린다.
-        // blob URL 은 탭마다 새로 만든 무작위 이름이라 문서에 원래 있던 텍스트와
-        // 충돌하지 않는다 — 통째 문자열 치환으로 충분하다.
+        // Position unknown (called without a range) or no substitutions in the
+        // range — restore via the table. Blob URLs are random names newly minted
+        // per tab, so they cannot collide with text originally in the document —
+        // whole-string substitution is enough.
         let out = html;
         for (const [to, from] of pairs) if (to !== from) out = out.split(to).join(from);
         return out;
       }
-      // 왼쪽부터 훑으며 프리뷰 표기를 찾아, 범위 안의 치환에 나온 순서대로 맞춘다 —
-      // k번째로 나온 같은 표기는 이 블록의 k번째 그 표기 자리라, 각자 제 원문 표기로
-      // 돌아간다 (대원칙 2). 지우거나 옮겨 자리에 맬 수 없게 된 표기만 표(먼저 나온
-      // 원문 표기)로 되돌린다 — 어느 표기든 같은 파일을 가리킨다.
+      // Scan from the left for preview spellings, matching them in the order the
+      // range's substitutions appear — the k-th occurrence of a spelling is this
+      // block's k-th position with that spelling, so each restores to its own
+      // source spelling (Principle 2). Only spellings orphaned by deletion or
+      // reordering restore via the table (the first source spelling seen) —
+      // either spelling names the same file.
       const used = local.map(() => false);
       let out = '';
       let i = 0;
       scan: while (i < html.length) {
-        // 긴 표기부터 본다 — 조각 없는 표기는 조각 있는 표기의 접두사다 (pairs 정렬).
+        // Check longer spellings first — a fragmentless spelling is a prefix of a
+        // fragmented one (the pairs ordering).
         for (const [to, fallback] of pairs) {
           if (!html.startsWith(to, i)) continue;
           let from = fallback;
@@ -484,7 +527,7 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
   };
 }
 
-/** 따옴표 문자열의 끝 (닫는 따옴표 다음). 이스케이프를 건너뛴다 */
+/** The end of a quoted string (past the closing quote). Skips escapes */
 function endOfString(css: string, at: number): number {
   const quote = css[at];
   let i = at + 1;
@@ -500,11 +543,12 @@ function endOfString(css: string, at: number): number {
 }
 
 /**
- * CSS 이스케이프를 푼다 (CSS Syntax §4.3.7).
+ * Decodes CSS escapes (CSS Syntax §4.3.7).
  *
- * `url(my\ file.png)` 의 경로는 `my file.png` 다 — 안 풀면 백슬래시째 묶음의 키를
- * 찾아 실제로 옆에 있는 파일을 없다고 센다. 16진 이스케이프는 뒤따르는 공백
- * 하나까지가 이스케이프다 (`\61 b` 는 `ab`).
+ * The path in `url(my\ file.png)` is `my file.png` — undecoded, the bundle key is
+ * looked up backslash and all, counting a file that really sits there as missing.
+ * A hex escape includes the one whitespace character that follows it (`\61 b` is
+ * `ab`).
  */
 function decodeCssEscapes(text: string): string {
   let out = '';
@@ -518,23 +562,23 @@ function decodeCssEscapes(text: string): string {
     const hex = /^[0-9a-f]{1,6}/i.exec(text.slice(i + 1, i + 7));
     if (hex) {
       const code = parseInt(hex[0], 16);
-      // 사양대로 0·서로게이트·범위 밖은 U+FFFD 다 — 지어낸 문자를 만들지 않는다.
+      // Per spec, 0, surrogates, and out-of-range are U+FFFD — do not fabricate characters.
       out +=
         code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
           ? '�'
           : String.fromCodePoint(code);
       i += 1 + hex[0].length;
-      // 16진 뒤의 공백 하나는 이스케이프의 일부다. CRLF 는 한 덩어리로 센다.
+      // One whitespace character after the hex is part of the escape. CRLF counts as one unit.
       if (text[i] === '\r' && text[i + 1] === '\n') i += 2;
       else if (/[ \t\n\r\f]/.test(text[i] ?? '')) i++;
       continue;
     }
-    // `\` 뒤의 개행은 문자열 안의 줄 잇기다 — 아무 문자도 남기지 않는다.
+    // A newline after `\` is a line continuation inside a string — it leaves no character.
     if (/[\n\r\f]/.test(text[i + 1] ?? '')) {
       i += text[i + 1] === '\r' && text[i + 2] === '\n' ? 3 : 2;
       continue;
     }
-    // 그 밖의 `\X` 는 X 그대로다. 끝에 홀로 남은 `\` 는 적힌 대로 둔다.
+    // Any other `\X` is X itself. A lone trailing `\` stays as written.
     out += text[i + 1] ?? '\\';
     i += 2;
   }
@@ -542,15 +586,16 @@ function decodeCssEscapes(text: string): string {
 }
 
 /**
- * 되적을 조각의 CSS 이스케이프. 풀어 둔 값을 그대로 적으면 따옴표·괄호·공백이
- * `url()` 토큰을 끊는다 — 그 글자들만 16진으로 잠근다. 16진 뒤에 붙인 공백까지가
- * 이스케이프라 다음 글자와 붙어 읽히지 않는다.
+ * CSS-escapes the fragment being written back. Writing the decoded value as-is
+ * lets quotes, parentheses, and whitespace break the `url()` token — lock only
+ * those characters as hex. The whitespace appended after the hex is part of the
+ * escape, so it cannot fuse with the next character.
  */
 function encodeCssValue(text: string): string {
   return text.replace(/[\s"'()\\]/g, (c) => `\\${(c.codePointAt(0) ?? 0).toString(16)} `);
 }
 
-/** `url(` 다음부터 닫는 괄호까지를 뜯는다. 값 자체가 따옴표에 싸여 있을 수 있다 */
+/** Tears out everything from after `url(` to the closing paren. The value itself may be quoted */
 function readUrl(css: string, at: number): { value: string; quote: string; end: number } | null {
   let i = at;
   while (i < css.length && /\s/.test(css[i] ?? '')) i++;
@@ -564,8 +609,8 @@ function readUrl(css: string, at: number): { value: string; quote: string; end: 
     return css[j] === ')' ? { value, quote, end: j + 1 } : null;
   }
 
-  // 따옴표 없는 url 토큰은 **이스케이프되지 않은** `)` 에서 끝난다. indexOf 로 찾으면
-  // `url(foo\)bar.png)` 가 이스케이프된 괄호에서 잘려 없는 경로를 찾는다.
+  // An unquoted url token ends at an **unescaped** `)`. Searching with indexOf
+  // cuts `url(foo\)bar.png)` at the escaped paren and looks up a nonexistent path.
   let j = i;
   while (j < css.length && css[j] !== ')') j += css[j] === '\\' ? 2 : 1;
   if (j >= css.length) return null;
@@ -573,13 +618,15 @@ function readUrl(css: string, at: number): { value: string; quote: string; end: 
 }
 
 /**
- * CSS 안의 `url(...)` 을 바꾼다.
+ * Rewrites `url(...)` inside CSS.
  *
- * blob URL 에는 디렉터리가 없다. 스타일시트만 붙이고 이걸 안 바꾸면 그 안의 글꼴이
- * 기준을 잃어 전부 깨진다. `@import` 는 건드리지 않는다 (spec §5.1).
+ * A blob URL has no directory. Attaching only the stylesheet without rewriting
+ * these leaves the fonts inside with no base, so they all break. `@import` is left
+ * alone (spec §5.1).
  *
- * 문자열과 주석은 통째로 건너뛴다. `content: "url(icon.png)"` 는 자원을 가리키는
- * 함수가 아니라 **화면에 찍히는 글자**다. 이걸 바꾸면 없던 글자가 생긴다.
+ * Strings and comments are skipped whole. `content: "url(icon.png)"` is not a
+ * function pointing at an asset but **characters printed on screen**. Changing it
+ * creates characters that were never there.
  */
 export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): string {
   let out = '';
@@ -601,8 +648,9 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
       i = end;
       continue;
     }
-    // 토큰 경계 뒤의 url( 만 함수다. 식별자 한가운데서도 바꾸면 `--icon: myurl(x)`
-    // 같은 남의 함수 이름이 잘려 `myurl(blob:...)` 이 된다 — 자원이 아닌 값을 바꾸는 셈이다.
+    // Only url( after a token boundary is the function. Rewriting mid-identifier
+    // cuts up someone else's function name like `--icon: myurl(x)` into
+    // `myurl(blob:...)` — changing a value that is not an asset.
     if (
       css.slice(i, i + 4).toLowerCase() === 'url(' &&
       !/[-\w\u0080-\uffff]/.test(css[i - 1] ?? '')
@@ -612,7 +660,8 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
       const url = path === null ? undefined : resolve(path);
       if (token && url) {
         const { suffix } = splitSuffix(token.value.trim());
-        // 조각은 이스케이프를 푼 값이다 — 토큰을 끊는 글자만 다시 잠가 되적는다.
+        // The fragment is the escape-decoded value — lock only the token-breaking
+        // characters again when writing back.
         out += `url(${token.quote}${url}${encodeCssValue(blobSuffix(suffix))}${token.quote})`;
         i = token.end;
         continue;
@@ -626,7 +675,7 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
   return out;
 }
 
-/** CSS 가 가리키는 자원 경로만 모은다 — 무엇을 못 붙였는지 세기 위한 것이다 */
+/** Collects only the asset paths CSS points at — for counting what could not be attached */
 export function cssAssetPaths(css: string, baseDir: string): string[] {
   const paths: string[] = [];
   rewriteCssUrls(css, baseDir, (path) => {
@@ -636,7 +685,7 @@ export function cssAssetPaths(css: string, baseDir: string): string[] {
   return paths;
 }
 
-/** 문서에 박혀 있는 `<style>` 들의 본문. 무엇을 부르는지 세려면 텍스트가 필요하다 */
+/** The bodies of the `<style>` elements embedded in the document. Counting what they call needs the text */
 export function styleTexts(source: string): string[] {
   const doc = parse(source, { sourceCodeLocationInfo: true });
   const texts: string[] = [];
@@ -655,7 +704,7 @@ export function styleTexts(source: string): string[] {
   return texts;
 }
 
-/** 문서에 박혀 있는 `<style>` 안의 `url(...)` 도 같은 규칙으로 바꾼다 */
+/** `url(...)` inside the document's embedded `<style>` gets rewritten by the same rules */
 export function styleEdits(source: string, baseDir: string, resolve: Resolve): Edit[] {
   const doc = parse(source, { sourceCodeLocationInfo: true });
   const edits: Edit[] = [];

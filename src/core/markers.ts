@@ -1,34 +1,34 @@
 import type { Block } from './types.js';
 import { applyEdits, type Edit } from './edits.js';
 
-/** 프리뷰에서 DOM 노드를 원본 블록으로 되짚기 위한 표식 (ADR-003) */
+/** The mark used to trace a DOM node in the preview back to its source block (ADR-003) */
 export const MARKER_ATTR = 'data-ne-id';
 
-/** 잠긴 블록에 붙는 표식. 에이전트가 대조 결과를 받은 뒤 붙인다 */
+/** The mark attached to locked blocks. The agent attaches it after receiving the comparison result */
 export const LOCKED_ATTR = 'data-ne-locked';
 
-/** 배경이 어두운 블록에 붙는 표식. 에이전트가 렌더된 색을 재서 붙인다 */
+/** The mark attached to blocks on a dark background. The agent measures the rendered color and attaches it */
 export const DARK_ATTR = 'data-ne-dark';
 
-/** 변경 목록에서 고른 블록을 잠깐 짚어줄 때 붙는 표식 */
+/** The mark attached to briefly point out a block picked from the change list */
 export const REVEALED_ATTR = 'data-ne-revealed';
 
 export class MarkerError extends Error {}
 
 /**
- * 프리뷰용 HTML 을 만든다. 각 블록의 여는 태그에 `data-ne-id` 를 넣는다.
+ * Builds the preview HTML. Puts `data-ne-id` into each block's opening tag.
  *
- * 라이브 DOM 에서 뽑은 구조 경로는 쓸 수 없다. 아티팩트 스크립트가 DOM 을
- * 재구성하기 때문이다(실측 아티팩트의 `wrapSheets()` 는 슬라이드의 자식 전체를
- * 새 wrapper 로 옮긴다). `appendChild` 는 노드를 **이동**시키므로 속성은 그대로
- * 따라간다 — 마커는 DOM 을 어떻게 휘저어도 살아남는다.
+ * Structural paths taken from the live DOM cannot be used, because artifact scripts
+ * rebuild the DOM (the measured artifact's `wrapSheets()` moves every child of a slide
+ * into a new wrapper). `appendChild` **moves** nodes, so attributes travel with them —
+ * markers survive however the DOM is shuffled.
  *
- * 결과물은 **프리뷰 전용**이다. 저장 경로는 언제나 원본 문자열에서 출발하므로
- * 마커가 저장본에 섞일 수 없다 (INV-3).
+ * The output is **preview only**. The save path always starts from the source string,
+ * so markers can never leak into the saved file (INV-3).
  */
 export function markerEdits(source: string, blocks: readonly Block[]): Edit[] {
   return blocks.map((block) => {
-    // innerStart 는 여는 태그의 '>' 다음이다. 그 '>' 바로 앞에 넣는다.
+    // innerStart is just past the opening tag's '>'. Insert right before that '>'.
     const at = block.innerStart - 1;
     if (source[at] !== '>') {
       throw new MarkerError(`여는 태그 끝을 찾지 못했다: id=${block.id} <${block.tag}>`);
@@ -42,18 +42,19 @@ export function injectMarkers(source: string, blocks: readonly Block[]): string 
 }
 
 /**
- * 프리뷰 에이전트를 문서 맨 앞에 주입한다 (ADR-007).
+ * Injects the preview agent at the very front of the document (ADR-007).
  *
- * 주입 위치가 정확성 조건이다. 에이전트는 아티팩트 스크립트보다 **먼저** 리스너를
- * 걸어야 버블 단계에서 먼저 실행되고, 그래야 아티팩트의 전역 핸들러를 막을 수 있다.
- * 아티팩트 스크립트는 대개 `<body>` 끝에 있으므로 `<head>` 맨 앞이면 충분하다.
+ * The injection point is a correctness condition. The agent must register its
+ * listeners **before** the artifact scripts do, so it runs first in the bubble phase
+ * and can block the artifact's global handlers. Artifact scripts usually sit at the
+ * end of `<body>`, so the front of `<head>` is enough.
  */
 export function injectAgentScript(html: string, agentSource: string, token = ''): string {
-  // 에이전트 소스 안의 `</script>` 는 인라인 스크립트를 조기 종료시킨다.
+  // A `</script>` inside the agent source would terminate the inline script early.
   const safe = agentSource.replace(/<\/script/gi, '<\\/script');
-  // 문서마다 다른 표 — 에이전트가 모든 메시지에 붙여, 갈아탄 뒤 도착한 옛 프리뷰의
-  // 메시지를 호스트가 가려낼 수 있게 한다 (spec §5). `<` 는 이스케이프한다 —
-  // 표 안의 `</script` 가 인라인 스크립트를 조기 종료시키면 안 된다.
+  // A per-document token — the agent attaches it to every message so the host can
+  // filter out messages arriving from an old preview after switching (spec §5).
+  // `<` is escaped — a `</script` inside the token must not terminate the inline script.
   const arg = JSON.stringify(token).replace(/</g, '\\u003c');
   const script = `<script>(${safe})(${arg});</script>`;
 
@@ -65,22 +66,24 @@ export function injectAgentScript(html: string, agentSource: string, token = '')
 }
 
 /**
- * 편집 가능 여부를 화면에 보여주는 스타일을 주입한다 (spec §4).
+ * Injects the style that shows editability on screen (spec §4).
  *
- * 무엇을 고칠 수 있고 무엇이 잠겼는지 보이지 않으면 사용자는 클릭해 보며 추측해야 한다.
- * 못 고치는 것은 못 고친다고 **보여준다** (대원칙 3).
+ * Without seeing what can be edited and what is locked, the user has to guess by
+ * clicking around. What cannot be fixed is **shown** as unfixable (Principle 3).
  *
- * 아티팩트의 레이아웃을 흔들지 않는 것이 조건이다.
- * - `outline` 만 쓴다. `border` 는 박스 크기를 바꿔 문서가 밀린다
- * - 색·글꼴·간격은 건드리지 않는다
- * - 아티팩트 CSS 가 이겨 표시가 사라지면 안 되므로 이 몇 줄만 `!important` 다 —
- *   표시가 읽는 `--ne-*` 변수 정의까지. 이 스타일은 아티팩트 CSS 보다 먼저
- *   주입되므로, 변수를 지키지 않으면 같은 선택자 한 줄로 표시가 통째로 사라진다
+ * Not disturbing the artifact's layout is a requirement.
+ * - `outline` only. `border` changes box size and shifts the document
+ * - colors, fonts, spacing stay untouched
+ * - The marks must not vanish under winning artifact CSS, so only these few lines
+ *   are `!important` — including the `--ne-*` variable definitions the marks read.
+ *   This style is injected before the artifact CSS, so an unprotected variable can
+ *   be wiped out, marks and all, by a single same-selector line
  *
- * 표시는 흑백이다. 아티팩트마다 배색이 제각각이라 고정된 색은 어떤 문서에서는
- * 배경에 묻히고 어떤 문서에서는 아티팩트의 색을 침범한다.
- * 어느 쪽을 쓸지는 블록마다 다르므로(어두운 바탕 위의 밝은 카드) 에이전트가
- * 렌더된 배경을 재서 `data-ne-dark` 를 붙이고, 여기서는 그 표식만 본다.
+ * The marks are monochrome. Every artifact has its own palette; a fixed color sinks
+ * into the background in one document and clashes with the artifact's colors in
+ * another. Which side to use differs per block (a light card on a dark background),
+ * so the agent measures the rendered background and attaches `data-ne-dark`; here we
+ * only read that mark.
  */
 export function injectEditorStyle(html: string): string {
   const editable = `[${MARKER_ATTR}]:not([${LOCKED_ATTR}])`;
@@ -96,7 +99,7 @@ export function injectEditorStyle(html: string): string {
     'outline-offset:2px!important;background:var(--ne-tint)!important}' +
     `[${LOCKED_ATTR}]{cursor:not-allowed}` +
     `[${LOCKED_ATTR}]:hover{outline:2px dashed var(--ne-soft)!important;outline-offset:2px!important}` +
-    // 목록에서 고른 자리를 짚어준다. 스크롤만 하면 어디가 그 블록인지 알 수 없다.
+    // Point out the spot picked from the list. Scrolling alone cannot say which block it is.
     `[${REVEALED_ATTR}]{outline:2px solid var(--ne-mark)!important;outline-offset:2px!important;` +
     'background:var(--ne-tint)!important}' +
     '</style>';

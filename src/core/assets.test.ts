@@ -13,23 +13,23 @@ import {
 } from './assets.js';
 import { applyEdits } from './edits.js';
 
-/** 경로를 그대로 blob 흉내로 바꾼다 */
+/** Turns a path into a blob impostor as-is */
 const fake = (path: string): string => `blob:${path}`;
 
 describe('resolvePath', () => {
-  it('문서가 놓인 자리를 기준으로 푼다', () => {
+  it('resolves against the document location', () => {
     expect(resolvePath('', 'deck.css')).toBe('deck.css');
     expect(resolvePath('slides', 'deck.css')).toBe('slides/deck.css');
     expect(resolvePath('slides/2026', '../deck.css')).toBe('slides/deck.css');
     expect(resolvePath('slides', './img/logo.png')).toBe('slides/img/logo.png');
   });
 
-  it('절대 경로는 묶음의 뿌리를 기준으로 본다', () => {
+  it('absolute paths resolve against the bundle root', () => {
     expect(resolvePath('slides/2026', '/assets/deck.css')).toBe('assets/deck.css');
   });
 
-  it('밖으로 나가는 참조는 건드리지 않는다', () => {
-    // 이미 브라우저가 가져올 수 있거나, 애초에 자원이 아니다.
+  it('leaves outward references alone', () => {
+    // Either the browser can already fetch them, or they are not assets at all.
     for (const url of [
       'https://cdn.example.com/a.css',
       '//cdn.example.com/a.css',
@@ -44,56 +44,58 @@ describe('resolvePath', () => {
     }
   });
 
-  it('질의 문자열과 앵커를 떼어낸다', () => {
+  it('strips query strings and anchors', () => {
     expect(resolvePath('', 'deck.css?v=3')).toBe('deck.css');
     expect(resolvePath('', 'sprite.svg#icon')).toBe('sprite.svg');
   });
 
-  it('퍼센트 인코딩을 실제 파일 이름으로 되돌린다', () => {
-    // 묶음의 키는 문서에 적힌 표기가 아니라 디스크에 있는 이름이다.
+  it('turns percent-encoding back into the real file name', () => {
+    // The bundle key is the name on disk, not the spelling in the document.
     expect(resolvePath('', 'my%20deck.css')).toBe('my deck.css');
   });
 
-  it('인코딩된 점 조각도 점으로 접는다 (spec §5.1)', () => {
-    // URL 사양은 %2e 조각을 점 조각으로 접는다. 접은 뒤에 풀면 deck/sub 의
-    // %2e%2e/logo.png 가 deck/sub/../logo.png 로 남아, 실제로 옆에 있는
-    // deck/logo.png 를 없다고 센다.
+  it('collapses encoded dot segments as dots too (spec §5.1)', () => {
+    // The URL spec collapses %2e segments as dot segments. Decoding after collapsing
+    // leaves deck/sub's %2e%2e/logo.png as deck/sub/../logo.png, counting the
+    // deck/logo.png that really sits there as missing.
     expect(resolvePath('deck/sub', '%2e%2e/logo.png')).toBe('deck/logo.png');
     expect(resolvePath('deck/sub', '%2E%2E/logo.png')).toBe('deck/logo.png');
     expect(resolvePath('deck/sub', '%2e/logo.png')).toBe('deck/sub/logo.png');
   });
 
-  it('잘못된 인코딩의 조각은 적힌 그대로 두고, 나머지는 푼다', () => {
-    // 통째로 풀다 실패하면 멀쩡한 조각까지 표기 그대로 남는다 — 조각마다 따로 푼다.
+  it('leaves badly encoded segments written as-is and decodes the rest', () => {
+    // Decoding the whole string and failing would leave even healthy segments in
+    // their spelling — decode segment by segment.
     expect(resolvePath('', '100%/my%20deck.css')).toBe('100%/my deck.css');
   });
 
-  it('조각 안의 %2F 는 구분자로 풀지 않는다 (spec §5.1)', () => {
-    // 디스크의 파일 이름에는 슬래시가 있을 수 없다 — 풀면 이름의 일부가 경로
-    // 구분자로 변해, a%2Fb.png 라는 실제 파일 대신 a/b.png 라는 없는 자리를 찾는다.
+  it('does not decode %2F inside a segment into a separator (spec §5.1)', () => {
+    // A file name on disk cannot contain a slash — decoded, part of the name turns
+    // into a path separator, and the nonexistent a/b.png is looked up instead of the
+    // real file a%2Fb.png.
     expect(resolvePath('', 'a%2Fb.png')).toBe('a%2Fb.png');
-    // 표기(대소문자)는 적힌 그대로다 — 묶음의 키는 디스크의 이름이다.
+    // Its spelling (case) stays as written — the bundle key is the name on disk.
     expect(resolvePath('', 'a%2fb.png')).toBe('a%2fb.png');
-    // 같은 조각의 다른 인코딩은 여전히 풀린다.
+    // Other encodings in the same segment still decode.
     expect(resolvePath('', 'img/a%2Fb%20c.png')).toBe('img/a%2Fb c.png');
-    // %252F 의 %25 는 % 로 풀린다 — %2F 그 자체가 아니다.
+    // The %25 of %252F decodes to % — not to %2F itself.
     expect(resolvePath('', 'a%252Fb.png')).toBe('a%2Fb.png');
   });
 
-  it('뿌리 밖으로 나가려 해도 넘어가지 않는다', () => {
+  it('does not escape past the root', () => {
     expect(resolvePath('', '../../etc/passwd')).toBe('etc/passwd');
   });
 });
 
 describe('dirOf', () => {
-  it('문서가 놓인 디렉터리를 준다', () => {
+  it('gives the directory the document sits in', () => {
     expect(dirOf('slides/deck.html')).toBe('slides');
     expect(dirOf('deck.html')).toBe('');
   });
 });
 
 describe('parseAssetRefs', () => {
-  it('자원을 가리키는 속성을 찾는다', () => {
+  it('finds attributes that point at assets', () => {
     const refs = parseAssetRefs(
       '<link rel="stylesheet" href="deck.css">' +
         '<script src="app.js"></script>' +
@@ -103,12 +105,12 @@ describe('parseAssetRefs', () => {
     expect(refs.map((r) => r.path)).toEqual(['deck.css', 'app.js', 'logo.png', 'v.mp4', 'p.jpg']);
   });
 
-  it('<a href> 는 자원이 아니다', () => {
-    // 이동할 곳이다. blob 으로 바꾸면 링크가 엉뚱한 데로 간다.
+  it('<a href> is not an asset', () => {
+    // It is a place to navigate to. Turned into a blob, the link goes somewhere wrong.
     expect(parseAssetRefs('<a href="next.html">다음</a>')).toHaveLength(0);
   });
 
-  it('바깥 URL 은 목록에 넣지 않는다', () => {
+  it('does not list external URLs', () => {
     const refs = parseAssetRefs(
       '<link href="https://cdn.example.com/a.css"><img src="data:image/gif;base64,R0lGOD">'
     );
@@ -116,28 +118,28 @@ describe('parseAssetRefs', () => {
     expect(refs).toHaveLength(0);
   });
 
-  it('값 범위가 따옴표 안쪽만 가리킨다', () => {
+  it('the value range covers only the inside of the quotes', () => {
     const source = '<img src="logo.png">';
     const [ref] = parseAssetRefs(source);
 
     expect(source.slice(ref?.valueStart, ref?.valueEnd)).toBe('logo.png');
   });
 
-  it('따옴표 없는 값도 값만 가리킨다', () => {
+  it('unquoted values also point at just the value', () => {
     const source = '<img src=logo.png>';
     const [ref] = parseAssetRefs(source);
 
     expect(source.slice(ref?.valueStart, ref?.valueEnd)).toBe('logo.png');
   });
 
-  it('작은따옴표도 받는다', () => {
+  it('accepts single quotes too', () => {
     const source = "<img src='logo.png'>";
     const [ref] = parseAssetRefs(source);
 
     expect(source.slice(ref?.valueStart, ref?.valueEnd)).toBe('logo.png');
   });
 
-  it('문서가 하위 폴더에 있으면 그 자리를 기준으로 푼다', () => {
+  it('resolves against the document location when it sits in a subfolder', () => {
     const refs = parseAssetRefs('<img src="img/logo.png">', 'slides');
 
     expect(refs[0]?.path).toBe('slides/img/logo.png');
@@ -146,62 +148,64 @@ describe('parseAssetRefs', () => {
 });
 
 describe('documentBaseDir (spec §5.1)', () => {
-  it('<base href> 가 없으면 문서 자리가 기준이다', () => {
+  it('the document location is the base when there is no <base href>', () => {
     expect(documentBaseDir('<html><body><p>글</p></body></html>', 'deck')).toBe('deck');
   });
 
-  it('디렉터리 base 는 문서 자리에 이어 붙는다', () => {
+  it('a directory base is appended to the document location', () => {
     const source = '<html><head><base href="assets/"></head><body></body></html>';
     expect(documentBaseDir(source, '')).toBe('assets');
     expect(documentBaseDir(source, 'deck')).toBe('deck/assets');
   });
 
-  it('파일이 붙은 base 는 마지막 조각을 떼어낸다 — base 는 디렉터리가 아니라 URL 이다', () => {
+  it('a base with a file strips the last segment — base is a URL, not a directory', () => {
     const source = '<base href="assets/sub/page.html">';
     expect(documentBaseDir(source, '')).toBe('assets/sub');
   });
 
-  it('상위로 올라가는 base 를 접는다', () => {
+  it('collapses a base that climbs upward', () => {
     expect(documentBaseDir('<base href="../shared/">', 'deck')).toBe('shared');
   });
 
-  it('질의·조각만 있는 base 는 자리를 옮기지 않는다', () => {
-    // URL 해석에서 `?v=2` 는 문서 제 주소에 질의만 갈아 끼운 것이다 — 기준은
-    // 문서 자리 그대로여야지, 빈 경로를 접어 한 단계 올라가면 안 된다.
+  it('a query- or fragment-only base does not move the location', () => {
+    // In URL resolution, `?v=2` is the document's own address with the query
+    // swapped — the base must stay the document location, not collapse an empty
+    // path and climb a level.
     expect(documentBaseDir('<base href="?v=2">', 'deck/sub')).toBe('deck/sub');
     expect(documentBaseDir('<base href="#top">', 'deck/sub')).toBe('deck/sub');
   });
 
-  it('마지막 조각 속의 %2F 는 구분자가 아니라 이름의 일부다', () => {
-    // 푼 뒤에 파일 이름을 떼면 이름 속 슬래시에서 잘려, dir 이 아니라 dir/a 가 된다.
+  it('a %2F inside the last segment is part of the name, not a separator', () => {
+    // Stripping the file name after decoding cuts at the slash inside the name,
+    // giving dir/a instead of dir.
     expect(documentBaseDir('<base href="dir/a%2Fb.css">', '')).toBe('dir');
   });
 
-  it('마지막 조각이 점 조각이면 자리 표시다 — 파일 이름으로 떼지 않는다 (spec §5.1)', () => {
-    // 풀기 전에 마지막 조각을 떼면 deck/sub 의 `..` 가 deck 이 아니라
-    // deck/sub 로 남아, 상대 자원을 전부 엉뚱한 자리에서 찾는다.
+  it('a dot-segment last segment is a location marker — not stripped as a file name (spec §5.1)', () => {
+    // Stripping the last segment before decoding leaves deck/sub's `..` at
+    // deck/sub instead of deck, so every relative asset is looked up in the wrong place.
     expect(documentBaseDir('<base href="..">', 'deck/sub')).toBe('deck');
     expect(documentBaseDir('<base href=".">', 'deck/sub')).toBe('deck/sub');
     expect(documentBaseDir('<base href="foo/..">', 'deck/sub')).toBe('deck/sub');
     expect(documentBaseDir('<base href="%2e%2e">', 'deck/sub')).toBe('deck');
   });
 
-  it('뿌리 base 는 묶음의 최상단이다', () => {
+  it('a root base is the top of the bundle', () => {
     expect(documentBaseDir('<base href="/">', 'deck')).toBe('');
     expect(documentBaseDir('<base href="/assets/">', 'deck')).toBe('assets');
   });
 
-  it('바깥을 가리키는 base 는 null — 상대 참조가 로컬 파일이 아니다', () => {
+  it('a base pointing outside is null — relative references are not local files', () => {
     expect(documentBaseDir('<base href="https://cdn.example/">', '')).toBeNull();
     expect(documentBaseDir('<base href="//cdn.example/">', 'deck')).toBeNull();
   });
 
-  it('href 있는 첫 <base> 만 유효하다 — HTML 사양과 같다', () => {
+  it('only the first <base> with an href is effective — same as the HTML spec', () => {
     const source = '<base target="_blank"><base href="a/"><base href="b/">';
     expect(documentBaseDir(source, '')).toBe('a');
   });
 
-  it('그 기준으로 참조가 풀린다', () => {
+  it('references resolve against that base', () => {
     const source = '<base href="assets/"><link rel="stylesheet" href="style.css">';
     const refs = parseAssetRefs(source, documentBaseDir(source, '') ?? '');
     expect(refs.map((r) => r.path)).toEqual(['assets/style.css']);
@@ -209,7 +213,7 @@ describe('documentBaseDir (spec §5.1)', () => {
 });
 
 describe('assetEdits', () => {
-  it('붙일 자원이 있는 자리만 바꾼다', () => {
+  it('changes only the spots with an attachable asset', () => {
     const source = '<link href="deck.css"><img src="없다.png">';
     const refs = parseAssetRefs(source);
     const out = applyEdits(
@@ -217,12 +221,14 @@ describe('assetEdits', () => {
       assetEdits(refs, (path) => (path === 'deck.css' ? fake(path) : undefined))
     );
 
-    // 못 붙인 자리는 원본 그대로 둔다 — 있지도 않은 URL 로 바꾸면 더 나쁘다.
+    // Spots that could not be attached stay as the source — swapping in a
+    // nonexistent URL would be worse.
     expect(out).toBe('<link href="blob:deck.css"><img src="없다.png">');
   });
 
-  it('마커 주입과 한 목록에서 함께 적용된다', () => {
-    // 따로 적용하면 앞선 삽입이 뒤쪽 offset 을 밀어 엉뚱한 자리를 자른다.
+  it('applies together with marker injection in one list', () => {
+    // Applied separately, the earlier insertion shifts the later offsets and cuts
+    // the wrong spot.
     const source = '<p>글</p><img src="logo.png">';
     const refs = parseAssetRefs(source);
     const out = applyEdits(source, [
@@ -234,10 +240,11 @@ describe('assetEdits', () => {
   });
 });
 
-describe('assetEdits · 디코딩된 조각의 인코딩 (INV-8)', () => {
-  it('엔티티로 적힌 따옴표가 조각에 있어도 속성을 조기 종료시키지 않는다', () => {
-    // parse5 는 &quot; 를 " 로 풀어 준다. 그대로 되적으면 값이 거기서 끝나고,
-    // 조각의 나머지가 프리뷰에서 onerror= 같은 새 속성으로 승격된다.
+describe('assetEdits · encoding the decoded fragment (INV-8)', () => {
+  it('a quote written as an entity in the fragment does not terminate the attribute early', () => {
+    // parse5 resolves &quot; to " for us. Written back as-is, the value ends there
+    // and the rest of the fragment is promoted to a new attribute like onerror= in
+    // the preview.
     const source = '<img src="x.png#foo&quot; onerror=&quot;alert(1)">';
     const refs = parseAssetRefs(source);
     const edits = assetEdits(refs, () => 'blob:x');
@@ -245,12 +252,12 @@ describe('assetEdits · 디코딩된 조각의 인코딩 (INV-8)', () => {
     expect(edits[0]?.text).not.toContain('"');
     expect(edits[0]?.text).not.toContain(' ');
     const out = applyEdits(source, edits);
-    // 치환된 값이 여전히 원래 따옴표 안에 통째로 담겨 있어야 한다.
+    // The substituted value must still sit whole inside the original quotes.
     expect(out.startsWith('<img src="blob:x#foo')).toBe(true);
     expect(out.endsWith('">')).toBe(true);
   });
 
-  it('평범한 조각은 그대로 남는다', () => {
+  it('an ordinary fragment stays as it is', () => {
     const source = '<use href="sprite.svg#icon"/>';
     const refs = parseAssetRefs(source);
     const edits = assetEdits(refs, () => 'blob:s');
@@ -260,8 +267,8 @@ describe('assetEdits · 디코딩된 조각의 인코딩 (INV-8)', () => {
 });
 
 describe('rewriteCssUrls', () => {
-  it('스타일시트 안의 상대 경로를 그 파일 위치 기준으로 푼다', () => {
-    // blob URL 에는 디렉터리가 없다. 안 바꾸면 글꼴이 전부 깨진다.
+  it('resolves relative paths inside a stylesheet against that file location', () => {
+    // A blob URL has no directory. Left unchanged, every font breaks.
     const css = "@font-face{src:url('fonts/x.woff2')}";
 
     expect(rewriteCssUrls(css, 'assets', fake)).toBe(
@@ -269,7 +276,7 @@ describe('rewriteCssUrls', () => {
     );
   });
 
-  it('따옴표 유무와 공백을 보존한다', () => {
+  it('preserves quoting style and whitespace', () => {
     expect(rewriteCssUrls('a{background:url(bg.png)}', '', fake)).toBe(
       'a{background:url(blob:bg.png)}'
     );
@@ -278,14 +285,15 @@ describe('rewriteCssUrls', () => {
     );
   });
 
-  it('바깥 URL 과 못 찾은 자원은 그대로 둔다', () => {
+  it('leaves external URLs and unfound assets alone', () => {
     const css = 'a{background:url(https://cdn.example.com/x.png)}b{background:url(없다.png)}';
 
     expect(rewriteCssUrls(css, '', () => undefined)).toBe(css);
   });
 
-  it('식별자 한가운데의 url( 은 함수 이름의 일부라 바꾸지 않는다', () => {
-    // `--icon: myurl(x)` 를 바꾸면 자원이 아닌 남의 함수가 `myurl(blob:...)` 이 된다.
+  it('url( in the middle of an identifier is part of the function name; do not rewrite', () => {
+    // Rewriting `--icon: myurl(x)` turns someone else's non-asset function into
+    // `myurl(blob:...)`.
     const css = ':root{--icon: myurl(icon.png)}a{background:url(icon.png)}';
 
     expect(rewriteCssUrls(css, '', fake)).toBe(
@@ -293,21 +301,23 @@ describe('rewriteCssUrls', () => {
     );
   });
 
-  it('여는 괄호·쉼표·공백 같은 토큰 경계 뒤의 url( 은 바꾼다', () => {
+  it('rewrites url( after token boundaries like open parens, commas, whitespace', () => {
     expect(rewriteCssUrls('a{background:red url(bg.png),url(bg.png)}', '', fake)).toBe(
       'a{background:red url(blob:bg.png),url(blob:bg.png)}'
     );
   });
 
-  it('이스케이프된 괄호에서 값을 끊지 않는다 — 푼 값이 경로다', () => {
-    // indexOf(')') 로 찾으면 `foo\` 까지만 읽어, 멀쩡한 CSS 의 자원이 영영 붙지 않는다.
+  it('does not cut the value at an escaped paren — the decoded value is the path', () => {
+    // Searching with indexOf(')') reads only up to `foo\`, and the healthy CSS's
+    // asset never attaches.
     expect(rewriteCssUrls('a{background:url(foo\\)bar.png)}', '', fake)).toBe(
       'a{background:url(blob:foo)bar.png)}'
     );
   });
 
-  it('이스케이프를 푼 뒤에 경로로 해석한다 — 묶음의 키는 디스크의 이름이다', () => {
-    // 문자 이스케이프(`\ `)와 16진 이스케이프(`\61 `, 뒤 공백까지가 이스케이프) 모두.
+  it('interprets the path after decoding escapes — the bundle key is the name on disk', () => {
+    // Both character escapes (`\ `) and hex escapes (`\61 `, the trailing space
+    // being part of the escape).
     expect(rewriteCssUrls('a{background:url(my\\ file.png)}', '', fake)).toBe(
       'a{background:url(blob:my file.png)}'
     );
@@ -316,7 +326,7 @@ describe('rewriteCssUrls', () => {
     );
   });
 
-  it('따옴표 값 안의 이스케이프도 푼다', () => {
+  it('decodes escapes inside quoted values too', () => {
     expect(
       rewriteCssUrls('a{background:url("we\\"ird.png")}', '', (path) =>
         path === 'we"ird.png' ? 'blob:ok' : undefined
@@ -324,12 +334,12 @@ describe('rewriteCssUrls', () => {
     ).toBe('a{background:url("blob:ok")}');
   });
 
-  it('되적는 조각은 토큰을 끊는 글자만 다시 잠근다', () => {
-    // 풀린 조각의 `)` 를 그대로 적으면 url() 이 그 자리에서 닫힌다 — 16진으로 잠근다.
+  it('the written-back fragment re-locks only the token-breaking characters', () => {
+    // Writing the decoded fragment's `)` as-is closes url() right there — lock it as hex.
     expect(rewriteCssUrls('a{clip-path:url(s.svg\\#i\\)x)}', '', fake)).toBe(
       'a{clip-path:url(blob:s.svg#i\\29 x)}'
     );
-    // 평범한 조각은 그대로 나간다.
+    // An ordinary fragment goes out as it is.
     expect(rewriteCssUrls('a{clip-path:url(s.svg#round)}', '', fake)).toBe(
       'a{clip-path:url(blob:s.svg#round)}'
     );
@@ -337,50 +347,51 @@ describe('rewriteCssUrls', () => {
 });
 
 describe('styleEdits', () => {
-  it('문서에 박힌 <style> 안도 바꾼다', () => {
+  it('rewrites inside the document-embedded <style> too', () => {
     const source = '<style>body{background:url(bg.png)}</style><p>글</p>';
     const out = applyEdits(source, styleEdits(source, '', fake));
 
     expect(out).toBe('<style>body{background:url(blob:bg.png)}</style><p>글</p>');
   });
 
-  it('바꿀 것이 없으면 편집을 만들지 않는다', () => {
+  it('creates no edits when there is nothing to rewrite', () => {
     expect(styleEdits('<style>body{color:red}</style>', '', fake)).toHaveLength(0);
   });
 });
 
-describe('parseAssetRefs · 이름공간 속성', () => {
-  it('xlink:href 를 찾는다', () => {
-    // parse5 는 이걸 { name: 'href', prefix: 'xlink' } 로 쪼개 두고 위치만
-    // 'xlink:href' 키로 남긴다. 이름만 보면 통째로 놓친다.
+describe('parseAssetRefs · namespaced attributes', () => {
+  it('finds xlink:href', () => {
+    // parse5 splits this into { name: 'href', prefix: 'xlink' } and keeps the
+    // location only under the 'xlink:href' key. Looking at the name alone misses it entirely.
     const refs = parseAssetRefs('<svg><use xlink:href="sprite.svg#icon"/></svg>');
 
     expect(refs.map((r) => r.path)).toEqual(['sprite.svg']);
   });
 
-  it('두 형태가 함께 있어도 각자 제 값을 집는다', () => {
+  it('each form grabs its own value when both are present', () => {
     const source = '<svg><use xlink:href="old.svg#a"/><use href="new.svg#b"/></svg>';
     const refs = parseAssetRefs(source);
 
     expect(refs.map((r) => r.path)).toEqual(['old.svg', 'new.svg']);
     for (const ref of refs) {
-      // 값 범위가 제 속성을 가리켜야 한다 — 어긋나면 엉뚱한 자리를 바꾼다.
+      // The value range must point at its own attribute — misaligned, the wrong spot changes.
       expect(source.slice(ref.valueStart, ref.valueEnd)).toBe(ref.url);
     }
   });
 });
 
-describe('자원 참조의 질의와 조각', () => {
-  it('붙일 때 조각을 다시 단다', () => {
-    // #icon 을 잃으면 스프라이트에서 무엇을 꺼낼지가 사라져 아무것도 그리지 않는다.
+describe('queries and fragments of asset references', () => {
+  it('reattaches the fragment when attaching', () => {
+    // Losing #icon loses what to pull from the sprite, so nothing draws.
     const source = '<svg><use href="sprite.svg#icon"/></svg>';
     const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
 
     expect(out).toContain('href="blob:sprite.svg#icon"');
   });
 
-  it('질의는 떼고, 파일도 질의를 뺀 이름으로 찾는다', () => {
-    // blob URL 은 질의가 붙는 순간 만들어 둔 객체와 다른 이름이 되어 아예 열리지 않는다.
+  it('strips the query, and finds the file under the query-less name too', () => {
+    // The moment a query is appended, a blob URL names a different object than the
+    // one created and does not open at all.
     const source = '<link href="deck.css?v=3">';
     const [ref] = parseAssetRefs(source);
     const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
@@ -389,20 +400,20 @@ describe('자원 참조의 질의와 조각', () => {
     expect(out).toBe('<link href="blob:deck.css">');
   });
 
-  it('질의와 조각이 함께 있으면 조각만 남긴다', () => {
+  it('keeps only the fragment when query and fragment are both present', () => {
     const source = '<svg><use href="sprite.svg?v=2#icon"/></svg>';
     const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
 
     expect(out).toContain('href="blob:sprite.svg#icon"');
   });
 
-  it('CSS 안에서도 조각을 지킨다', () => {
+  it('keeps fragments inside CSS too', () => {
     expect(rewriteCssUrls('a{clip-path:url(shapes.svg#round)}', '', fake)).toBe(
       'a{clip-path:url(blob:shapes.svg#round)}'
     );
   });
 
-  it('CSS 안에서도 질의는 뗀다', () => {
+  it('strips queries inside CSS too', () => {
     expect(rewriteCssUrls('a{background:url("bg.png?v=3")}', '', fake)).toBe(
       'a{background:url("blob:bg.png")}'
     );
@@ -412,15 +423,16 @@ describe('자원 참조의 질의와 조각', () => {
   });
 });
 
-describe('rewriteCssUrls · 문자열과 주석', () => {
-  it('문자열 안의 url( 은 자원이 아니라 글자다', () => {
-    // content 는 화면에 찍히는 값이다. 바꾸면 없던 글자가 생긴다.
+describe('rewriteCssUrls · strings and comments', () => {
+  it('url( inside a string is characters, not an asset', () => {
+    // content is a value printed on screen. Changing it creates characters that
+    // were never there.
     const css = `a::after{content:'url(icon.png)'}`;
 
     expect(rewriteCssUrls(css, '', fake)).toBe(css);
   });
 
-  it('주석 안도 건드리지 않는다', () => {
+  it('does not touch the inside of comments either', () => {
     const css = '/* url(icon.png) 는 예시다 */ a{background:url(icon.png)}';
 
     expect(rewriteCssUrls(css, '', fake)).toBe(
@@ -428,56 +440,56 @@ describe('rewriteCssUrls · 문자열과 주석', () => {
     );
   });
 
-  it('따옴표에 싸인 값과 대문자 URL( 도 바꾼다', () => {
+  it('rewrites quoted values and uppercase URL( too', () => {
     expect(rewriteCssUrls('a{background:URL("bg.png")}', '', fake)).toBe(
       'a{background:url("blob:bg.png")}'
     );
   });
 
-  it('닫히지 않은 url( 은 그대로 둔다', () => {
+  it('leaves an unclosed url( alone', () => {
     expect(rewriteCssUrls('a{background:url(bg.png', '', fake)).toBe('a{background:url(bg.png');
   });
 });
 
 describe('cssAssetPaths', () => {
-  it('CSS 가 가리키는 자원 경로를 모은다 — 못 붙인 것을 세려면 목록이 필요하다', () => {
+  it('collects the asset paths CSS points at — counting what failed to attach needs the list', () => {
     const css = '@font-face{src:url(fonts/x.woff2)}a{background:url("../img/bg.png")}';
 
     expect(cssAssetPaths(css, 'assets')).toEqual(['assets/fonts/x.woff2', 'img/bg.png']);
   });
 
-  it('바깥 URL 은 세지 않는다', () => {
+  it('does not count external URLs', () => {
     expect(cssAssetPaths('a{background:url(https://cdn.example.com/x.png)}', '')).toEqual([]);
   });
 
-  it('남의 함수 이름에 붙은 url( 은 세지 않는다', () => {
-    // 세면 이 문서와 상관없는 파일을 찾으라고 조른다.
+  it("does not count url( attached to someone else's function name", () => {
+    // Counting it nags the user for a file unrelated to this document.
     expect(cssAssetPaths(':root{--icon: myurl(icon.png)}', '')).toEqual([]);
   });
 });
 
 describe('assetSwaps · assetBoundary (ADR-011)', () => {
-  /** 블록 안에 자원이 든 문서 — 치환이 편집 범위 안쪽에서 일어나는 경우다 */
+  /** A document with an asset inside a block — substitution happens inside the edit range */
   const source = '<p>설명 <span>사진 <img src="img/logo.png"></span></p><img src="없다.png">';
   const swaps = () => assetSwaps(source, parseAssetRefs(source), '', fake);
   const innerStart = source.indexOf('설명');
   const inner = source.slice(innerStart, source.indexOf('</p>'));
 
-  it('나가는 조각의 참조를 프리뷰 표기로 치환한다', () => {
+  it('substitutes references in an outgoing fragment with the preview spelling', () => {
     const out = assetBoundary(swaps()).toPreview(inner, innerStart);
 
     expect(out).toContain('src="blob:img/logo.png"');
-    // 조각의 나머지 바이트는 그대로다 — 치환은 값 범위만 바꾼다.
+    // The rest of the fragment's bytes stay — the substitution changes only the value range.
     expect(out.startsWith('설명 <span>사진 ')).toBe(true);
   });
 
-  it('치환했다 되돌리면 바이트 단위로 같다 (대원칙 1·2)', () => {
+  it('substituting and restoring is byte-identical (Principles 1 and 2)', () => {
     const boundary = assetBoundary(swaps());
 
     expect(boundary.fromPreview(boundary.toPreview(inner, innerStart))).toBe(inner);
   });
 
-  it('돌아온 편집의 blob URL 을 원문 표기로 되돌린다', () => {
+  it('restores blob URLs in a returning edit to the source spelling', () => {
     const edited = '고친 설명 <span>사진 <img src="blob:img/logo.png"></span>';
 
     expect(assetBoundary(swaps()).fromPreview(edited)).toBe(
@@ -485,9 +497,9 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('치환하지 않은 참조와 원래부터 blob: 인 표기는 어느 방향으로도 건드리지 않는다', () => {
-    // 없다.png 는 못 붙였고(resolve 가 undefined), 문서에 원래 적힌 blob: 은 외부
-    // 참조라 치환 목록에 들지 않는다.
+  it('touches neither unsubstituted references nor spellings that were blob: to begin with', () => {
+    // 없다.png could not be attached (resolve gave undefined), and a blob: originally
+    // written in the document is an external reference, so it never enters the swap list.
     const src = '<p><img src="없다.png"><img src="blob:이미있던것"></p>';
     const list = assetSwaps(src, parseAssetRefs(src), '', (p) =>
       p === '없다.png' ? undefined : fake(p)
@@ -499,9 +511,10 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     expect(boundary.fromPreview(body)).toBe(body);
   });
 
-  it('브라우저가 직렬화로 갈아 끼운 표기도 되돌린다', () => {
-    // 조각의 공백은 &#32; 로 나가지만, 브라우저 innerHTML 은 공백을 인코딩하지
-    // 않아 다른 표기로 돌아온다 — 그 표기의 짝도 들고 있어야 blob 이 안 샌다.
+  it('restores the spelling the browser swapped in through serialization too', () => {
+    // A space in the fragment goes out as &#32;, but the browser's innerHTML does
+    // not encode spaces, so it comes back in a different spelling — the pair for
+    // that spelling must be held too, or the blob leaks.
     const src = '<p><use href="sprite.svg#i con"/></p>';
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
@@ -510,10 +523,11 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('직렬화 짝도 원문 엔티티 표기로 되돌린다 (대원칙 2)', () => {
-    // parse5 가 준 값은 &#32; 가 이미 풀려 있다 — 디코딩된 값을 재인코딩해 짝을
-    // 만들면, 그 블록을 고치는 순간 손대지 않은 속성의 표기가 바뀐다.
-    // 원문 쪽도 원본 슬라이스가 기준이다.
+  it('the serialized pair also restores to the source entity spelling (Principle 2)', () => {
+    // The value parse5 gave has &#32; already resolved — building the pair by
+    // re-encoding the decoded value would change the spelling of untouched
+    // attributes the moment that block is edited.
+    // The source side is also anchored to the source slice.
     const src = '<p><use href="sprite.svg#i&#32;con"/></p>';
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
@@ -522,10 +536,11 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('원문의 날 큰따옴표만은 직렬화 문맥에 맞게 &quot; 로 잠근다', () => {
-    // 홑따옴표 원문에는 " 가 날 것으로 있을 수 있다. 직렬화 짝은 innerHTML 이
-    // 만든 큰따옴표 속성 안에 들어가므로, 날 것 그대로면 값이 조기 종료되어
-    // 뒤가 새 속성으로 풀린다. 파서를 지나면 같은 값이다.
+  it('only a raw double quote in the source is locked as &quot; for the serialized context', () => {
+    // A single-quoted source can hold a raw ". The serialized pair goes inside the
+    // double-quoted attribute innerHTML makes, so left raw the value terminates
+    // early and the rest parses as a new attribute. Through the parser it is the
+    // same value.
     const src = "<p><use href='sprite.svg#i\"c'/></p>";
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
@@ -534,9 +549,9 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('조각 없는 표기가 조각 있는 표기를 가로채지 않는다', () => {
-    // blob:sprite.svg 는 blob:sprite.svg#icon 의 접두사다. 짧은 쪽을 먼저 되돌리면
-    // 긴 쪽이 영영 안 잡혀 #icon 이 blob 이름 뒤에 남는다.
+  it('a fragmentless spelling does not hijack a fragmented one', () => {
+    // blob:sprite.svg is a prefix of blob:sprite.svg#icon. Restoring the short one
+    // first means the long one never matches, leaving #icon behind the blob name.
     const src = '<img src="sprite.svg"><use href="sprite.svg#icon"/>';
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
@@ -545,17 +560,19 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('자리를 모르면 같은 프리뷰 표기의 원문 표기 중 먼저 나온 것으로 되돌린다', () => {
-    // logo.png 와 ./logo.png 는 같은 파일이라 프리뷰 표기가 같다 — 블록 범위 없이
-    // 불리면 자리에 맬 수 없으므로, 결정적으로 첫 표기를 쓴다. 자리를 알 때는
-    // 아래 "자리마다 제 표기" 묶음이 각자 제 표기로 되돌린다 (spec §5.1).
+  it('with no position known, restores to the first source spelling of that preview spelling', () => {
+    // logo.png and ./logo.png are the same file, so they share one preview
+    // spelling — called without a block range there is no position to tie to, so
+    // the first spelling is used deterministically. With a position, the
+    // "each position its own spelling" group below restores each to its own
+    // (spec §5.1).
     const src = '<img src="logo.png"><img src="./logo.png">';
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
     expect(boundary.fromPreview('<img src="blob:logo.png">')).toBe('<img src="logo.png">');
   });
 
-  it('<style> 본문의 치환도 짝에 든다', () => {
+  it('substitutions in <style> bodies enter the pairs too', () => {
     const src = '<style>body{background:url(bg.png)}</style>';
     const list = assetSwaps(src, parseAssetRefs(src), '', fake);
     const boundary = assetBoundary(list);
@@ -566,8 +583,9 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('원문과 자리가 어긋난 조각은 추측으로 바꾸지 않는다 (대원칙 3)', () => {
-    // 다른 블록의 offset 을 들고 부르면 범위가 겹쳐도 내용이 다르다 — 그대로 둔다.
+  it('does not change a fragment whose content disagrees with its position on a guess (Principle 3)', () => {
+    // Called with another block's offset, the ranges overlap but the content
+    // differs — leave it alone.
     const boundary = assetBoundary(swaps());
 
     expect(
@@ -576,23 +594,23 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
   });
 });
 
-describe('assetBoundary · 자리마다 제 표기 (spec §5.1)', () => {
-  /** 같은 파일을 두 표기로 적은 블록 — 프리뷰 표기가 같아 표로는 못 가른다 */
+describe('assetBoundary · each position its own spelling (spec §5.1)', () => {
+  /** A block spelling the same file two ways — the preview spellings coincide, so a table cannot tell them apart */
   const src = '<p><img src="logo.png"> 사이 <img src="./logo.png"></p>';
   const start = 3;
   const end = src.indexOf('</p>');
   const inner = src.slice(start, end);
   const boundary = () => assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
-  it('치환했다 되돌리면 두 표기가 각자 제자리로 돌아간다 (대원칙 1·2)', () => {
+  it('substituting and restoring returns both spellings to their own places (Principles 1 and 2)', () => {
     const b = boundary();
 
     expect(b.fromPreview(b.toPreview(inner, start), start, end)).toBe(inner);
   });
 
-  it('글자만 고쳐도 손대지 않은 참조의 표기는 그대로다 (대원칙 2)', () => {
-    // 옛 코드는 표 하나로 되돌려 ./logo.png 가 logo.png 로 갈렸다 — 편집한 적 없는
-    // 속성의 diff 가 생긴다.
+  it('editing only the text keeps the spelling of untouched references (Principle 2)', () => {
+    // The old code restored via a single table, grinding ./logo.png into logo.png —
+    // a diff in an attribute never edited.
     const edited = '<img src="blob:logo.png"> 고친 글 <img src="blob:logo.png">';
 
     expect(boundary().fromPreview(edited, start, end)).toBe(
@@ -600,8 +618,9 @@ describe('assetBoundary · 자리마다 제 표기 (spec §5.1)', () => {
     );
   });
 
-  it('질의만 다른 두 참조도 제 표기로 돌아간다', () => {
-    // 질의는 blob URL 에 붙이지 않아 프리뷰 표기가 같아진다 — 되돌릴 때는 각자다.
+  it('two references differing only in the query also return to their own spellings', () => {
+    // Queries are not appended to blob URLs, so the preview spellings coincide —
+    // restoration keeps them apart.
     const q = '<p><img src="logo.png?v=1"><img src="logo.png?v=2"></p>';
     const qEnd = q.indexOf('</p>');
     const qInner = q.slice(3, qEnd);
@@ -610,9 +629,10 @@ describe('assetBoundary · 자리마다 제 표기 (spec §5.1)', () => {
     expect(b.fromPreview(b.toPreview(qInner, 3), 3, qEnd)).toBe(qInner);
   });
 
-  it('직렬화 짝도 자리마다 제 표기다', () => {
-    // 두 조각의 디코딩 값이 같아 브라우저 직렬화 표기도 같다 — 원문 엔티티 표기는
-    // 자리마다 다르므로 각자 제 표기로 돌아가야 한다.
+  it('serialized pairs are also per-position spellings', () => {
+    // The two fragments decode to the same value, so their browser-serialized
+    // spellings coincide — the source entity spellings differ per position, so
+    // each must return to its own.
     const e = '<p><use href="sprite.svg#i&#32;con"/><use href="sprite.svg#i con"/></p>';
     const eEnd = e.indexOf('</p>');
     const b = assetBoundary(assetSwaps(e, parseAssetRefs(e), '', fake));
@@ -626,16 +646,18 @@ describe('assetBoundary · 자리마다 제 표기 (spec §5.1)', () => {
     ).toBe('<use href="sprite.svg#i&#32;con"></use><use href="sprite.svg#i con"></use>');
   });
 
-  it('지워서 수가 안 맞으면 먼저 나온 원문 표기로 되돌린다', () => {
-    // 어느 자리의 것인지 증명할 수 없다 — 추측 대신 결정적인 첫 표기를 쓴다.
-    // 어느 표기든 같은 파일을 가리키고, 그 블록은 사용자가 실제로 고친 범위다.
+  it('restores to the first source spelling when a deletion leaves the counts unequal', () => {
+    // Which position it belonged to cannot be proven — use the deterministic first
+    // spelling instead of a guess. Either spelling names the same file, and that
+    // block is the range the user actually edited.
     expect(boundary().fromPreview('<img src="blob:logo.png">', start, end)).toBe(
       '<img src="logo.png">'
     );
   });
 
-  it('다른 블록에서 복사해 온 blob 표기는 표로 되돌린다', () => {
-    // 범위 안에 그 표기의 치환이 없어도 blob URL 을 남길 수는 없다 (INV-9).
+  it('a blob spelling copied in from another block restores via the table', () => {
+    // Even with no substitution of that spelling inside the range, a blob URL
+    // cannot be left behind (INV-9).
     const two = '<p><img src="a.png"></p><p><img src="b.png"></p>';
     const firstEnd = two.indexOf('</p>');
     const b = assetBoundary(assetSwaps(two, parseAssetRefs(two), '', fake));

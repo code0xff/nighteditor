@@ -10,10 +10,12 @@ import { fixtureBundle } from '../__fixtures__/load.js';
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 /**
- * 손으로 조립한 바이트가 아니라 **진짜 zip** 으로 검사한다.
- * 직접 만든 헤더는 내 오해까지 그대로 베껴 담아서, 파서가 맞는지 틀리는지를 가리지 못한다.
+ * Tested against **real zips**, not hand-assembled bytes.
+ * Headers we build ourselves copy in our own misunderstandings, so they cannot
+ * tell whether the parser is right or wrong.
  *
- * 기본은 커밋된 픽스처다. `zip` 이 있는 환경에서는 그 자리에서 만든 것도 함께 본다.
+ * The committed fixture is the baseline. Where the `zip` command exists, zips made
+ * on the spot are checked as well.
  */
 function realZip(files: Record<string, string>, args: string[] = []): Uint8Array {
   const dir = mkdtempSync(join(tmpdir(), 'ne-zip-'));
@@ -35,12 +37,12 @@ function hasZipCommand(): boolean {
   }
 }
 
-describe('readZip · 픽스처 회귀', () => {
+describe('readZip · fixture regression', () => {
   const entries = readZip(fixtureBundle());
   const find = (name: string) => entries.find((e) => e.name === name);
 
-  it('하위 폴더의 경로를 그대로 유지한다', () => {
-    // 문서가 deck/ 안에 있으므로 자원도 그 자리를 기준으로 찾아야 한다.
+  it('keeps subfolder paths intact', () => {
+    // The document sits in deck/, so assets must be found relative to that spot.
     expect(entries.map((e) => e.name).sort()).toEqual([
       'deck/css/deck.css',
       'deck/fonts/mono.woff2',
@@ -50,50 +52,52 @@ describe('readZip · 픽스처 회귀', () => {
     ]);
   });
 
-  it('디렉터리 항목과 __MACOSX 는 파일이 아니다', () => {
+  it('directory entries and __MACOSX are not files', () => {
     expect(entries.some((e) => e.name.endsWith('/'))).toBe(false);
     expect(entries.some((e) => e.name.startsWith('__MACOSX/'))).toBe(false);
   });
 
-  it('풀었을 때의 크기를 중앙 디렉터리에서 읽는다', () => {
-    // 로컬 헤더의 크기 칸은 비어 있을 수 있다. 중앙 디렉터리는 언제나 채워져 있다.
+  it('reads the decompressed size from the central directory', () => {
+    // The local header's size fields can be empty. The central directory is always filled in.
     expect(find('deck/index.html')?.size).toBeGreaterThan(300);
     expect(find('deck/img/logo.svg')?.size).toBe(107);
   });
 
-  it('압축된 항목은 deflate 로 표시된다', () => {
+  it('compressed entries are marked deflate', () => {
     expect(find('deck/index.html')?.method).toBe(8);
   });
 
-  it('풀었을 때의 CRC 를 중앙 디렉터리에서 읽는다', () => {
-    // 크기만으로는 같은 크기로 깨진 바이트를 못 가린다 — 내용 검사는 이 값으로 한다.
+  it('reads the decompressed CRC from the central directory', () => {
+    // Size alone cannot catch bytes corrupted at the same size — content checks use this value.
     const stored = find('deck/js/deck.js');
     expect(stored?.method).toBe(0);
-    // 그대로 담긴 항목은 data 가 곧 풀린 바이트다. 기준은 node 의 crc32 다.
+    // For stored entries, data is already the decompressed bytes. node's crc32 is the baseline.
     expect(stored?.crc).toBe(crc32(stored?.data ?? new Uint8Array()));
   });
 
-  it('끝이 잘리면 이유를 들고 던진다', () => {
+  it('throws with a reason when the end is cut off', () => {
     const zip = fixtureBundle();
 
     expect(() => readZip(zip.subarray(0, zip.length - 8))).toThrow(ZipError);
   });
 
-  it('zip 이 아니면 조용히 빈 목록을 주지 않는다', () => {
-    // 조용히 넘어가면 "열었는데 아무것도 없다" 로 보인다 (대원칙 3).
+  it('does not silently return an empty list for a non-zip', () => {
+    // Passing silently looks like "opened it, but there is nothing inside" (Principle 3).
     expect(() => readZip(new TextEncoder().encode('이건 zip 이 아니다'))).toThrow(ZipError);
   });
 
-  it('주석 안에 EOCD 시그니처 바이트가 있어도 진짜 EOCD 를 찾는다', () => {
-    // 뒤에서부터 훑다 주석 속 바이트를 먼저 만나면, 주석이 목차 위치·개수로 풀려
-    // 멀쩡한 zip 이 깨졌다며 거절된다. 진짜 EOCD 는 주석이 버퍼 끝까지 닿는다.
+  it('finds the real EOCD even when the comment contains EOCD signature bytes', () => {
+    // Scanning from the back, meeting the bytes inside the comment first turns the
+    // comment into a directory position and count, and a healthy zip is rejected as
+    // broken. The real EOCD's comment reaches to the end of the buffer.
     const zip = fixtureBundle();
-    // 시그니처 네 바이트 뒤로 'x' 를 길게 — 그 자리를 EOCD 로 읽으면 어느 칸도 맞지 않는다.
+    // A long run of 'x' after the four signature bytes — read as an EOCD, none of its fields line up.
     const comment = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...Array(30).fill(0x78)]);
     const withComment = new Uint8Array(zip.length + comment.length);
     withComment.set(zip);
     withComment.set(comment, zip.length);
-    // 픽스처는 주석이 없다 — EOCD 가 마지막 22바이트라, 주석 길이 칸은 끝에서 두 바이트다.
+    // The fixture has no comment — the EOCD is the last 22 bytes, so the comment
+    // length field is the last two bytes.
     new DataView(withComment.buffer).setUint16(zip.length - 2, comment.length, true);
 
     const names = readZip(withComment).map((e) => e.name);
@@ -101,17 +105,18 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
-  it('주석 끝의 가짜 EOCD 레코드를 진짜로 믿지 않는다', () => {
-    // 주석이 22바이트짜리 EOCD 모양으로 끝나면(제 주석 길이 0 → 끝에 닿음) 끝-정렬
-    // 검사만으로는 걸러지지 않는다. 개수·목차 위치가 0 인 가짜를 믿으면 멀쩡한 zip 이
-    // 빈 묶음으로 열린다 — 목차 칸이 실제 목차를 가리키는지까지 봐야 한다.
+  it('does not take a fake EOCD record at the end of the comment for the real one', () => {
+    // A comment ending in a 22-byte EOCD shape (own comment length 0, so it touches
+    // the end) is not filtered by the end-alignment check alone. Trusting a fake with
+    // count and directory position 0 opens a healthy zip as an empty bundle — the
+    // directory field must be checked to point at an actual directory.
     const zip = fixtureBundle();
     const fake = new Uint8Array(22);
-    new DataView(fake.buffer).setUint32(0, 0x06054b50, true); // 나머지 칸은 전부 0
+    new DataView(fake.buffer).setUint32(0, 0x06054b50, true); // every other field stays 0
     const withComment = new Uint8Array(zip.length + fake.length);
     withComment.set(zip);
     withComment.set(fake, zip.length);
-    // 진짜 EOCD 의 주석 길이 칸이 뒤에 붙인 가짜까지 덮게 한다.
+    // Make the real EOCD's comment length field cover the appended fake.
     new DataView(withComment.buffer).setUint16(zip.length - 2, fake.length, true);
 
     const names = readZip(withComment).map((e) => e.name);
@@ -119,15 +124,16 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
-  it('제 위치를 목차 칸에 적은 가짜 "빈 zip" EOCD 에도 속지 않는다', () => {
-    // 빈 zip 의 목차는 크기 0 이라 EOCD 자리에서 시작한다. 가짜도 제 위치를 목차
-    // 칸에 적으면 같은 꼴이 된다 — 그 자리만 보고 믿으면 멀쩡한 zip 이 빈 묶음으로
-    // 열린다. 더 앞의 실제 목차가 달린 EOCD 가 이겨야 한다.
+  it('is not fooled by a fake "empty zip" EOCD writing its own position into the directory field', () => {
+    // An empty zip's directory has size 0 and starts at the EOCD position. A fake
+    // writing its own position into the directory field has the same shape — trusting
+    // it on sight opens a healthy zip as an empty bundle. The earlier EOCD with an
+    // actual directory must win.
     const zip = fixtureBundle();
     const fake = new Uint8Array(22);
     const fakeView = new DataView(fake.buffer);
     fakeView.setUint32(0, 0x06054b50, true);
-    fakeView.setUint32(16, zip.length, true); // 목차 위치 = 가짜 레코드 제 위치
+    fakeView.setUint32(16, zip.length, true); // directory position = the fake record's own position
     const withComment = new Uint8Array(zip.length + fake.length);
     withComment.set(zip);
     withComment.set(fake, zip.length);
@@ -138,22 +144,24 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
-  it('진짜 빈 zip 은 빈 목록으로 열린다 — 문서가 없다는 사정은 부르는 쪽이 말한다', () => {
-    // 빈 zip 은 EOCD 하나가 전부다. 이것까지 거절하면 "zip 이 아니다" 가 거짓말이 된다.
+  it('a genuinely empty zip opens as an empty list — the caller states that there is no document', () => {
+    // An empty zip is one EOCD and nothing else. Rejecting it too would make
+    // "not a zip" a lie.
     const empty = new Uint8Array(22);
     new DataView(empty.buffer).setUint32(0, 0x06054b50, true);
 
     expect(readZip(empty)).toEqual([]);
   });
 
-  it('주석 끝의 zip64 흉내 레코드에 속지 않는다 — 진짜 목차로 연다', () => {
-    // zip64 칸(0xFF..)을 실은 가짜는 끝-정렬 검사를 통과하고, 즉시 믿으면 멀쩡한
-    // zip 이 "zip64 미지원" 으로 거절된다. 받아 두고 더 앞의 진짜 EOCD 를 찾아야 한다.
+  it('is not fooled by a zip64-imitating record at the end of the comment — opens via the real directory', () => {
+    // A fake carrying zip64 fields (0xFF..) passes the end-alignment check, and
+    // trusting it on sight rejects a healthy zip as "zip64 unsupported". It must be
+    // held while the real EOCD further forward is found.
     const zip = fixtureBundle();
     const fake = new Uint8Array(22);
     const fakeView = new DataView(fake.buffer);
     fakeView.setUint32(0, 0x06054b50, true);
-    fakeView.setUint16(10, 0xffff, true); // 항목 수를 zip64 표식으로
+    fakeView.setUint16(10, 0xffff, true); // entry count as the zip64 marker
     const withComment = new Uint8Array(zip.length + fake.length);
     withComment.set(zip);
     withComment.set(fake, zip.length);
@@ -164,9 +172,9 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/index.html');
   });
 
-  it('진짜 목차가 없는 zip64 꼴은 미지원 사유로 멈춘다 — zip 이 아니라고 하지 않는다', () => {
-    // zip64 는 이 칸들을 0xFF.. 로 채우고 실제 값을 따로 둔다. 읽지는 못해도
-    // 사유는 정확해야 한다 (대원칙 3).
+  it('a zip64 shape with no real directory stops with the unsupported reason — not "not a zip"', () => {
+    // zip64 fills these fields with 0xFF.. and keeps the real values elsewhere.
+    // Even what we cannot read deserves an accurate reason (Principle 3).
     const eocd = new Uint8Array(22);
     const dv = new DataView(eocd.buffer);
     dv.setUint32(0, 0x06054b50, true);
@@ -175,9 +183,10 @@ describe('readZip · 픽스처 회귀', () => {
     expect(() => readZip(eocd)).toThrow(expect.objectContaining({ code: 'zip64' }));
   });
 
-  it('EOCD 보다 짧은 입력은 zip 이 아니라는 사유로 멈춘다', () => {
-    // 훑기 시작점이 음수라 아예 돌지 않고, 우리 진단으로 떨어져야 한다 —
-    // DataView 의 RangeError 원문이 새면 언어팩 대신 브라우저 문장이 보인다.
+  it('input shorter than an EOCD stops with the not-a-zip reason', () => {
+    // The scan start is negative, so the loop never runs and it must fall through to
+    // our diagnostic — a leaked DataView RangeError shows the browser's sentence
+    // instead of the language pack's.
     for (const len of [0, 1, 10, 21]) {
       expect(() => readZip(new Uint8Array(len).fill(0x50))).toThrow(
         expect.objectContaining({ code: 'notZip' })
@@ -185,12 +194,14 @@ describe('readZip · 픽스처 회귀', () => {
     }
   });
 
-  it('목차가 버퍼 밖의 로컬 헤더를 가리키면 우리 진단으로 멈춘다', () => {
-    // DataView 의 RangeError 가 먼저 터지면 언어팩 진단 대신 브라우저 원문이 나간다.
+  it('stops with our diagnostic when the directory points at a local header outside the buffer', () => {
+    // If the DataView's RangeError fires first, the browser's raw sentence goes out
+    // instead of the language pack diagnostic.
     const zip = new Uint8Array(fixtureBundle());
     const dv = new DataView(zip.buffer);
-    // 픽스처는 주석이 없어 EOCD 가 마지막 22바이트다. 디렉터리 항목은 로컬 헤더를
-    // 읽기 전에 걸러지므로, 목차를 걸어 **첫 파일 항목**의 로컬 위치를 조작한다.
+    // The fixture has no comment, so the EOCD is the last 22 bytes. Directory entries
+    // are filtered before the local header is read, so walk the directory and tamper
+    // with the **first file entry's** local position.
     const centralAt = dv.getUint32(zip.length - 22 + 16, true);
     let at = centralAt;
     for (;;) {
@@ -204,20 +215,21 @@ describe('readZip · 픽스처 회귀', () => {
     expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badLocal' }));
   });
 
-  it('목차 항목이 EOCD 를 넘어가면 지어낸 항목 없이 멈춘다', () => {
-    // 이름 길이를 부풀린 목차는 subarray 가 조용히 잘라 준 바이트로 가짜 이름을
-    // 만들고, 커서는 버퍼 밖으로 걸어 나간다. 항목 하나짜리 목차라면 그 가짜가
-    // 유일한 "파일" 이 되어, 깨진 zip 이 문서 없는 묶음 행세를 한다 (spec §6).
+  it('stops without invented entries when a directory record overruns the EOCD', () => {
+    // A directory with an inflated name length builds a fake name from the bytes
+    // subarray silently truncates, and the cursor walks out of the buffer. In a
+    // one-entry directory that fake becomes the only "file", and a broken zip poses
+    // as a bundle without a document (spec §6).
     const zip = new Uint8Array(fixtureBundle());
     const dv = new DataView(zip.buffer);
-    dv.setUint16(zip.length - 22 + 10, 1, true); // 항목 수를 1로 — 넘친 항목이 마지막이 되게
+    dv.setUint16(zip.length - 22 + 10, 1, true); // entry count 1 — the overrunning entry becomes the last
     const centralAt = dv.getUint32(zip.length - 22 + 16, true);
-    dv.setUint16(centralAt + 28, 0xffff, true); // 이름 길이를 부풀린다
+    dv.setUint16(centralAt + 28, 0xffff, true); // inflate the name length
 
     expect(() => readZip(zip)).toThrow(expect.objectContaining({ code: 'badCentral' }));
   });
 
-  /** 이름이 `want` 인 중앙 레코드의 위치. 픽스처엔 부가 필드가 없어 이름은 ASCII 그대로다 */
+  /** Position of the central record named `want`. The fixture has no extra fields, so names are plain ASCII */
   function centralRecordOf(zip: Uint8Array, want: string): number {
     const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     let at = dv.getUint32(zip.length - 22 + 16, true);
@@ -229,20 +241,21 @@ describe('readZip · 픽스처 회귀', () => {
     }
   }
 
-  it('UTF-8 표시가 없는 이름은 CP437 로 읽는다', () => {
-    // 픽스처의 이름은 전부 플래그 0(UTF-8 표시 없음)으로 적혀 있다. 이름에 0x82 를
-    // 심으면 CP437 로는 é, 무조건 UTF-8 로 풀면 U+FFFD 다 — 키가 깨지면 문서 후보도
-    // 상대 자원도 그 이름으로는 안 잡힌다.
+  it('reads names without the UTF-8 flag as CP437', () => {
+    // The fixture names are all written with flag 0 (no UTF-8 flag). Planting 0x82 in
+    // a name gives é in CP437 but U+FFFD when decoded unconditionally as UTF-8 — with
+    // the key broken, neither document candidates nor relative assets are found under
+    // that name.
     const zip = new Uint8Array(fixtureBundle());
     const at = centralRecordOf(zip, 'deck/index.html');
-    zip[at + 46 + 'deck/'.length] = 0x82; // 'index' 의 i 자리
+    zip[at + 46 + 'deck/'.length] = 0x82; // the 'i' of 'index'
 
     const names = readZip(zip).map((e) => e.name);
 
     expect(names).toContain('deck/éndex.html');
   });
 
-  /** 유니코드 경로 부가 필드(0x7075)를 한 항목에 끼워 넣은 픽스처 변형 */
+  /** A fixture variant with a Unicode Path extra field (0x7075) inserted into one entry */
   function withUnicodePath(utf8Name: string, crcOk: boolean): Uint8Array {
     const zip = new Uint8Array(fixtureBundle());
     const dv = new DataView(zip.buffer);
@@ -254,7 +267,7 @@ describe('readZip · 픽스처 회귀', () => {
     const fdv = new DataView(field.buffer);
     fdv.setUint16(0, 0x7075, true);
     fdv.setUint16(2, 5 + encoded.length, true);
-    field[4] = 1; // 필드 버전
+    field[4] = 1; // field version
     fdv.setUint32(5, crcOk ? crc32(nameBytes) : 0xdeadbeef, true);
     field.set(encoded, 9);
 
@@ -267,38 +280,41 @@ describe('readZip · 픽스처 회귀', () => {
     return out;
   }
 
-  it('유니코드 경로 부가 필드의 CRC 가 표준 이름과 맞으면 그쪽 이름을 쓴다', () => {
+  it('uses the Unicode Path extra field name when its CRC matches the standard name', () => {
     const names = readZip(withUnicodePath('deck/실제이름.html', true)).map((e) => e.name);
 
     expect(names).toContain('deck/실제이름.html');
     expect(names).not.toContain('deck/index.html');
   });
 
-  it('CRC 가 어긋난 유니코드 경로 필드는 옛것이다 — 표준 이름을 쓴다', () => {
-    // 이름만 바뀌고 필드는 갱신되지 않은 zip 이 있다. 무조건 믿으면 옛 이름이 키가 된다.
+  it('a Unicode Path field with a mismatched CRC is stale — the standard name is used', () => {
+    // There are zips whose name changed while the field stayed stale. Trusting it
+    // unconditionally makes the old name the key.
     const names = readZip(withUnicodePath('deck/옛이름.html', false)).map((e) => e.name);
 
     expect(names).toContain('deck/index.html');
     expect(names).not.toContain('deck/옛이름.html');
   });
 
-  it('UTF-8 표시(bit 11)가 선 이름의 깨진 바이트는 U+FFFD 로 푼다', () => {
-    // TextDecoder 없이 직접 푸는 경로다 (INV-6) — 깨진 바이트에서 죽거나 조용히
-    // 건너뛰지 않고, 표준 디코더처럼 그 자리만 대체 문자로 남긴다.
+  it('decodes broken bytes in a name with the UTF-8 flag (bit 11) as U+FFFD', () => {
+    // The path decoded by hand without TextDecoder (INV-6) — on a broken byte it
+    // neither dies nor silently skips; like the standard decoder, only that spot
+    // becomes the replacement character.
     const zip = new Uint8Array(fixtureBundle());
     const dv = new DataView(zip.buffer);
     const at = centralRecordOf(zip, 'deck/index.html');
-    dv.setUint16(at + 8, 0x0800, true); // UTF-8 이름 플래그
-    zip[at + 46 + 'deck/'.length] = 0x82; // 홀로 온 이어짐 바이트 — UTF-8 이 아니다
+    dv.setUint16(at + 8, 0x0800, true); // the UTF-8 name flag
+    zip[at + 46 + 'deck/'.length] = 0x82; // a lone continuation byte — not UTF-8
 
     const names = readZip(zip).map((e) => e.name);
 
     expect(names).toContain('deck/�ndex.html');
   });
 
-  it('과잉 표기(overlong)는 올바른 UTF-8 이 아니다 — CP437 로 넘어간다', () => {
-    // 0xC0 0xAF 는 '/' 의 과잉 표기다. 엄격 판정이 이걸 받으면 이름 속에 경로
-    // 구분자가 숨어 들어온다 — 표준 디코더와 같이 거절해야 한다.
+  it('overlong forms are not valid UTF-8 — falls through to CP437', () => {
+    // 0xC0 0xAF is the overlong form of '/'. If the strict judgment accepted it, a
+    // path separator would sneak inside a name — it must be rejected like the
+    // standard decoder does.
     const zip = new Uint8Array(fixtureBundle());
     const at = centralRecordOf(zip, 'deck/index.html');
     zip[at + 46 + 'deck/'.length] = 0xc0;
@@ -309,31 +325,32 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).toContain('deck/└»dex.html');
   });
 
-  it('표시 없는 4바이트 UTF-8 이름도 그대로 읽는다', () => {
-    // BMP 밖(이모지)까지 — 손으로 푼 디코더가 서로게이트 쌍을 제대로 만드는지.
+  it('reads unflagged 4-byte UTF-8 names as-is too', () => {
+    // Beyond the BMP (emoji) — does the hand-rolled decoder build surrogate pairs correctly.
     const zip = new Uint8Array(fixtureBundle());
     const at = centralRecordOf(zip, 'deck/index.html');
-    zip.set([0xf0, 0x9f, 0x93, 0x84], at + 46 + 'deck/'.length); // 📄 가 'inde' 자리에
+    zip.set([0xf0, 0x9f, 0x93, 0x84], at + 46 + 'deck/'.length); // 📄 in place of 'inde'
 
     const names = readZip(zip).map((e) => e.name);
 
     expect(names).toContain('deck/📄x.html');
   });
 
-  it('파일 수 한도를 목차를 읽는 동안 센다', () => {
-    // 다 만들고 나서 세면 거절할 zip 의 항목을 전부(최대 65,534개) 만든 뒤에야
-    // 거절하게 된다 — 한도는 담는 수가 아니라 읽는 일 자체를 묶는다 (spec §5.1).
+  it('counts the file cap while reading the directory', () => {
+    // Counting after building would build every entry of a zip due for rejection
+    // (up to 65,534) before rejecting — the cap bounds the reading itself, not the
+    // stored count (spec §5.1).
     expect(() => readZip(fixtureBundle(), 2)).toThrow(
       expect.objectContaining({ code: 'tooManyFiles', params: { limit: 2 } })
     );
-    // 한도 안이면 그대로 다 읽힌다.
+    // Within the cap, everything reads as before.
     expect(readZip(fixtureBundle(), 5)).toHaveLength(5);
   });
 });
 
-describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () => {
-  it('압축된 항목의 이름·크기·방식을 읽는다', () => {
-    // 잘 압축되도록 길게 — 짧은 파일은 zip 이 그냥 담아버린다.
+describe.skipIf(!hasZipCommand())('readZip · zips made on the spot', () => {
+  it('reads the name, size, and method of a compressed entry', () => {
+    // Long so it compresses well — zip just stores short files.
     const body = '한 줄이 반복된다\n'.repeat(200);
     const entries = readZip(realZip({ 'deck.html': body }));
     const deck = entries.find((e) => e.name === 'deck.html');
@@ -343,34 +360,34 @@ describe.skipIf(!hasZipCommand())('readZip · 그 자리에서 만든 zip', () =
     expect(deck?.data.length).toBeLessThan(deck?.size ?? 0);
   });
 
-  it('압축하지 않고 담은 항목은 바이트 그대로다', () => {
-    // -0 은 전부 그대로 담는다. 그때는 해제 없이 바로 쓸 수 있어야 한다.
+  it('entries stored without compression are the bytes as-is', () => {
+    // -0 stores everything as-is. Then they must be usable directly, no decompression.
     const entries = readZip(realZip({ 'a.txt': '있는 그대로' }, ['-0']));
 
     expect(entries[0]?.method).toBe(0);
     expect(decode(entries[0]?.data ?? new Uint8Array())).toBe('있는 그대로');
   });
 
-  it('한글 파일 이름을 읽는다', () => {
+  it('reads Korean file names', () => {
     const entries = readZip(realZip({ '발표 자료.html': 'x' }));
 
     expect(entries[0]?.name).toBe('발표 자료.html');
   });
 
-  it('암호가 걸린 항목은 반쯤 읽지 않고 멈춘다', () => {
+  it('stops at an encrypted entry instead of half-reading it', () => {
     const zip = realZip({ 'deck.html': '비밀' }, ['-P', 'pw']);
 
-    // 어느 항목인지는 파라미터로 넘긴다 — 문장은 언어팩이 만든다 (spec §1).
+    // Which entry it was travels as a parameter — the language pack makes the sentence (spec §1).
     expect(() => readZip(zip)).toThrow(
       expect.objectContaining({ code: 'encrypted', params: { name: 'deck.html' } })
     );
   });
 });
 
-describe('crc32 · 기준 구현과의 대조', () => {
-  it('IEEE CRC-32 와 같고, 조각으로 이어 재도 같다', () => {
-    // 압축 해제는 스트림 조각으로 나온다 — 이어 재는 seed 가 틀리면 멀쩡한 zip 이
-    // 전부 깨졌다며 거절된다. 기준은 node 의 crc32 다.
+describe('crc32 · against the reference implementation', () => {
+  it('matches IEEE CRC-32, and chunked continuation matches too', () => {
+    // Decompression yields stream chunks — a wrong continuation seed rejects every
+    // healthy zip as corrupted. node's crc32 is the baseline.
     const bytes = fixtureBundle();
     expect(ourCrc32(bytes)).toBe(crc32(bytes));
     const mid = Math.floor(bytes.length / 3);
