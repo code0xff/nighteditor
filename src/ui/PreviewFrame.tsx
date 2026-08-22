@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
-import { registerPreviewFlush, shortcutSave } from '@/store/unsaved';
+import { FLUSH_TIMEOUT, registerPreviewFlush, shortcutSave } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
 import { cn } from '@/lib/utils';
 import { FORMAT_LABELS } from '@/lib/messages';
@@ -36,12 +36,15 @@ export function PreviewFrame() {
   const drainReveal = useEditor((s) => s.drainReveal);
   // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
   const replacing = useReplacement((s) => s.replacing);
-  /** 프리뷰의 확정 답(flushed)을 기다리는 자리 — 청 번호마다 하나 */
+  /**
+   * 프리뷰의 확정 답(flushed)을 기다리는 자리 — 청 번호마다 하나 (spec §4).
+   * 대기의 수명은 항목마다 하나 걸린 settle 이 끝낸다 — 답·한도·화면 내려감 중
+   * 무엇이 먼저 오든 같은 자리에서 타이머를 걷고 목록에서 지우고 프라미스를 푼다.
+   */
   const flushWaiters = useRef(new Map<number, () => void>());
 
   // 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하는 함수를 걸어 둔다 (spec §4).
-  // 물음(keepEdits) 쪽은 iframe 을 모르므로 여기서 잇는다. 죽은 프리뷰의 한도는
-  // 청한 쪽(flushPreviewEdits)이 잡는다 — 여기서는 답이 올 때만 풀면 된다.
+  // 물음(keepEdits) 쪽은 iframe 을 모르므로 여기서 잇는다.
   useEffect(() => {
     const waiters = flushWaiters.current;
     const unregister = registerPreviewFlush(
@@ -54,16 +57,25 @@ export function PreviewFrame() {
             return;
           }
           const seq = ++flushSerial;
-          waiters.set(seq, resolve);
+          // 한도는 청한 쪽(flushPreviewEdits)의 race 가 이미 잡지만, 그 race 는 이
+          // 목록을 모른다 — 답 없는 프리뷰 앞에서 시간이 다 된 항목이 화면이 내려갈
+          // 때까지 남아, 청할 때마다 대기가 쌓인다. 항목 스스로 같은 한도에 정리한다.
+          const settle = (): void => {
+            clearTimeout(timer);
+            waiters.delete(seq);
+            resolve();
+          };
+          const timer = setTimeout(settle, FLUSH_TIMEOUT);
+          waiters.set(seq, settle);
           const msg: ToPreview = { type: 'flush', seq };
           win.postMessage(msg, '*');
         })
     );
     return () => {
       unregister();
-      // 내려가는 화면은 답을 더 전달할 수 없다 — 기다리는 쪽을 한도까지 붙잡지 않는다.
-      for (const resolve of waiters.values()) resolve();
-      waiters.clear();
+      // 내려가는 화면은 답을 더 전달할 수 없다 — 남은 대기를 지금 전부 끝낸다.
+      // settle 이 목록에서 저를 지우므로, 순회는 베낀 목록으로 한다.
+      for (const settle of [...waiters.values()]) settle();
     };
   }, []);
 
@@ -88,14 +100,9 @@ export function PreviewFrame() {
       else if (msg.type === 'undo') undoLast();
       // 확정 청의 답 — 같은 통로로 확정(edit)이 먼저 왔으므로, 여기서 풀리는 물음은
       // 이미 그 편집을 아는 unsaved 를 본다 (spec §4). 옛 프리뷰의 답은 위 표 검사가
-      // 걸러내고, 그 청은 한도(flushPreviewEdits)가 푼다.
-      else if (msg.type === 'flushed') {
-        const resolve = flushWaiters.current.get(msg.seq);
-        if (resolve) {
-          flushWaiters.current.delete(msg.seq);
-          resolve();
-        }
-      }
+      // 걸러내고, 그 청은 항목의 한도 타이머가 정리한다. settle 이 타이머·목록·풀기를
+      // 한 번에 끝낸다 — 시간이 다 돼 이미 정리된 청의 늦은 답은 조용히 지나간다.
+      else if (msg.type === 'flushed') flushWaiters.current.get(msg.seq)?.();
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);

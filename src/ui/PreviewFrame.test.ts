@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useEditor } from '@/store/editor';
 import type { Block } from '@/core/types';
 import { useReplacement } from '@/store/replacement';
-import { flushPreviewEdits } from '@/store/unsaved';
+import { FLUSH_TIMEOUT, flushPreviewEdits } from '@/store/unsaved';
 import { PreviewFrame } from './PreviewFrame';
 
 // react 의 act 는 이 표식이 있어야 테스트 환경으로 인정하고 경고 없이 돈다.
@@ -29,6 +29,11 @@ afterEach(() => {
   root = null;
   host?.remove();
   host = null;
+});
+
+// 나중에 등록한 afterEach 가 먼저 돈다 — 위의 unmount 는 실제 타이머로 돌아야 한다.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('PreviewFrame · 서식 문구는 에이전트가 준비된 뒤에 다시 보낸다 (spec §4.1)', () => {
@@ -180,6 +185,55 @@ describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
     arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-2' });
     await pending;
     expect(done).toBe(true);
+  });
+
+  it('답이 오면 그 청의 한도 타이머도 함께 걷는다', async () => {
+    // 대기 항목의 수명은 settle 하나로 끝난다 — 답이 왔는데 타이머가 남으면
+    // 항목 정리가 두 갈래가 되고, 한 갈래만 고치는 회귀가 스며든다.
+    vi.useFakeTimers();
+    useEditor.setState({ previewToken: 'doc-2' });
+    const frame = mountFrame();
+    const posted: { type?: string; seq?: number }[] = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((msg: unknown) => {
+      posted.push(msg as { type?: string; seq?: number });
+    }) as typeof window.postMessage);
+
+    const before = vi.getTimerCount();
+    const pending = flushPreviewEdits();
+    // 청 하나에 타이머 둘 — 항목의 한도와 청한 쪽(flushPreviewEdits)의 한도.
+    expect(vi.getTimerCount()).toBe(before + 2);
+
+    const flush = posted.find((m) => m.type === 'flush');
+    arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-2' });
+    await pending;
+
+    // 항목의 타이머는 답이 걷었다 — 남은 하나는 청한 쪽의 race 다.
+    expect(vi.getTimerCount()).toBe(before + 1);
+  });
+
+  it('한도가 지난 대기는 목록에 남지 않는다 — 늦은 답이 와도 아무 일 없다', async () => {
+    // 답 없는 프리뷰 앞에서 갈아 끼우기를 거듭 시도하면, 시간이 다 된 대기가
+    // 목록에 남아 화면이 내려갈 때까지 쌓인다 — 항목 스스로 한도에 정리해야 한다.
+    vi.useFakeTimers();
+    useEditor.setState({ previewToken: 'doc-2' });
+    const frame = mountFrame();
+    const posted: { type?: string; seq?: number }[] = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((msg: unknown) => {
+      posted.push(msg as { type?: string; seq?: number });
+    }) as typeof window.postMessage);
+
+    const first = flushPreviewEdits();
+    const second = flushPreviewEdits();
+    await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT);
+    await first;
+    await second;
+    // 모든 타이머가 정리됐다 — 대기 항목의 한도가 발동해 항목도 함께 지웠다.
+    expect(vi.getTimerCount()).toBe(0);
+
+    // 정리된 청의 늦은 답은 조용히 지나간다 — 죽은 항목을 되살리거나 던지지 않는다.
+    for (const m of posted) {
+      if (m.type === 'flush') arrive(frame, { type: 'flushed', seq: m.seq, token: 'doc-2' });
+    }
   });
 
   it('화면이 내려가면 기다리던 청을 푼다 — 답을 전달할 길이 없다', async () => {
