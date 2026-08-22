@@ -82,6 +82,8 @@ const ko = {
   'changes.revert': '되돌리기',
   'changes.revertAll': '전체 되돌리기',
   'changes.empty': '아직 고친 곳이 없어요. 프리뷰에서 글자를 눌러 보세요.',
+  'changes.panel': '고친 곳 목록',
+  'changes.panelClose': '목록 닫기',
 
   'lock.RAW_TEXT': '코드 영역',
   'lock.SCRIPT_GENERATED': '스크립트가 만든 글자',
@@ -195,6 +197,8 @@ const en: Record<MessageKey, string> = {
   'changes.revert': 'Revert',
   'changes.revertAll': 'Revert all',
   'changes.empty': 'Nothing yet. Click some text in the preview to start.',
+  'changes.panel': 'Change list',
+  'changes.panelClose': 'Close the list',
 
   'lock.RAW_TEXT': 'Code area',
   'lock.SCRIPT_GENERATED': 'Written by a script',

@@ -12,6 +12,7 @@ import {
 import { lockNotice } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { lockSummary, useEditor } from '@/store/editor';
+import { usePanel } from '@/store/panel';
 import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
@@ -33,7 +34,16 @@ export function ChangeList() {
   // the previous document, and a change made here has nowhere to go the moment
   // the new document stands (spec §4 · ADR-010).
   const replacing = useReplacement((s) => s.replacing);
+  const closePanel = usePanel((s) => s.close);
   const { t, tn } = useI18n();
+
+  // On a narrow screen this list is a panel over the preview. Jumping to a spot
+  // hidden behind the panel shows nothing, so the panel gets out of the way.
+  // Beside the preview it is not a panel at all and this does nothing.
+  const jump = (id: number) => {
+    reveal(id);
+    closePanel();
+  };
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
   const changed = [...patches.keys()].sort((a, b) => a - b);
@@ -110,7 +120,7 @@ export function ChangeList() {
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => reveal(id)}
+                    onClick={() => jump(id)}
                     onKeyDown={(e) => {
                       // A key bubbling up from the inner revert button belongs
                       // to that button. Intercepting it makes reverting
@@ -118,7 +128,7 @@ export function ChangeList() {
                       if (e.target !== e.currentTarget) return;
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        reveal(id);
+                        jump(id);
                       }
                     }}
                     className={cn(

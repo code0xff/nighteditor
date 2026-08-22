@@ -8,9 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { canOverwrite } from '@/lib/fs';
-import { IconCloseDoc, IconDownloadCopy, IconSave } from '@/lib/icons';
+import { IconChangeList, IconCloseDoc, IconDownloadCopy, IconSave } from '@/lib/icons';
 import { lockNotice } from '@/lib/messages';
 import { titleBlock, useEditor, useEditorBusy } from '@/store/editor';
+import { usePanel } from '@/store/panel';
 import { useReplacement } from '@/store/replacement';
 import { useI18n } from '@/store/locale';
 
@@ -27,6 +28,8 @@ export function Toolbar() {
   const save = useEditor((s) => s.save);
   const downloadCopy = useEditor((s) => s.downloadCopy);
   const closeFile = useEditor((s) => s.closeFile);
+  // Below `lg` the change list is a panel over the preview, and this opens it.
+  const togglePanel = usePanel((s) => s.toggle);
   const { t } = useI18n();
 
   const title = titleBlock(blocks);
@@ -128,6 +131,19 @@ export function Toolbar() {
             <IconSave />
             <span className="hidden sm:inline">{t('toolbar.save')}</span>
             {patches.size > 0 && `(${patches.size})`}
+          </Button>
+        )}
+        {/* From `lg` up the list is already beside the preview, so this is gone */}
+        {file && (
+          <Button
+            variant="outline"
+            size="icon"
+            className="lg:hidden"
+            onClick={togglePanel}
+            aria-label={t('changes.panel')}
+            title={t('changes.panel')}
+          >
+            <IconChangeList />
           </Button>
         )}
         <LangSelect />

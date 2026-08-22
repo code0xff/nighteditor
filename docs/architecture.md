@@ -51,6 +51,8 @@ src/
     editor.ts           original, blocks, patches, bundle. Notices are stored as message keys, not sentences
     replacement.ts      document replacement reservations — the single place that decides who wins and what locks (ADR-010)
     locale.ts           UI language (localStorage + <html lang>), useI18n
+    panel.ts            whether the change list is over the preview — only below `lg` (ADR-012)
+    toasts.ts           the notice stack at the top right — message keys, never sentences
     unsaved.ts          where we ask before anything that would lose edits (save / discard / cancel)
 ```
 
@@ -344,3 +346,26 @@ so they cannot collide with text the document already had, and references origin
 
 **Consequence** `core/` remains strings in, strings out (INV-6). The store calls the boundary in
 exactly two places: where edits arrive (`onEdit`) and where reverts go out.
+
+---
+
+### ADR-012 · Below `lg` the change list comes over the preview, not beside it
+
+**Decision** From `lg` (1024px) up, the change list stands beside the preview as it always has. Below
+that, it becomes a panel that slides over the preview from the right, opened by a header button and
+closed by pressing beside it or by jumping to an edit. `store/panel.ts` holds the single open flag.
+
+**Why** The list is 288px wide and does not usefully shrink — it carries lock reasons and the edited
+text of each block. In a 500px window that leaves 212px for the document, which is not enough to
+read, let alone click a paragraph in. Two things that each need most of the width cannot share it, so
+one of them has to be temporary. The preview is the thing being worked on and stays; the list, which
+is consulted between edits, comes when asked.
+
+**Reach, not just looks** The layout is CSS, but "off-screen" also has to mean "not tabbable" —
+otherwise the panel keeps focusable controls outside the window, which is how the header overflow bug
+scrolled the whole document sideways. `useListBeside()` reads the same breakpoint through
+`matchMedia` so the closed panel can be marked `inert`, and beside the preview it never is.
+
+**Consequence** The toolbar gains one button that exists only below `lg`. Pressing a change card
+closes the panel — the jump it triggers is in the preview underneath, and a jump to somewhere hidden
+shows nothing.

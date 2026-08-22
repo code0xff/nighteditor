@@ -25,6 +25,7 @@ import {
   LoaderCircle,
   Lock,
   Moon,
+  PanelRight,
   PencilLine,
   RotateCcw,
   Save,
@@ -71,6 +72,8 @@ export const IconScanning = LoaderCircle;
 
 /** Block tallies */
 export const IconBlocks = Boxes;
+/** Opens the change list as a panel — only on a screen too narrow to hold it beside the preview */
+export const IconChangeList = PanelRight;
 export const IconEditable = PencilLine;
 
 /** Language */

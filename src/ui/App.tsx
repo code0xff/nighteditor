@@ -9,6 +9,7 @@ import { onBeforeUnload } from '@/lib/unsaved';
 import { ERROR_NOTICES } from '@/lib/messages';
 import { cn } from '@/lib/utils';
 import { countAssets, useEditor, useEditorBusy } from '@/store/editor';
+import { useListBeside, usePanel } from '@/store/panel';
 import { useReplacement } from '@/store/replacement';
 import { shortcutSave } from '@/store/unsaved';
 import { useToasts } from '@/store/toasts';
@@ -35,6 +36,10 @@ export function App() {
   const missing = useEditor((s) => countAssets(s).missing);
   const failedToOpen = useEditor((s) => s.failedToOpen);
   const show = useToasts((s) => s.show);
+  // Below `lg` the list cannot stand beside the preview — it comes over it (ADR-012).
+  const panelOpen = usePanel((s) => s.open);
+  const closePanel = usePanel((s) => s.close);
+  const listBeside = useListBeside();
   const { t } = useI18n();
   // Unsaved edits live only in memory. Have the browser ask before the tab closes.
   // The criterion is not the patch count — patches survive a save (INV-1), so
@@ -42,6 +47,12 @@ export function App() {
   // leave. Ask only on "differs from the file" (unsaved).
   useEffect(() => onBeforeUnload(() => unsaved), [unsaved]);
   const [dragging, setDragging] = useState(false);
+
+  // Closing the document leaves the panel with nothing to show. Left open, it
+  // would be up over the next document the moment it opens.
+  useEffect(() => {
+    if (!file) closePanel();
+  }, [file, closePanel]);
 
   // Files arrive here when the OS "open with this app" targets the installed PWA.
   useEffect(() => onFileLaunch((f) => void adopt(f)), [adopt]);
@@ -131,9 +142,32 @@ export function App() {
         </div>
 
         {file && (
-          <aside className="w-72 shrink-0 border-l border-border">
-            <ChangeList />
-          </aside>
+          <>
+            {/* Only below `lg`, and only while the panel is up. Pressing beside
+                the panel closes it — on a small screen the preview underneath
+                is what the user came back for. */}
+            {panelOpen && (
+              <div
+                className="fixed inset-0 top-12 z-20 bg-background/60 lg:hidden"
+                onClick={closePanel}
+                aria-hidden
+              />
+            )}
+            <aside
+              className={cn(
+                'w-72 shrink-0 border-l border-border bg-background',
+                // From `lg` up it simply stands beside the preview. Below that
+                // 288px of list would leave the document unreadable, so it
+                // slides over the preview instead of taking its width.
+                'fixed inset-y-0 right-0 top-12 z-30 transition-transform lg:static lg:z-auto lg:translate-x-0',
+                panelOpen ? 'translate-x-0 shadow-xl' : 'translate-x-full'
+              )}
+              // Off-screen means out of reach — not something to tab into.
+              inert={listBeside || panelOpen ? undefined : true}
+            >
+              <ChangeList />
+            </aside>
+          </>
         )}
       </main>
     </div>

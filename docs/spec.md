@@ -349,6 +349,28 @@ The lock marker (`data-ne-locked`) is attached to the DOM by the agent after the
 comparison finishes, and each time the list updates it is repainted in full — stale
 markers would leave unlocked blocks looking locked.
 
+### On a narrow screen
+
+The screen holds two things that each want most of the width: the preview and the
+change list. Below `lg` (1024px) they cannot share it — 288px of list inside a
+500px window leaves 212px of document, too little to read or to click a paragraph
+in. So the list stops being a column and becomes a **panel over the preview**,
+opened by a button in the header and closed by pressing beside it, or by pressing a
+change card (which jumps to a spot the panel would be covering). From `lg` up
+nothing changes: the list stands beside the preview and the button is not there
+(ADR-012).
+
+The header keeps only what you act with. As the window narrows, the wordmark, the
+open-button labels, the file name, the save label, and the overwrite hint drop away
+in that order, the language picker becomes its icon, and the title field takes
+whatever room is left. This is not only about looks: **a header wider than the
+window scrolls the whole document sideways** the moment a popup inside it opens,
+and `body { overflow: hidden }` then keeps it there. Nothing in the header may
+overflow at any width.
+
+Anything off-screen must also be **out of reach** — the closed panel is `inert`, so
+it cannot be tabbed into from the preview.
+
 ### Editing interactions
 - Click: only that block gets `contenteditable=true`; the rest are false
 - `Enter`: **commit and close.** Inserts no line break and is not forwarded to
