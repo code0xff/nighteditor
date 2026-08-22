@@ -16,11 +16,19 @@ const buttonVariants = cva(
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline',
       },
+      // Every size has a `touch:` step. The root font is 15px, so the sizes
+      // land a little under their names: `h-8` is 30px, `h-10` is 37.5px.
+      // With a mouse the row is dense — this is a tool you keep open beside a
+      // document. With a fingertip nothing you press is under ~34px, and the
+      // controls that carry the document (the header row, dialogs) are ~38px.
       size: {
-        default: 'h-8 px-3 py-1.5',
-        sm: 'h-7 rounded-md px-2.5 text-xs',
-        lg: 'h-9 rounded-md px-6',
-        icon: 'h-8 w-8',
+        default: 'h-8 touch:h-10 px-3 py-1.5',
+        sm: 'h-7 touch:h-9 rounded-md px-2.5 text-xs',
+        lg: 'h-9 touch:h-11 rounded-md px-6',
+        icon: 'h-8 w-8 touch:h-10 touch:w-10',
+        // The header row. Same height as `default`, `sm`'s tighter sides —
+        // below `lg` these buttons are icon-only and the width is spoken for.
+        chrome: 'h-8 touch:h-10 rounded-md px-2.5',
       },
     },
     defaultVariants: {

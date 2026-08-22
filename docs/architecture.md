@@ -372,3 +372,30 @@ scrolled the whole document sideways. `useListBeside()` reads the same breakpoin
 **Consequence** The toolbar gains one button that exists only below `lg`. Pressing a change card
 closes the panel — the jump it triggers is in the preview underneath, and a jump to somewhere hidden
 shows nothing.
+
+### ADR-013 · Control sizes follow the pointer, not the window
+
+**Decision** One Tailwind variant, `touch:` — `@media (pointer: coarse) and (min-width: 360px)` —
+carries a second size for everything that is pressed. With a mouse the app stays dense: the header
+row is 30px, buttons inside the change list 26px, menu items 24px. Where the pointer is a fingertip
+those become 37.5px in the header, in dialogs and in menus, and 33.75px in the list. The sizes live
+in the primitives (`components/ui/button.tsx`, `select.tsx`, `input.tsx`), not at the call sites; the
+header row has its own button size, `chrome`, so that one name means one height.
+
+**Why the pointer and not the width** A narrow window on a desktop is still driven by a mouse, and a
+tablet held in two hands is not, however wide it is. Sizing by window width would fatten a dragged-in
+browser window and leave an iPad with 30px targets.
+
+**Why 360px comes into it anyway** Measured with a five-document bundle open — every control the
+header can hold — the grown controls put the row 24px past the edge of a 320px window. An
+overflowing header is not a cosmetic problem: it scrolls the whole document sideways the moment a
+popup inside it opens (spec §4 · ADR-012). Below 360px the dense sizes are what fits, so that is what
+those screens get.
+
+**Why in CSS** `lib/media.ts` draws the line: the layout belongs in CSS, and `matchMedia` in
+JavaScript is for the cases where the answer changes behaviour — what is reachable by tab, which
+sentence is true on this device. A size is looks, so it stays a variant and never becomes state.
+
+**Consequence** A control that opts out of the scale opts out visibly. The save button had been one
+step smaller than its neighbours and sat 4px low in the row; with `chrome` there is no size to pass
+that could do that again without saying so.

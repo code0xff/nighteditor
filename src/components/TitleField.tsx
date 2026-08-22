@@ -38,7 +38,7 @@ export function TitleField({ stacked = false }: { stacked?: boolean }) {
       <Input
         id="doc-title"
         placeholder={t('toolbar.title')}
-        className={stacked ? 'h-8 w-full' : 'h-8 w-full min-w-0 md:w-56 md:flex-none'}
+        className={stacked ? 'w-full' : 'w-full min-w-0 md:w-56 md:flex-none'}
         value={value}
         // An edit made while replacing has nowhere to go once the new
         // document stands. Lock the field instead of pretending to

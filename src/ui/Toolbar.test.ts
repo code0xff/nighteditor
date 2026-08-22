@@ -105,3 +105,18 @@ describe('Toolbar · the title field locks during replacement (spec §4)', () =>
     expect(titleInput()?.disabled).toBe(true);
   });
 });
+
+describe('Toolbar · the header row is one height (spec §4 · ADR-013)', () => {
+  it('every control carries the row height, and a taller step for a fingertip', () => {
+    // The save button used to be one size smaller than its neighbours and sat
+    // 4px low. What that costs is not obvious in the markup, so assert it here:
+    // whatever a control is for, in this row it is the same height as the rest.
+    const controls = [...document.querySelectorAll('header button, header a')];
+    expect(controls.length).toBeGreaterThan(3);
+
+    for (const control of controls) {
+      expect(control.className).toMatch(/(^|\s)h-8(\s|$)/);
+      expect(control.className).toMatch(/(^|\s)touch:h-10(\s|$)/);
+    }
+  });
+});

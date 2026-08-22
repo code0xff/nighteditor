@@ -66,7 +66,10 @@ function ToastCard({ toast }: { toast: Toast }) {
         onClick={() => dismiss(toast.key)}
         aria-label={t('toast.dismiss')}
         title={t('toast.dismiss')}
-        className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
+        // The icon is 13px. Where the press is a fingertip the padding grows
+        // to about 32px of target and the margin takes the same room back,
+        // so the notice itself does not change shape.
+        className="shrink-0 rounded-sm text-muted-foreground hover:text-foreground touch:-m-2.5 touch:p-2.5"
       >
         <IconClose className="h-3.5 w-3.5" />
       </button>

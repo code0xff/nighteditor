@@ -31,9 +31,7 @@ export function OpenButton() {
     <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
       <Button
         variant="outline"
-        size="sm"
-        // Same 32px as the rest of the header row (Toolbar)
-        className="h-8"
+        size="chrome"
         disabled={busy}
         title={t('toolbar.openFileHint')}
         onClick={() => void openFile()}
@@ -47,8 +45,7 @@ export function OpenButton() {
       {canPickFolder() && (
         <Button
           variant="outline"
-          size="sm"
-          className="h-8"
+          size="chrome"
           disabled={busy}
           title={t('toolbar.openFolderHint')}
           onClick={() => void openFolder()}

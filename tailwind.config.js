@@ -1,4 +1,5 @@
 import tailwindcssAnimate from 'tailwindcss-animate';
+import plugin from 'tailwindcss/plugin';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -105,5 +106,21 @@ export default {
       },
     },
   },
-  plugins: [tailwindcssAnimate],
+  plugins: [
+    tailwindcssAnimate,
+    // `touch:` — the pointer is a fingertip, not a cursor. Controls sized for a
+    // 1px hotspot are a coin toss to tap, so everything you press grows where
+    // this matches. It asks about the pointer first, not the window width: a
+    // narrow window on a desktop is still driven by a mouse, and a tablet held
+    // in two hands is not, however wide it is.
+    //
+    // The width still has a say at the very bottom. Measured with a five
+    // document bundle open — the widest the header ever gets — the grown
+    // controls need a 360px window; in 320px they push the row past the edge,
+    // and an overflowing header scrolls the whole document sideways the moment
+    // a popup opens. Below that the dense sizes are what fits.
+    plugin(({ addVariant }) =>
+      addVariant('touch', '@media (pointer: coarse) and (min-width: 360px)')
+    ),
+  ],
 };

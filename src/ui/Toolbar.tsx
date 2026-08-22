@@ -37,7 +37,11 @@ export function Toolbar() {
     // reports an overflow — the controls just squash, and a 28px app mark ends
     // up 19px wide and out of shape. Squashed icons are the harder thing to
     // notice, so the flexible element is the one that gives.
-    <header className="sticky top-0 z-10 flex h-12 items-center gap-1 border-b border-border bg-background/80 px-2 backdrop-blur sm:gap-3 sm:px-3">
+    //
+    // Hence the thin side padding below `sm`: with a five document bundle open
+    // — every control this row can hold — it lands within a pixel of a 320px
+    // window, and this is the pixel.
+    <header className="sticky top-0 z-10 flex h-12 items-center gap-1 border-b border-border bg-background/80 px-1.5 backdrop-blur sm:gap-3 sm:px-3">
       <Brand />
 
       <OpenButton />
@@ -99,12 +103,11 @@ export function Toolbar() {
           // Also lock while a save runs and while replacing (useEditorBusy) —
           // the former to avoid overlapping writes, the latter because it
           // would mean saving the previous document.
-          // `h-8` because the row is 32px tall — that is what every icon button
-          // and select here measures. `sm` only supplies the compact padding;
-          // its own 28px would leave this button sitting low among them, which
-          // is plainest on a phone, where the label is gone and the neighbours
-          // on both sides are icon buttons.
-          <Button size="sm" className="h-8" onClick={() => void save()} disabled={busy || !unsaved}>
+          // `chrome`, like everything else in this row: one height, and a
+          // taller one where the pointer is a fingertip. `sm` would leave it
+          // sitting low among the icon buttons — plainest on a phone, where
+          // the label is gone and both neighbours are icon buttons.
+          <Button size="chrome" onClick={() => void save()} disabled={busy || !unsaved}>
             <IconSave />
             <span className="hidden lg:inline">{t('toolbar.save')}</span>
             {patches.size > 0 && `(${patches.size})`}

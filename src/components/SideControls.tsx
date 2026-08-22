@@ -27,10 +27,10 @@ export function SideControls() {
     <div className="mt-auto flex flex-col gap-2">
       <Separator />
       {file && (
-        // Taller than the header's 32px on purpose: this panel is only ever
-        // shown below `md`, where the press is a fingertip, and a full-width
-        // button 28px tall reads as flat as it is hard to hit.
-        <Button variant="outline" size="sm" className="h-10 justify-start" onClick={downloadCopy}>
+        // `chrome`, not `sm`: full width and 26px tall reads as flat as it is
+        // hard to hit, and on the screens this panel is shown on the press is
+        // usually a fingertip.
+        <Button variant="outline" size="chrome" className="justify-start" onClick={downloadCopy}>
           <IconDownloadCopy />
           {t('toolbar.downloadCopy')}
         </Button>
