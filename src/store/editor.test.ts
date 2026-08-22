@@ -24,6 +24,7 @@ beforeEach(() => {
     unsaved: false,
     savedText: '',
     saving: false,
+    pendingText: null,
   });
   // 잠금은 예약 스토어에 있다 — 앞 테스트가 세워 둔 잠금이 새면 편집이 거절된다.
   useReplacement.setState({ replacing: false });
@@ -875,6 +876,62 @@ describe('editor · 저장하는 사이의 편집', () => {
     await saving;
 
     expect(useEditor.getState().unsaved).toBe(true);
+  });
+
+  it('쓰는 동안 되돌려도 더러움은 풀리지 않는다 — 디스크는 곧 그 결과물을 든다', async () => {
+    // 옛 savedText 와 견주면 되돌린 순간 "잃을 것 없음" 으로 읽혀, 그 창에서 탭을
+    // 닫으면 경고 없이 닫히고 화면(원본)과 디스크(결과물)가 어긋난다 (spec §5).
+    let releaseWrite: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.resolve(new File(['<p>하나</p>'], 'deck.html', { type: 'text/html' })),
+      createWritable: () => Promise.resolve({ write: () => gate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>하나</p></body></html>',
+      handle,
+    });
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const saving = useEditor.getState().save();
+    useEditor.getState().revert(target?.id ?? -1);
+
+    // 쓰는 동안에도, 쓰기가 끝난 뒤에도 화면은 디스크와 다르다.
+    expect(useEditor.getState().unsaved).toBe(true);
+    releaseWrite?.();
+    await saving;
+    expect(useEditor.getState().unsaved).toBe(true);
+    expect(useEditor.getState().pendingText).toBeNull();
+  });
+
+  it('쓰기가 실패하면 옛 내용 기준으로 되잰다 — 파일은 그대로다', async () => {
+    // 실패한 결과물을 기준으로 남겨 두면, 쓰는 사이 그 결과물과 같아진 화면이
+    // 저장된 척 남는다. 되돌려 파일과 같아진 화면은 잃을 것이 없다.
+    let failWrite: ((e: Error) => void) | undefined;
+    const gate = new Promise<void>((_, reject) => (failWrite = reject));
+    const handle = {
+      name: 'deck.html',
+      getFile: () => Promise.resolve(new File(['<p>하나</p>'], 'deck.html', { type: 'text/html' })),
+      createWritable: () => Promise.resolve({ write: () => gate, close: () => Promise.resolve() }),
+    };
+    await useEditor.getState().adopt({
+      name: 'deck.html',
+      text: '<html><body><p>하나</p></body></html>',
+      handle,
+    });
+    const target = useEditor.getState().blocks.find((x) => x.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const saving = useEditor.getState().save();
+    useEditor.getState().revert(target?.id ?? -1);
+    failWrite?.(new Error('디스크가 가득 참'));
+
+    await expect(saving).resolves.toBe(false);
+    expect(useEditor.getState().unsaved).toBe(false);
+    expect(useEditor.getState().pendingText).toBeNull();
   });
 
   it('쓰는 동안 아무 일도 없었으면 깨끗해진다', async () => {

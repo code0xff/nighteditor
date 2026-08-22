@@ -69,6 +69,13 @@ export interface EditorState {
    */
   savedText: string;
   /**
+   * 저장이 지금 쓰고 있는 결과물. 쓰기가 끝나면 파일이 들 내용이 이것이라, 쓰는 동안의
+   * "파일과 다른가" 는 옛 `savedText` 가 아니라 이것과 견준다 (spec §5) — 옛것과
+   * 견주면 쓰는 사이에 편집을 되돌렸을 때 잃을 것이 없다고 읽혀, 그 창에서 탭을
+   * 닫으면 경고 없이 닫히고 화면과 디스크가 어긋난다. 저장 중이 아니면 null 이다.
+   */
+  pendingText: string | null;
+  /**
    * 마지막 저장 때 파일에 들어간 패치들 — `savedText` 의 블록별 대응물.
    * 물음의 "{count}곳" 이 지금 `patches` 와 이것의 차이를 센다 (spec §4 · `unsavedCount`).
    * 저장 경로의 입력이 아니다 — 그건 `patches` 와 `source` 다 (INV-1).
@@ -181,11 +188,12 @@ export function countAssets(state: Pick<EditorState, 'assetPaths' | 'assets'>): 
  * 안전하다 (대원칙 3).
  */
 function differsFromDisk(
-  s: Pick<EditorState, 'source' | 'blocks' | 'patches' | 'savedText'>
+  s: Pick<EditorState, 'source' | 'blocks' | 'patches' | 'savedText' | 'pendingText'>
 ): boolean {
   try {
     const list = [...s.patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
-    return applyPatches(s.source, s.blocks, list) !== s.savedText;
+    // 저장이 쓰는 중이면 파일은 곧 그 결과물을 든다 — 견줄 기준도 그쪽이다 (spec §5).
+    return applyPatches(s.source, s.blocks, list) !== (s.pendingText ?? s.savedText);
   } catch {
     return true;
   }
@@ -293,7 +301,7 @@ async function replace(
   // 설치 세대를 올린다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
   // 저장 등)는 claim 의 판정에 걸려 버려진다 (spec §5).
   mine.install();
-  set({ ...next, saving: false });
+  set({ ...next, saving: false, pendingText: null });
   return next;
 }
 
@@ -556,6 +564,7 @@ function emptyDocument(): Partial<EditorState> {
 export const useEditor = create<EditorState>((set, get) => ({
   ...(emptyDocument() as EditorState),
   saving: false,
+  pendingText: null,
   notice: null,
 
   openFile: async () => {
@@ -1052,6 +1061,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
+      // 이제부터 파일은 이 결과물을 향해 간다 — 쓰는 사이의 편집·되돌리기가
+      // "파일과 다른가" 를 잴 때의 기준이다 (spec §5). 옛 savedText 로 재면 쓰는
+      // 사이에 되돌린 편집이 잃을 것 없음으로 읽혀 경고 없이 탭이 닫힌다.
+      set({ pendingText: output });
       const how = await saveFile(file, output);
       // 갈아탄 뒤 도착한 결과는 이전 문서의 것이다. 파일에는 이미 썼고 그것은 그
       // 파일의 몫이라 잃는 것이 없다 — 새 문서에 적을 것은 아무것도 없다.
@@ -1075,7 +1088,9 @@ export const useEditor = create<EditorState>((set, get) => ({
         bundle: s.bundle?.has(s.docPath)
           ? new Map(s.bundle).set(s.docPath, new Blob([output], { type: 'text/html' }))
           : s.bundle,
-        unsaved: differsFromDisk({ ...s, savedText: output }),
+        // 쓰기가 끝났다 — 기준은 이제 savedText(방금 쓴 결과물) 그 자체다.
+        pendingText: null,
+        unsaved: differsFromDisk({ ...s, savedText: output, pendingText: null }),
         notice: {
           key: how === 'overwritten' ? 'notice.saved' : 'notice.downloaded',
           params: { name: file.name, count: list.length },
@@ -1086,12 +1101,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       // 실패도 이전 문서의 것이면 알리지 않는다 — 파일 이름도 없는 실패 알림은
       // 지금 문서의 일로 읽혀, 멀쩡한 새 문서를 두고 사용자를 헤매게 한다.
       if (mine()) {
-        set({
+        set((s) => ({
+          // 쓰기가 실패했다 — 파일은 옛 내용 그대로다 (쓰기는 닫을 때 확정된다).
+          // 쓰는 사이 결과물 기준으로 잰 unsaved 를 옛 기준으로 다시 잰다. 안 그러면
+          // 쓰는 사이의 편집이 실패한 결과물과 같다는 이유로 저장된 척 남는다.
+          pendingText: null,
+          unsaved: differsFromDisk({ ...s, pendingText: null }),
           notice:
             e instanceof PatchError
               ? { key: 'notice.saveRejected', params: { detail: patchNotice(e.code, e.params) } }
               : { key: 'notice.saveFailed' },
-        });
+        }));
       }
       return false;
     } finally {
