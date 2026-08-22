@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditor } from './editor.js';
-import { useReplacement } from './replacement.js';
+import { reserveReplacement, useReplacement } from './replacement.js';
 import { useToasts } from './toasts.js';
 import {
   FLUSH_TIMEOUT,
@@ -262,6 +262,21 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT);
 
     expect(await asked).toBe(true);
+    expect(useUnsaved.getState().why).toBeNull();
+  });
+
+  it('확정을 기다리는 사이 더 새 흐름이 예약했으면 묻지 않고 물러난다 (spec §5)', async () => {
+    // 밀려난 채 물으면 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면
+    // 밀려난 흐름이 save() 를 불러 사용자의 마지막 선택이 사라진다.
+    edited();
+    const mine = reserveReplacement();
+    unregister = registerPreviewFlush(async () => {
+      // 답을 기다리는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+      reserveReplacement();
+    });
+
+    expect(await keepEdits({ key: 'confirm.whyOpen' }, mine)).toBe(false);
+    // 물음은 뜨지 않았다 — 밀려난 흐름의 물음은 최신 흐름의 물음을 취소해 버린다.
     expect(useUnsaved.getState().why).toBeNull();
   });
 

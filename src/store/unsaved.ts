@@ -101,6 +101,10 @@ export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolea
   // 그 답까지 기다린다. 이미 unsaved 여도 청한다 — "저장하고 계속" 이 열려 있던
   // 편집까지 담아야 하기 때문이다 (spec §4).
   await flushPreviewEdits();
+  // 확정 답(또는 한도)을 기다리는 사이에도 더 새 흐름은 예약한다 — 밀려난 채 물으면
+  // 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를
+  // 불러 사용자의 마지막 선택이 사라진다 (spec §5 · 갈아 끼우기 예약). 묻기 전에 물러난다.
+  if (mine && !mine.current()) return false;
   const { unsaved, save } = useEditor.getState();
   // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
   if (!unsaved) return true;
