@@ -1003,6 +1003,47 @@ describe('previewAgent · the lifetime of the held formatting range (spec §4.1)
 
     expect(selectedAtBold).toBe('나다라');
   });
+
+  it('a tap on the bar holds the selection too — the emulated mouse events may never come', () => {
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p>`);
+    click(el(0)!);
+    select(1, 4);
+
+    const button = document.querySelector('[data-ne-bar] button')!;
+    button.dispatchEvent(new Event('touchstart', { bubbles: true }));
+    // A tap collapses the selection on the way in.
+    getSelection()?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+    // The touch ends on the bar, so the hold stays — its click has not run yet.
+    button.dispatchEvent(new Event('touchend', { bubbles: true }));
+    click(button);
+
+    expect(selectedAtBold).toBe('나다라');
+  });
+
+  it('a touch that ends anywhere else lets the selection go', () => {
+    // Held forever, the next Ctrl+B would land on text the user left behind.
+    mount(`<p ${MARKER_ATTR}="0">가나다라마바사</p><p ${MARKER_ATTR}="1">아자차카</p>`);
+    click(el(0)!);
+    select(1, 4);
+
+    document
+      .querySelector('[data-ne-bar] button')!
+      .dispatchEvent(new Event('touchstart', { bubbles: true }));
+    el(1)!.dispatchEvent(new Event('touchend', { bubbles: true }));
+    // The tap leaves a caret behind, the way tapping elsewhere does.
+    const caret = document.createRange();
+    caret.setStart(el(0)!.firstChild!, 6);
+    caret.collapse(true);
+    const sel = getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(caret);
+    document.dispatchEvent(new Event('selectionchange'));
+
+    keydown('b', { ctrlKey: true });
+
+    expect(selectedAtBold).toBe('');
+  });
 });
 
 describe('previewAgent · brightness of translucent backgrounds (spec §4 · visual marks)', () => {

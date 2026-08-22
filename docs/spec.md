@@ -389,6 +389,12 @@ on-screen keyboard shrinks the layout viewport (`interactive-widget=resizes-cont
 instead of sliding over it — otherwise it covers the bottom of the app, which is
 where the block being edited usually is.
 
+The format bar's held range (§4.1) is held by **a touch as well as a press**. A tap
+produces emulated mouse events, but not dependably, and if the selection collapses
+before one arrives the range to format is already gone. A touch ending **on the bar**
+keeps the hold — its click has not run yet, and that click is what needs the range;
+a touch ending anywhere else is the user leaving, and drops it.
+
 ### Editing interactions
 - Click: only that block gets `contenteditable=true`; the rest are false
 - `Enter`: **commit and close.** Inserts no line break and is not forwarded to

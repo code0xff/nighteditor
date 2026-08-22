@@ -575,6 +575,12 @@ export function previewAgent(token = ''): () => void {
     box.addEventListener('mousedown', () => {
       barHeld = true;
     });
+    // A tap has to hold it too. The emulated mouse events a tap produces are
+    // not guaranteed to arrive, and if the selection collapses before one does,
+    // the range to act on is already gone.
+    box.addEventListener('touchstart', () => {
+      barHeld = true;
+    });
     // Wrapping is what keeps the bar inside a phone-sized window. The palette
     // grows with the document's colors, so on one line it would be wider than
     // the screen — and a bar hanging off the right edge scrolls the document
@@ -793,6 +799,12 @@ export function previewAgent(token = ''): () => void {
 
   // Keep the artifact's swipe handlers from firing while editing.
   on(document, 'touchend', (e) => {
+    // The release side of the hold above, and it lives here because the stop
+    // below would keep a later listener from ever seeing this event. A touch
+    // that ends **on the bar** keeps the hold — its click has not run yet, and
+    // that click is what needs the range. Anywhere else is the user leaving.
+    const target = (e as TouchEvent).target;
+    if (!(bar && target instanceof Node && bar.contains(target))) barHeld = false;
     if (editingId !== null) e.stopImmediatePropagation();
   });
 
