@@ -15,35 +15,35 @@ export default tseslint.config(
     },
   },
   {
-    // 아이콘 생성기는 Node 에서 직접 돈다
+    // The icon generator runs directly in Node
     files: ['scripts/**/*.mjs'],
     languageOptions: {
       globals: { Buffer: 'readonly', process: 'readonly', console: 'readonly' },
     },
   },
   {
-    // INV-6 · core/ 는 브라우저 API를 모른다 (docs/rules.md)
+    // INV-6 · core/ knows nothing of browser APIs (docs/rules.md)
     files: ['src/core/**/*.ts'],
     ignores: ['src/core/**/*.test.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
-        { name: 'document', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
-        { name: 'window', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
-        { name: 'navigator', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
-        // Web Encoding 전역 — 15차 리뷰에서 core/zip.ts 로 새어 들어온 적이 있다.
-        { name: 'TextDecoder', message: 'INV-6: core/ 는 Web Encoding 전역을 참조할 수 없다' },
-        { name: 'TextEncoder', message: 'INV-6: core/ 는 Web Encoding 전역을 참조할 수 없다' },
+        { name: 'document', message: 'INV-6: core/ cannot reference browser APIs' },
+        { name: 'window', message: 'INV-6: core/ cannot reference browser APIs' },
+        { name: 'navigator', message: 'INV-6: core/ cannot reference browser APIs' },
+        // Web Encoding globals — these leaked into core/zip.ts once, caught in the 15th review.
+        { name: 'TextDecoder', message: 'INV-6: core/ cannot reference Web Encoding globals' },
+        { name: 'TextEncoder', message: 'INV-6: core/ cannot reference Web Encoding globals' },
       ],
       'no-restricted-syntax': [
         'error',
         {
           selector: "MemberExpression[property.name='outerHTML']",
-          message: 'INV-2: 전체 재직렬화 금지',
+          message: 'INV-2: no whole-document re-serialization',
         },
         {
           selector: "CallExpression[callee.name='serialize']",
-          message: 'INV-2: parse5.serialize 로 문서를 재직렬화하지 않는다',
+          message: 'INV-2: never re-serialize the document with parse5.serialize',
         },
       ],
     },

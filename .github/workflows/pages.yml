@@ -1,7 +1,8 @@
 name: Pages
 
-# 검증(ci.yml)과 배포는 다른 관심사다. ci.yml 은 pnpm verify 만 호출하는 상태로 둔다.
-# verify 에 build 가 들어 있으므로 배포 전 검증은 ci.yml 이 이미 하고 있다.
+# Verification (ci.yml) and deployment are separate concerns. ci.yml stays a plain
+# call to pnpm verify. verify includes the build, so the pre-deploy check is already
+# covered there.
 on:
   push:
     branches: [dev]
@@ -12,7 +13,7 @@ permissions:
   pages: write
   id-token: write
 
-# 배포는 하나씩. 진행 중인 배포를 취소하지 않는다.
+# One deploy at a time, and a deploy already running is never cancelled.
 concurrency:
   group: pages
   cancel-in-progress: false

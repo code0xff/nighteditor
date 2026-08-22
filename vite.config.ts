@@ -3,11 +3,11 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath, URL } from 'node:url';
 
-/** GitHub Pages 는 하위 경로로 서빙된다. 절대 경로로 두면 에셋이 전부 404 다. */
+/** GitHub Pages serves from a subpath. Left absolute, every asset 404s. */
 const PAGES_BASE = '/nighteditor/';
 
 export default defineConfig(({ command }) => ({
-  // dev 서버는 루트로 둔다. 여기까지 하위 경로로 만들 이유가 없다.
+  // The dev server stays at the root — no reason to carry the subpath here too.
   base: command === 'build' ? PAGES_BASE : '/',
   plugins: [
     react(),
@@ -25,7 +25,10 @@ export default defineConfig(({ command }) => ({
       manifest: {
         name: 'nighteditor',
         short_name: 'nighteditor',
-        description: '아티팩트 HTML 을 클릭해 고치고 원본을 최소 diff 로 되돌려준다',
+        // User-facing copy, so it follows the app's default UI language rather than
+        // the repository's. It says what the tool does without naming artifacts —
+        // the document does not have to be one.
+        description: 'HTML 문서를 클릭해 고치고, 원본을 최소 diff 로 되돌려준다',
         lang: 'ko',
         display: 'standalone',
         background_color: '#0b0b0c',
@@ -40,8 +43,8 @@ export default defineConfig(({ command }) => ({
             purpose: 'maskable',
           },
         ],
-        // 설치하면 OS 에서 HTML 을 이 앱으로 바로 열 수 있다.
-        // 이때 넘어오는 핸들로 원본 덮어쓰기까지 된다.
+        // Once installed, the OS can open HTML with this app directly. The handle
+        // that arrives that way is what allows overwriting the original.
         file_handlers: [
           {
             action: PAGES_BASE,
@@ -50,7 +53,8 @@ export default defineConfig(({ command }) => ({
         ],
       },
       workbox: {
-        // 앱 전체를 미리 캐시한다. 백엔드가 없어 이걸로 완전한 오프라인이 된다.
+        // Precache the whole app. With no backend, that is all it takes to be
+        // fully offline.
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
       },
     }),
@@ -59,11 +63,12 @@ export default defineConfig(({ command }) => ({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   build: {
-    // 청크는 **바뀌는 주기**로 나눈다. 앱 코드를 고쳐 배포해도 react·radix 청크의
-    // 해시는 그대로라 사용자는 그 부분을 다시 받지 않는다.
+    // Chunks are split by **how often they change**. Shipping a change to app code
+    // leaves the react and radix chunk hashes alone, so nobody downloads them again.
     //
-    // parse5 는 여기서 나누지 않는다 — `store/editor.ts` 가 파일을 열 때 동적으로
-    // 불러오므로 이미 별도 청크이고, 초기 화면에는 실리지 않는다 (ADR-008).
+    // parse5 is not split here — `store/editor.ts` imports it dynamically when a
+    // file is opened, so it is already its own chunk and never rides the first
+    // screen (ADR-008).
     rolldownOptions: {
       output: {
         codeSplitting: {

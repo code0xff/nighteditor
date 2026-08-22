@@ -2,8 +2,8 @@ name: CI
 
 on: [push, pull_request]
 
-# 검증 로직을 여기 직접 쓰지 않는다. 로컬과 CI가 갈라지면
-# push 전 사전 확인이 무력해진다. (docs/rules.md §5.2)
+# The verification logic is never written out here. Once local and CI drift apart,
+# checking before a push stops meaning anything. (docs/rules.md §5.2)
 jobs:
   verify:
     runs-on: ubuntu-latest
