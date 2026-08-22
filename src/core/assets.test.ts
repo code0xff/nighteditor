@@ -545,9 +545,10 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     );
   });
 
-  it('같은 프리뷰 표기에 원문 표기가 여럿이면 먼저 나온 표기로 되돌린다', () => {
-    // logo.png 와 ./logo.png 는 같은 파일이라 프리뷰 표기가 같다 — 어느 쪽으로
-    // 되돌려도 같은 파일을 가리키므로, 결정적으로 첫 표기를 쓴다.
+  it('자리를 모르면 같은 프리뷰 표기의 원문 표기 중 먼저 나온 것으로 되돌린다', () => {
+    // logo.png 와 ./logo.png 는 같은 파일이라 프리뷰 표기가 같다 — 블록 범위 없이
+    // 불리면 자리에 맬 수 없으므로, 결정적으로 첫 표기를 쓴다. 자리를 알 때는
+    // 아래 "자리마다 제 표기" 묶음이 각자 제 표기로 되돌린다 (spec §5.1).
     const src = '<img src="logo.png"><img src="./logo.png">';
     const boundary = assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
 
@@ -572,5 +573,75 @@ describe('assetSwaps · assetBoundary (ADR-011)', () => {
     expect(
       boundary.toPreview('전혀 다른 내용의 조각이 같은 길이로 있다고 치자!!', innerStart)
     ).toBe('전혀 다른 내용의 조각이 같은 길이로 있다고 치자!!');
+  });
+});
+
+describe('assetBoundary · 자리마다 제 표기 (spec §5.1)', () => {
+  /** 같은 파일을 두 표기로 적은 블록 — 프리뷰 표기가 같아 표로는 못 가른다 */
+  const src = '<p><img src="logo.png"> 사이 <img src="./logo.png"></p>';
+  const start = 3;
+  const end = src.indexOf('</p>');
+  const inner = src.slice(start, end);
+  const boundary = () => assetBoundary(assetSwaps(src, parseAssetRefs(src), '', fake));
+
+  it('치환했다 되돌리면 두 표기가 각자 제자리로 돌아간다 (대원칙 1·2)', () => {
+    const b = boundary();
+
+    expect(b.fromPreview(b.toPreview(inner, start), start, end)).toBe(inner);
+  });
+
+  it('글자만 고쳐도 손대지 않은 참조의 표기는 그대로다 (대원칙 2)', () => {
+    // 옛 코드는 표 하나로 되돌려 ./logo.png 가 logo.png 로 갈렸다 — 편집한 적 없는
+    // 속성의 diff 가 생긴다.
+    const edited = '<img src="blob:logo.png"> 고친 글 <img src="blob:logo.png">';
+
+    expect(boundary().fromPreview(edited, start, end)).toBe(
+      '<img src="logo.png"> 고친 글 <img src="./logo.png">'
+    );
+  });
+
+  it('질의만 다른 두 참조도 제 표기로 돌아간다', () => {
+    // 질의는 blob URL 에 붙이지 않아 프리뷰 표기가 같아진다 — 되돌릴 때는 각자다.
+    const q = '<p><img src="logo.png?v=1"><img src="logo.png?v=2"></p>';
+    const qEnd = q.indexOf('</p>');
+    const qInner = q.slice(3, qEnd);
+    const b = assetBoundary(assetSwaps(q, parseAssetRefs(q), '', fake));
+
+    expect(b.fromPreview(b.toPreview(qInner, 3), 3, qEnd)).toBe(qInner);
+  });
+
+  it('직렬화 짝도 자리마다 제 표기다', () => {
+    // 두 조각의 디코딩 값이 같아 브라우저 직렬화 표기도 같다 — 원문 엔티티 표기는
+    // 자리마다 다르므로 각자 제 표기로 돌아가야 한다.
+    const e = '<p><use href="sprite.svg#i&#32;con"/><use href="sprite.svg#i con"/></p>';
+    const eEnd = e.indexOf('</p>');
+    const b = assetBoundary(assetSwaps(e, parseAssetRefs(e), '', fake));
+
+    expect(
+      b.fromPreview(
+        '<use href="blob:sprite.svg#i con"></use><use href="blob:sprite.svg#i con"></use>',
+        3,
+        eEnd
+      )
+    ).toBe('<use href="sprite.svg#i&#32;con"></use><use href="sprite.svg#i con"></use>');
+  });
+
+  it('지워서 수가 안 맞으면 먼저 나온 원문 표기로 되돌린다', () => {
+    // 어느 자리의 것인지 증명할 수 없다 — 추측 대신 결정적인 첫 표기를 쓴다.
+    // 어느 표기든 같은 파일을 가리키고, 그 블록은 사용자가 실제로 고친 범위다.
+    expect(boundary().fromPreview('<img src="blob:logo.png">', start, end)).toBe(
+      '<img src="logo.png">'
+    );
+  });
+
+  it('다른 블록에서 복사해 온 blob 표기는 표로 되돌린다', () => {
+    // 범위 안에 그 표기의 치환이 없어도 blob URL 을 남길 수는 없다 (INV-9).
+    const two = '<p><img src="a.png"></p><p><img src="b.png"></p>';
+    const firstEnd = two.indexOf('</p>');
+    const b = assetBoundary(assetSwaps(two, parseAssetRefs(two), '', fake));
+
+    expect(b.fromPreview('<img src="blob:a.png"><img src="blob:b.png">', 3, firstEnd)).toBe(
+      '<img src="a.png"><img src="b.png">'
+    );
   });
 });

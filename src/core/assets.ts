@@ -382,13 +382,22 @@ export interface AssetBoundary {
    * 프리뷰 표기로 치환한다. @param textStart 조각이 원본에서 시작하는 offset (INV-3)
    */
   toPreview(text: string, textStart: number): string;
-  /** 프리뷰에서 돌아온 HTML 을 저장용으로 — 프리뷰 표기를 원문 표기로 되돌린다 */
-  fromPreview(html: string): string;
+  /**
+   * 프리뷰에서 돌아온 HTML 을 저장용으로 — 프리뷰 표기를 원문 표기로 되돌린다.
+   *
+   * @param textStart/textEnd 이 HTML 이 나온 블록의 원본 범위 (INV-3). 주면 범위 안의
+   *   치환을 원문에 나온 순서대로 **각자 제 표기**로 되돌린다 — 같은 파일을 다르게
+   *   적은 참조(`logo.png` 와 `./logo.png`)는 프리뷰 표기가 같아, 표 하나로 되돌리면
+   *   손대지 않은 참조의 표기가 다른 자리의 표기로 갈린다 (대원칙 2). 자리에 맬 수
+   *   없는 표기는 먼저 나온 원문 표기로 되돌린다 (spec §5.1).
+   */
+  fromPreview(html: string, textStart?: number, textEnd?: number): string;
 }
 
 export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
-  // 되돌림 표. 같은 프리뷰 표기에 원문 표기가 여럿이면(`logo.png` 와 `./logo.png`)
-  // 먼저 나온 표기로 되돌린다 — 어느 쪽이든 같은 파일을 가리킨다.
+  // 자리에 맬 수 없는 표기의 되돌림 표. 같은 프리뷰 표기에 원문 표기가 여럿이면
+  // (`logo.png` 와 `./logo.png`) 먼저 나온 표기로 되돌린다 — 어느 쪽이든 같은 파일을
+  // 가리킨다. 자리를 아는 표기는 아래 fromPreview 가 치환 목록에서 직접 되돌린다.
   const back = new Map<string, string>();
   for (const swap of swaps) {
     // 직렬화 짝이 먼저다 — fromPreview 가 받는 것은 브라우저가 직렬화한 HTML 이라,
@@ -403,6 +412,17 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
   // 접두사라, 짧은 쪽을 먼저 바꾸면 긴 쪽이 영영 안 잡혀 조각이 blob 이름에 남는다.
   const pairs = [...back].sort((a, b) => b[0].length - a[0].length);
 
+  /** 이 치환이 프리뷰 표기 `spelled` 로 나간 것이면 되돌릴 원문 표기, 아니면 null */
+  const ownSpelling = (swap: AssetSwap, spelled: string): string | null => {
+    // 직렬화 짝이 먼저다 — fromPreview 가 받는 것은 브라우저가 직렬화한 HTML 이라,
+    // 두 표기가 같으면(to === serializedTo) 그 문맥에 맞는 쪽(serializedFrom,
+    // `"` 가 &quot; 로 잠긴 원본 슬라이스)으로 되돌려야 속성이 조기 종료되지 않는다.
+    if (swap.serializedTo !== undefined && spelled === swap.serializedTo) {
+      return swap.serializedFrom ?? swap.from;
+    }
+    return spelled === swap.to ? swap.from : null;
+  };
+
   return {
     toPreview(text, textStart) {
       const inside: Edit[] = [];
@@ -415,11 +435,50 @@ export function assetBoundary(swaps: readonly AssetSwap[]): AssetBoundary {
       }
       return applyEdits(text, inside);
     },
-    fromPreview(html) {
-      let out = html;
-      // blob URL 은 탭마다 새로 만든 무작위 이름이라 문서에 원래 있던 텍스트와
-      // 충돌하지 않는다 — 통째 문자열 치환으로 충분하다.
-      for (const [to, from] of pairs) if (to !== from) out = out.split(to).join(from);
+    fromPreview(html, textStart, textEnd) {
+      // 이 블록 범위 안의 치환 — 되돌림의 기준은 표가 아니라 자리다 (spec §5.1).
+      const local =
+        textStart === undefined || textEnd === undefined
+          ? []
+          : swaps
+              .filter((s) => s.start >= textStart && s.end <= textEnd)
+              .sort((a, b) => a.start - b.start);
+      if (local.length === 0) {
+        // 자리를 모르거나(범위 없이 불렸다) 범위 안에 치환이 없다 — 표로 되돌린다.
+        // blob URL 은 탭마다 새로 만든 무작위 이름이라 문서에 원래 있던 텍스트와
+        // 충돌하지 않는다 — 통째 문자열 치환으로 충분하다.
+        let out = html;
+        for (const [to, from] of pairs) if (to !== from) out = out.split(to).join(from);
+        return out;
+      }
+      // 왼쪽부터 훑으며 프리뷰 표기를 찾아, 범위 안의 치환에 나온 순서대로 맞춘다 —
+      // k번째로 나온 같은 표기는 이 블록의 k번째 그 표기 자리라, 각자 제 원문 표기로
+      // 돌아간다 (대원칙 2). 지우거나 옮겨 자리에 맬 수 없게 된 표기만 표(먼저 나온
+      // 원문 표기)로 되돌린다 — 어느 표기든 같은 파일을 가리킨다.
+      const used = local.map(() => false);
+      let out = '';
+      let i = 0;
+      scan: while (i < html.length) {
+        // 긴 표기부터 본다 — 조각 없는 표기는 조각 있는 표기의 접두사다 (pairs 정렬).
+        for (const [to, fallback] of pairs) {
+          if (!html.startsWith(to, i)) continue;
+          let from = fallback;
+          for (let j = 0; j < local.length; j++) {
+            if (used[j]) continue;
+            const own = ownSpelling(local[j] as AssetSwap, to);
+            if (own !== null) {
+              used[j] = true;
+              from = own;
+              break;
+            }
+          }
+          out += from;
+          i += to.length;
+          continue scan;
+        }
+        out += html[i];
+        i++;
+      }
       return out;
     },
   };

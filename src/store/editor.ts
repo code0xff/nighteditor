@@ -778,7 +778,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     // 블록 안에 치환된 자원이 있으면 innerHTML 에 blob URL 이 실려 있고, 그대로
     // 패치가 되면 탭을 닫는 순간 죽는 주소가 파일에 박힌다. 제목(rcdata)은 호스트
     // 입력 칸에서 오지만, 경계는 제 blob 표기만 만지므로 함께 지나도 그대로다.
-    const restored = get().boundary?.fromPreview(html) ?? html;
+    // 블록 범위를 함께 준다 — 같은 파일을 다르게 적은 참조가 하나의 표기로 뭉치지
+    // 않고 자리마다 제 표기로 돌아간다 (spec §5.1 · 대원칙 2).
+    const restored = get().boundary?.fromPreview(html, block.innerStart, block.innerEnd) ?? html;
     const before = get().patches;
     const patches = nextPatches(before, block, restored, pristine);
     // 눌렀다 그냥 빠져나온 것은 아무 일도 아니다 — 패치도, 편집 순서도, unsaved 도
