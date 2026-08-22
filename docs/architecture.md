@@ -7,7 +7,7 @@
 | Language | TypeScript (`strict`) | Offset and range math is the core; a type error here is data corruption |
 | Build | Vite | Static output, with local `file://` execution in mind |
 | UI | React | Matches the house style of the `design-ui` skill |
-| Styling | Tailwind CSS + shadcn/ui | Use the `design-ui` skill for UI work (Pretendard / JetBrains Mono, dev-tool tone) |
+| Styling | Tailwind CSS + shadcn/ui | Use the `design-ui` skill for UI work (Pretendard / JetBrains Mono, dev-tool tone). One variant of our own, `touch:`, lives in `tailwind.config.js` — ADR-013 |
 | State | Zustand | It is just a patch list and selection state; anything more is overkill |
 | HTML parser | **parse5** (`sourceCodeLocationInfo: true`) | A spec-compliant implementation that yields source offsets. The heart of this project |
 | Editor | **Native `contenteditable`** | See ADR-004 — rich text frameworks are banned |
@@ -377,7 +377,7 @@ shows nothing.
 
 **Decision** One Tailwind variant, `touch:` — `@media (pointer: coarse) and (min-width: 360px)` —
 carries a second size for everything that is pressed. With a mouse the app stays dense: the header
-row is 30px, buttons inside the change list 26px, menu items 24px. Where the pointer is a fingertip
+row is 30px, buttons inside the change list 26px, menu items 21px. Where the pointer is a fingertip
 those become 37.5px in the header, in dialogs and in menus, and 33.75px in the list. The sizes live
 in the primitives (`components/ui/button.tsx`, `select.tsx`, `input.tsx`), not at the call sites; the
 header row has its own button size, `chrome`, so that one name means one height.

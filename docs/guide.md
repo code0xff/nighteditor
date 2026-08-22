@@ -174,6 +174,11 @@ acts on the document — open, close, save — plus the language and theme butto
 the **title field** moves to the top of the panel and **Download a copy** and the
 source link to the bottom of it.
 
+**On a touch device the buttons are bigger.** This follows the pointer, not the
+window: a narrow window on a desktop is still driven by a mouse and stays compact,
+while a tablet gets the larger controls however wide it is. Under about 360px there
+is no room for them, and those screens keep the compact sizes.
+
 ## 5. Saving and getting the result
 
 With nothing edited, the save button is disabled and `Ctrl+S` does nothing.

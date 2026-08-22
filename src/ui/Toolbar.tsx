@@ -34,9 +34,10 @@ export function Toolbar() {
     // into view, and the whole document jumps with it.
     //
     // Everything but the title field is `shrink-0`. Without it the row never
-    // reports an overflow — the controls just squash, and a 28px app mark ends
-    // up 19px wide and out of shape. Squashed icons are the harder thing to
-    // notice, so the flexible element is the one that gives.
+    // reports an overflow — the controls just squash. Measured while the row
+    // was about 100px over, the 26px app mark came out 19px wide and out of
+    // shape. Squashed icons are the harder thing to notice, so the flexible
+    // element is the one that gives.
     //
     // Hence the thin side padding below `sm`: with a five document bundle open
     // — every control this row can hold — the row lands within a pixel or two

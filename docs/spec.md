@@ -383,12 +383,13 @@ lives:
 screen is written in and lit by, and they are looked for in the corner. Everything in
 the panel needs a document open to reach — which is exactly not the moment someone
 picks the language they read in. Below `sm` the toolbar's gaps and side padding
-tighten instead (`gap-1`, `px-1.5`), which is what buys them the room — with a
-five-document bundle open the row lands within a pixel of a 320px window.
+tighten instead (`gap-1`, `px-1`), which is what buys them the room — with a
+five-document bundle open the row lands within a pixel or two of the narrowest
+window each scale has to survive.
 
 **Where the pointer is a fingertip, everything you press grows.** The header row and
 dialog buttons go from 30px to 37.5px, buttons inside the change list from 26px to
-33.75px, menu items from 24px to 37.5px, and the notice's dismiss icon gets padding
+33.75px, menu items from 21px to 37.5px, and the notice's dismiss icon gets padding
 until it is about 32px of target. This follows the pointer, not the window width: a
 narrow window on a desktop is still driven by a mouse, and a tablet is not however
 wide it is. One exception, and it is measured — under 360px the grown controls put
@@ -403,9 +404,10 @@ exactly — there is nothing left over, and something new in that row has to buy
 width from something already there.
 
 Every toolbar item but the title field is `shrink-0`. Without that the row never
-reports an overflow at all — the controls quietly squash instead, and the 28px app
-mark ends up 19px wide and out of shape. Squashed icons are the harder thing to
-notice, so the flexible element is the one that gives.
+reports an overflow at all — the controls quietly squash instead. Measured while the
+row was about 100px over, the 26px app mark came out 19px wide and out of shape.
+Squashed icons are the harder thing to notice, so the flexible element is the one
+that gives.
 
 The panel itself is capped at 85% of the window: 288px of it in a 320px window leaves
 32px of document, not enough to see what closing it would take you back to.
