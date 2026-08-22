@@ -15,6 +15,45 @@ import { refuseWhileReplacing, type Replacement } from './replacement';
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
+/**
+ * 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하는 통로 (spec §4).
+ *
+ * 프리뷰를 그리는 화면(PreviewFrame)이 자기 iframe 으로 청하는 함수를 걸어 둔다 —
+ * 스토어는 iframe 을 모른다. 돌려주는 프라미스는 프리뷰의 답(flushed)에 풀린다.
+ */
+let flushPreview: (() => Promise<void>) | null = null;
+
+/** @returns 걸어둔 함수를 떼는 함수 — 더 새 등록을 덮어 떼지는 않는다 */
+export function registerPreviewFlush(fn: () => Promise<void>): () => void {
+  flushPreview = fn;
+  return () => {
+    if (flushPreview === fn) flushPreview = null;
+  };
+}
+
+/**
+ * 프리뷰 확정 답을 기다리는 한도 (spec §4).
+ *
+ * 정상 프리뷰의 답은 한 순회(수 ms)에 온다 — 한도는 프리뷰가 죽었거나 아티팩트
+ * 스크립트가 이벤트 루프를 붙들고 있을 때만 발동한다. 그 상태의 프리뷰는
+ * 확정(focusout)도 보낼 수 없으므로 더 기다려도 지킬 편집이 새로 오지 않는다 —
+ * 기다림은 사용자의 클릭만 붙든다. 1초는 무거운 아티팩트 스크립트의 긴 작업
+ * 한 번쯤은 넘기고, 죽은 프리뷰 앞에서의 멈칫거림으로는 참을 만한 값이다.
+ */
+export const FLUSH_TIMEOUT = 1000;
+
+/**
+ * 프리뷰에 열려 있는 편집을 확정시키고 그 답을 (한도까지만) 기다린다.
+ *
+ * 확정과 답은 같은 postMessage 통로로 순서대로 오므로, 답이 왔다면 확정도 이미
+ * 스토어에 닿아 있다 — 이 뒤에 읽는 `unsaved` 는 그 편집을 안다.
+ */
+export async function flushPreviewEdits(): Promise<void> {
+  const ask = flushPreview;
+  if (!ask) return;
+  await Promise.race([ask(), new Promise<void>((done) => setTimeout(done, FLUSH_TIMEOUT))]);
+}
+
 interface UnsavedState {
   /** 무엇을 하려다 멈췄는지. null 이면 묻는 중이 아니다 */
   why: Notice | null;
@@ -56,6 +95,12 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
  *   홀로 도는 저장과 다르다 — 그쪽 편집은 살아남으므로 잠그지 않는다.
  */
 export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolean> {
+  // 프리뷰에서 편집 중이던 블록의 확정(focusout)은 postMessage 로 떠 있을 뿐이라
+  // 아직 도착 전일 수 있다 — 그대로 unsaved 를 읽으면 묻지 않고 갈아 끼우고, 늦게
+  // 온 확정은 프리뷰가 내려가며 조용히 사라진다 (대원칙 3). 판정 전에 확정을 청해
+  // 그 답까지 기다린다. 이미 unsaved 여도 청한다 — "저장하고 계속" 이 열려 있던
+  // 편집까지 담아야 하기 때문이다 (spec §4).
+  await flushPreviewEdits();
   const { unsaved, save } = useEditor.getState();
   // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
   if (!unsaved) return true;

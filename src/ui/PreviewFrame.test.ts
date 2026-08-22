@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useEditor } from '@/store/editor';
 import type { Block } from '@/core/types';
 import { useReplacement } from '@/store/replacement';
+import { flushPreviewEdits } from '@/store/unsaved';
 import { PreviewFrame } from './PreviewFrame';
 
 // react 의 act 는 이 표식이 있어야 테스트 환경으로 인정하고 경고 없이 돈다.
@@ -137,5 +138,62 @@ describe('PreviewFrame · 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 
       token: 'doc-2',
     });
     expect(useEditor.getState().patches.get(0)).toBe('지금 문서의 내용');
+  });
+});
+
+describe('PreviewFrame · 프리뷰 확정 청 (spec §4)', () => {
+  function mountFrame(): HTMLIFrameElement {
+    act(() => {
+      root = createRoot(host!);
+      root.render(createElement(PreviewFrame));
+    });
+    const frame = host!.querySelector('iframe');
+    if (!frame?.contentWindow) throw new Error('iframe 이 그려지지 않았다');
+    return frame;
+  }
+
+  const arrive = (frame: HTMLIFrameElement, data: unknown) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data, source: frame.contentWindow }));
+    });
+
+  it('iframe 에 flush 를 청하고, 지금 문서의 flushed 가 와야 풀린다', async () => {
+    useEditor.setState({ previewToken: 'doc-2' });
+    const frame = mountFrame();
+    const posted: { type?: string; seq?: number }[] = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((msg: unknown) => {
+      posted.push(msg as { type?: string; seq?: number });
+    }) as typeof window.postMessage);
+
+    let done = false;
+    const pending = flushPreviewEdits().then(() => {
+      done = true;
+    });
+    const flush = posted.find((m) => m.type === 'flush');
+    expect(flush?.seq).toBeTypeOf('number');
+
+    // 옛 프리뷰의 답은 표 검사가 걸러낸다 — 새 청을 풀면 안 된다 (spec §5).
+    arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-1' });
+    await act(async () => {});
+    expect(done).toBe(false);
+
+    arrive(frame, { type: 'flushed', seq: flush?.seq, token: 'doc-2' });
+    await pending;
+    expect(done).toBe(true);
+  });
+
+  it('화면이 내려가면 기다리던 청을 푼다 — 답을 전달할 길이 없다', async () => {
+    useEditor.setState({ previewToken: 'doc-2' });
+    const frame = mountFrame();
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((() => {
+      /* 답 없는 프리뷰 */
+    }) as typeof window.postMessage);
+
+    const pending = flushPreviewEdits();
+    act(() => root?.unmount());
+    root = null;
+
+    // 한도(1초)를 기다리지 않고 바로 풀린다 — 여기서 멈추면 테스트가 그 증거다.
+    await pending;
   });
 });

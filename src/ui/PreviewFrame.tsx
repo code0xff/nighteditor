@@ -1,11 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { useEditor } from '@/store/editor';
 import { useReplacement } from '@/store/replacement';
-import { shortcutSave } from '@/store/unsaved';
+import { registerPreviewFlush, shortcutSave } from '@/store/unsaved';
 import { useI18n } from '@/store/locale';
 import { cn } from '@/lib/utils';
 import { FORMAT_LABELS } from '@/lib/messages';
 import type { FromPreview, ToPreview } from '@/preview/protocol';
+
+/** flush 청마다 새 번호 — 늦게 온 옛 청의 답이 새 청을 풀면 안 된다 */
+let flushSerial = 0;
 
 /**
  * 아티팩트를 렌더하고 프리뷰 에이전트와 postMessage 로만 대화한다 (rules §4).
@@ -33,6 +36,36 @@ export function PreviewFrame() {
   const drainReveal = useEditor((s) => s.drainReveal);
   // 갈아 끼우는 동안의 화면 잠금은 전부 예약 상태 하나에서 나온다 (ADR-010).
   const replacing = useReplacement((s) => s.replacing);
+  /** 프리뷰의 확정 답(flushed)을 기다리는 자리 — 청 번호마다 하나 */
+  const flushWaiters = useRef(new Map<number, () => void>());
+
+  // 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하는 함수를 걸어 둔다 (spec §4).
+  // 물음(keepEdits) 쪽은 iframe 을 모르므로 여기서 잇는다. 죽은 프리뷰의 한도는
+  // 청한 쪽(flushPreviewEdits)이 잡는다 — 여기서는 답이 올 때만 풀면 된다.
+  useEffect(() => {
+    const waiters = flushWaiters.current;
+    const unregister = registerPreviewFlush(
+      () =>
+        new Promise<void>((resolve) => {
+          const win = frame.current?.contentWindow;
+          // 프리뷰가 없으면 확정시킬 편집도 없다 — 바로 푼다.
+          if (!win) {
+            resolve();
+            return;
+          }
+          const seq = ++flushSerial;
+          waiters.set(seq, resolve);
+          const msg: ToPreview = { type: 'flush', seq };
+          win.postMessage(msg, '*');
+        })
+    );
+    return () => {
+      unregister();
+      // 내려가는 화면은 답을 더 전달할 수 없다 — 기다리는 쪽을 한도까지 붙잡지 않는다.
+      for (const resolve of waiters.values()) resolve();
+      waiters.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const handle = (e: MessageEvent) => {
@@ -53,6 +86,16 @@ export function PreviewFrame() {
       else if (msg.type === 'save') shortcutSave();
       else if (msg.type === 'downloadCopy') downloadCopy();
       else if (msg.type === 'undo') undoLast();
+      // 확정 청의 답 — 같은 통로로 확정(edit)이 먼저 왔으므로, 여기서 풀리는 물음은
+      // 이미 그 편집을 아는 unsaved 를 본다 (spec §4). 옛 프리뷰의 답은 위 표 검사가
+      // 걸러내고, 그 청은 한도(flushPreviewEdits)가 푼다.
+      else if (msg.type === 'flushed') {
+        const resolve = flushWaiters.current.get(msg.seq);
+        if (resolve) {
+          flushWaiters.current.delete(msg.seq);
+          resolve();
+        }
+      }
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);

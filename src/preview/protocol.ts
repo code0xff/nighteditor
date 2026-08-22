@@ -24,6 +24,12 @@ type FromPreviewBody =
   | { type: 'blocked'; id: number }
   /** 대조가 끝나기 전에 블록을 눌렀다 — 편집은 열지 않았고, 호스트가 사정을 말한다 (spec §4) */
   | { type: 'notReady' }
+  /**
+   * 호스트의 flush 청에 대한 답 (spec §4). 열려 있던 편집의 확정(edit)을 **먼저**
+   * 보낸 뒤라, 이 답이 닿았다면 그 확정도 이미 호스트에 닿아 있다 — 같은 통로는
+   * 순서를 지킨다.
+   */
+  | { type: 'flushed'; seq: number }
   /** 프리뷰 안에서 Ctrl+S 를 눌렀다. iframe 의 키 이벤트는 호스트 창에 닿지 않는다 */
   | { type: 'save' }
   /** Ctrl+Shift+S — 원본은 그대로 두고 결과물만 내려받는다 */
@@ -40,6 +46,13 @@ export type ToPreview =
    * 어느 블록의 것도 아니어서 조용히 사라진다.
    */
   | { type: 'locked'; ids: number[]; all: number[] }
+  /**
+   * 열려 있는 편집을 지금 확정하라 (spec §4). 편집을 잃을 일(닫기·열기·갈아타기)의
+   * 물음 전에 보낸다 — 프리뷰의 확정(focusout)은 postMessage 라 호스트의 `unsaved`
+   * 판정보다 늦게 닿을 수 있다. 에이전트는 확정을 보낸 뒤 같은 `seq` 로 flushed 를
+   * 답한다.
+   */
+  | { type: 'flush'; seq: number }
   | { type: 'revert'; id: number; html: string }
   /** 변경 목록에서 고른 블록을 화면에 보여준다 (스크롤 + 잠깐 짚어주기) */
   | { type: 'reveal'; id: number }

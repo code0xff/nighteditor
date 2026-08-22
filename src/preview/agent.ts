@@ -707,6 +707,7 @@ export function previewAgent(token = ''): () => void {
       id?: number;
       html?: string;
       labels?: Record<string, string>;
+      seq?: number;
     } | null;
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'locked' && msg.ids) {
@@ -756,6 +757,15 @@ export function previewAgent(token = ''): () => void {
     } else if (msg.type === 'revert' && typeof msg.id === 'number') {
       const el = elementFor(msg.id);
       if (el) el.innerHTML = msg.html ?? '';
+    } else if (msg.type === 'flush' && typeof msg.seq === 'number') {
+      // 열려 있는 편집을 지금 확정한다 — 호스트가 편집을 잃을 일(닫기·열기·갈아타기)의
+      // 물음 전에 청한다 (spec §4). 확정(edit)이 같은 통로로 **먼저** 나가므로, 이 답이
+      // 호스트에 닿을 즈음이면 그 확정도 이미 스토어에 닿아 있다.
+      // 조합 중이면 commit 이 확정을 미룬다 — 그래도 답은 보낸다. 프리뷰 밖을 누른
+      // 시점이면 브라우저가 조합을 이미 끝내 줘 여기 오는 flush 는 거의 조합 밖이고,
+      // 미뤄진 확정이 갈아 끼우는 사이에 오면 스토어가 거절하고 알린다 (조용히 사라지지 않는다).
+      commit();
+      post({ type: 'flushed', seq: msg.seq });
     }
   }) as EventListener);
 

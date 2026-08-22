@@ -1,9 +1,15 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEditor } from './editor.js';
 import { useReplacement } from './replacement.js';
 import { useToasts } from './toasts.js';
-import { keepEdits, shortcutSave, useUnsaved } from './unsaved.js';
+import {
+  FLUSH_TIMEOUT,
+  keepEdits,
+  registerPreviewFlush,
+  shortcutSave,
+  useUnsaved,
+} from './unsaved.js';
 
 /**
  * 대화상자가 뜨기를 기다렸다가 대신 답한다 — 사람이 버튼을 누르는 자리다.
@@ -203,5 +209,67 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     expect(useUnsaved.getState().why).not.toBeNull();
     useUnsaved.getState().reply('cancel');
     expect(await asked).toBe(false);
+  });
+});
+
+describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
+  let unregister: (() => void) | null = null;
+
+  afterEach(() => {
+    unregister?.();
+    unregister = null;
+    vi.useRealTimers();
+  });
+
+  it('확정이 아직 도착 전이면 기다렸다가 묻는다', async () => {
+    // focusout 확정은 postMessage 라 unsaved 판정보다 늦을 수 있다 — 청 없이
+    // 판정하면 묻지 않고 갈아 끼워, 고치던 내용이 조용히 사라진다 (대원칙 3).
+    unregister = registerPreviewFlush(async () => {
+      // 청을 받고서야 확정이 스토어에 닿는다 — 실제로는 edit 메시지가 이 사이에 온다.
+      edited();
+    });
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    await answerWith('cancel');
+
+    expect(await asked).toBe(false);
+  });
+
+  it('청이 풀리기 전에는 판정하지 않는다', async () => {
+    let release: () => void = () => {};
+    unregister = registerPreviewFlush(() => new Promise((r) => (release = r)));
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    // 답이 오기 전 — 아직 묻지도, 진행하지도 않았다.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(useUnsaved.getState().why).toBeNull();
+
+    edited();
+    release();
+    await answerWith('discard');
+
+    expect(await asked).toBe(true);
+  });
+
+  it('프리뷰가 답하지 않으면 한도까지만 기다리고 지금 아는 상태로 진행한다', async () => {
+    // 답 못 하는 프리뷰는 확정도 못 보낸다 — 더 기다려도 지킬 편집이 오지 않고,
+    // 기다림은 사용자의 클릭만 붙든다 (spec §4).
+    vi.useFakeTimers();
+    unregister = registerPreviewFlush(() => new Promise(() => {}));
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    await vi.advanceTimersByTimeAsync(FLUSH_TIMEOUT);
+
+    expect(await asked).toBe(true);
+    expect(useUnsaved.getState().why).toBeNull();
+  });
+
+  it('떼고 나면 청하지 않는다 — 프리뷰가 없으면 확정시킬 편집도 없다', async () => {
+    const flush = vi.fn().mockResolvedValue(undefined);
+    registerPreviewFlush(flush)();
+
+    expect(await keepEdits({ key: 'confirm.whyOpen' })).toBe(true);
+    expect(flush).not.toHaveBeenCalled();
   });
 });

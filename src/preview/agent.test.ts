@@ -1408,3 +1408,32 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
   });
 });
+
+describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 (spec §4)', () => {
+  it('편집 중이면 확정(edit)을 먼저 보내고 flushed 로 답한다', () => {
+    // 호스트는 이 순서에 기대어 unsaved 를 판정한다 — flushed 가 먼저 가면
+    // 확정이 아직 안 닿은 채 물음이 돌아 편집이 조용히 사라진다.
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    el(0)!.innerHTML = '고친 본문';
+    sent = [];
+
+    fromHost({ type: 'flush', seq: 7 });
+
+    const editAt = sent.findIndex((m) => m.type === 'edit');
+    const flushedAt = sent.findIndex((m) => m.type === 'flushed');
+    expect(sent[editAt]).toMatchObject({ type: 'edit', id: 0, html: '고친 본문' });
+    expect(sent[flushedAt]).toMatchObject({ type: 'flushed', seq: 7 });
+    expect(editAt).toBeLessThan(flushedAt);
+    // 편집은 닫혔다 — contenteditable 이 남으면 안 된다.
+    expect(el(0)!.hasAttribute('contenteditable')).toBe(false);
+  });
+
+  it('편집 중이 아니어도 flushed 로 답한다 — 청한 쪽이 한도까지 기다리면 안 된다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+
+    fromHost({ type: 'flush', seq: 3 });
+
+    expect(sent).toEqual([{ type: 'flushed', seq: 3 }]);
+  });
+});
