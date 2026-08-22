@@ -164,6 +164,11 @@ overpower the color scheme the document already has.
 Reverting removes that block from the patch list, so saving changes not a single
 byte relative to the original.
 
+**On a small screen the panel is not beside the preview.** Under about 1024px the
+document and the list cannot both have room, so the list moves over the preview and
+the toolbar gains a button that opens it. Press beside the panel to close it —
+pressing a change card also closes it, since the spot it takes you to is underneath.
+
 ## 5. Saving and getting the result
 
 With nothing edited, the save button is disabled and `Ctrl+S` does nothing.

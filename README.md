@@ -20,7 +20,7 @@ pnpm install
 pnpm dev
 ```
 
-1. Drag an HTML file or a zip into the window, or press **Open a file** (**Open a folder** to open a whole folder)
+1. Drag an HTML file or a zip into the window, or press **Open a file** (**Open a folder** to open a whole folder). On a phone or tablet, press **Open a file** — there is nothing to drag onto, and folders cannot be opened there
 2. Click text to edit it — `Enter` commits and closes, `Shift+Enter` breaks a line, `Esc` cancels
 3. **Save** (`Ctrl+S` / `⌘S` — works inside the preview too)
 
