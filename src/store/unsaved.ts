@@ -64,6 +64,11 @@ export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolea
   if (choice === 'cancel') return false;
   if (choice === 'save') {
     mine?.engage();
+    // 물음이 떠 있는 사이에도 상태는 움직인다 — 단축키로 부른 저장이 그 사이 끝났거나,
+    // 마지막 편집을 되돌려 이미 파일과 같아졌을 수 있다. 그때 save() 는 "쓸 것 없음"
+    // 으로 false 를 돌려주는데, 그것을 실패로 읽으면 청한 저장이 이미 충족됐는데도
+    // 하려던 일이 조용히 취소된다. 깨끗하면 저장된 것으로 치고 계속한다 (spec §4).
+    if (!useEditor.getState().unsaved) return true;
     return save();
   }
   return true;

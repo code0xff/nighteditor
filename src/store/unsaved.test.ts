@@ -89,6 +89,26 @@ describe('keepEdits', () => {
     expect(await asked).toBe(false);
   });
 
+  it('물음이 떠 있는 사이 이미 깨끗해졌으면 저장한 것으로 치고 계속한다', async () => {
+    // 단축키로 부른 저장이 그 사이 끝났거나 마지막 편집을 되돌렸을 수 있다. 그때
+    // save() 의 "쓸 것 없음" false 를 실패로 읽으면 하려던 일이 조용히 취소된다 (spec §4).
+    const save = vi.fn().mockResolvedValue(false);
+    edited({ save });
+
+    const asked = keepEdits({ key: 'confirm.whyOpen' });
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
+      await Promise.resolve();
+    }
+    // 물음이 떠 있는 사이 문서가 깨끗해졌다.
+    useEditor.setState({ unsaved: false });
+    useUnsaved.getState().reply('save');
+
+    expect(await asked).toBe(true);
+    // 청한 저장은 이미 충족됐다 — 헛되이 다시 쓰지 않는다.
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('무엇 때문에 사라지는지를 그대로 들고 있는다', async () => {
     edited();
 
