@@ -10,8 +10,9 @@ import { useUnsaved } from './unsaved.js';
 const dropped = () => new File([fixtureSource()], 'artifact.html', { type: 'text/html' });
 
 beforeEach(() => {
-  // notice 까지 지운다. 남겨두면 앞 테스트의 알림이 다음 단정으로 새어 나간다.
-  // unsaved 도 지운다 — 남으면 다음 테스트의 adopt 가 있지도 않은 편집을 두고 물으며 멈춘다.
+  // notice is cleared too. Left over, a previous test's notice leaks into the
+  // next assertion. unsaved as well — left over, the next test's adopt stops to
+  // ask about edits that do not exist.
   useEditor.setState({
     file: null,
     source: '',
@@ -26,32 +27,32 @@ beforeEach(() => {
     saving: false,
     pendingText: null,
   });
-  // 잠금은 예약 스토어에 있다 — 앞 테스트가 세워 둔 잠금이 새면 편집이 거절된다.
+  // The lock lives in the reservation store — a lock left up by a previous test would get edits refused.
   useReplacement.setState({ replacing: false });
   useUnsaved.setState({ why: null, answer: null });
   useToasts.getState().clear();
 });
 
-describe('editor · 파일 열기 (동적 import 경로)', () => {
-  it('놓은 파일을 파싱해 블록과 프리뷰 문서를 채운다', async () => {
+describe('editor · opening a file (the dynamic-import path)', () => {
+  it('parses the dropped file and fills blocks and the preview document', async () => {
     await useEditor.getState().loadDropped(dropped());
 
     const { source, blocks, previewDoc, notice } = useEditor.getState();
-    // 파서를 동적으로 불러오므로 load 를 await 하지 않으면 여기가 전부 빈 채로 남는다 (ADR-008).
+    // The parser loads dynamically, so without awaiting load all of this stays empty (ADR-008).
     expect(notice).toBeNull();
     expect(blocks.length).toBeGreaterThan(0);
     expect(source).toBe(fixtureSource());
     expect(previewDoc).toContain('data-ne-id');
   });
 
-  it('로드가 끝나면 잠금이 풀린다 — 청크를 기다리다 굳지 않는다', async () => {
+  it('unlocks when the load finishes — no freezing while waiting on the chunk', async () => {
     await useEditor.getState().loadDropped(dropped());
     expect(useReplacement.getState().replacing).toBe(false);
   });
 });
 
-describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
-  /** 편집 가능한 블록 두 개를 골라 각각 고친다 */
+describe('editor · reverting the last change (Ctrl+Z)', () => {
+  /** Picks two editable blocks and edits each */
   async function twoEdits() {
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
@@ -61,7 +62,7 @@ describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
     return { a, b };
   }
 
-  it('가장 최근에 고친 블록만 되돌린다', async () => {
+  it('reverts only the most recently edited block', async () => {
     const { a, b } = await twoEdits();
 
     useEditor.getState().undoLast();
@@ -71,7 +72,7 @@ describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
     expect(patches.get(a.id)).toBe('A 수정');
   });
 
-  it('다시 고친 블록이 가장 최근이 된다 — Map 순서로는 알 수 없다', async () => {
+  it('a re-edited block becomes the most recent — Map order cannot tell', async () => {
     const { a, b } = await twoEdits();
     useEditor.getState().onEdit(a.id, 'A 다시 수정');
 
@@ -82,7 +83,7 @@ describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
     expect(patches.get(b.id)).toBe('B 수정');
   });
 
-  it('되돌린 블록은 순서에서 빠진다 — 두 번 눌러도 되살아나지 않는다', async () => {
+  it('a reverted block drops out of the order — pressing twice does not revive it', async () => {
     const { a, b } = await twoEdits();
 
     useEditor.getState().undoLast();
@@ -94,7 +95,7 @@ describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
     expect(useEditor.getState().revertQueue.map((r) => r.id)).toEqual([b.id, a.id]);
   });
 
-  it('고친 것이 없으면 아무 일도 하지 않는다', async () => {
+  it('does nothing when nothing was edited', async () => {
     await useEditor.getState().loadDropped(dropped());
 
     useEditor.getState().undoLast();
@@ -103,8 +104,8 @@ describe('editor · 마지막 변경 되돌리기 (Ctrl+Z)', () => {
   });
 });
 
-describe('editor · 사본 내려받기', () => {
-  it('패치가 없어도 원본을 그대로 내려받는다 — 고치기 전 백업 용도', () => {
+describe('editor · downloading a copy', () => {
+  it('downloads the pristine original even with no patches — for a backup before editing', () => {
     const url = vi.fn(() => 'blob:x');
     vi.stubGlobal('URL', { ...URL, createObjectURL: url, revokeObjectURL: vi.fn() });
 
@@ -124,25 +125,25 @@ describe('editor · 사본 내려받기', () => {
     vi.unstubAllGlobals();
   });
 
-  it('파일이 없으면 아무 일도 하지 않는다', () => {
+  it('does nothing without a file', () => {
     useEditor.getState().downloadCopy();
     expect(useEditor.getState().notice).toBeNull();
   });
 });
 
-describe('editor · 저장', () => {
-  it('고친 것이 없으면 저장하지 않는다 — Ctrl+S 가 같은 내용을 다시 쓰지 않게', async () => {
+describe('editor · saving', () => {
+  it('does not save with nothing edited — so Ctrl+S never rewrites identical content', async () => {
     await useEditor.getState().loadDropped(dropped());
 
     await useEditor.getState().save();
 
-    // 아무 일도 없었으니 알릴 것도 없다.
+    // Nothing happened, so there is nothing to announce.
     expect(useEditor.getState().notice).toBeNull();
   });
 });
 
-describe('editor · 폴더 열기', () => {
-  /** showDirectoryPicker 가 주는 핸들 흉내 — 파일 핸들에는 getFile 이, 폴더에는 entries 가 있다 */
+describe('editor · opening a folder', () => {
+  /** Mimics the handles showDirectoryPicker returns — file handles have getFile, folders have entries */
   function fakeDir(files: Record<string, string>) {
     const entries = Object.entries(files).map(([name, body]) => [
       name,
@@ -176,8 +177,8 @@ describe('editor · 폴더 열기', () => {
       Promise.resolve(dir);
   }
 
-  it('폴더 안의 문서를 열고, 되쓸 핸들을 함께 들고 온다', async () => {
-    // 열기로 연 것은 덮어쓴다 — 폴더에서도 같아야 한다.
+  it('opens the document in the folder and brings its writable handle along', async () => {
+    // What was opened via the dialog gets overwritten — folders must be no different.
     withPicker(fakeDir({ 'index.html': '<p>본문</p>', 'style.css': 'p{color:red}' }));
 
     await useEditor.getState().openFolder();
@@ -189,7 +190,7 @@ describe('editor · 폴더 열기', () => {
     expect(blocks.length).toBeGreaterThan(0);
   });
 
-  it('편집 허용을 거절하면 아무 일도 일어나지 않는다', async () => {
+  it('nothing happens when edit permission is refused', async () => {
     (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
       Promise.reject(new DOMException('사용자가 취소', 'AbortError'));
 
@@ -200,7 +201,7 @@ describe('editor · 폴더 열기', () => {
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('HTML 이 없는 폴더는 이유를 말한다', async () => {
+  it('a folder without HTML says why', async () => {
     withPicker(fakeDir({ 'style.css': 'p{color:red}' }));
 
     await useEditor.getState().openFolder();
@@ -209,9 +210,9 @@ describe('editor · 폴더 열기', () => {
   });
 });
 
-describe('editor · 저장했는지 아는가', () => {
-  it('저장하면 되묻지 않을 상태가 된다', async () => {
-    // patches 는 저장해도 남는다(INV-1). 그걸로 판단하면 저장한 뒤에도 계속 되묻는다.
+describe('editor · knowing whether it was saved', () => {
+  it('saving reaches a state that will not re-ask', async () => {
+    // patches survive a save (INV-1). Judged by them, it would keep asking even after saving.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -223,7 +224,7 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('저장한 뒤 다시 고치면 또 저장할 것이 생긴다', async () => {
+  it('editing again after a save produces something to save again', async () => {
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
     useEditor.getState().onEdit(a?.id ?? -1, '고친 값');
@@ -234,7 +235,7 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().unsaved).toBe(true);
   });
 
-  it('되돌리기도 파일과 달라지는 일이다', async () => {
+  it('a revert also diverges from the file', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((x) => x.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -245,8 +246,8 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().unsaved).toBe(true);
   });
 
-  it('저장한 적 없는 편집을 되돌리면 다시 깨끗해진다', async () => {
-    // unsaved 를 단조 증가로 두면 결과물이 파일과 같은데도 되묻는다 (spec §5).
+  it('reverting a never-saved edit comes out clean again', async () => {
+    // With unsaved only ever rising, it would re-ask even though output and file match (spec §5).
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((x) => x.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -257,7 +258,7 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().unsaved).toBe(false);
   });
 
-  it('전체 되돌리기도 파일과 같아지면 깨끗해진다', async () => {
+  it('revert-all also comes out clean once it matches the file', async () => {
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
     useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
@@ -268,8 +269,8 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().unsaved).toBe(false);
   });
 
-  it('제목을 고쳤다가 원래대로 돌려 적으면 깨끗해진다', async () => {
-    // 손으로 되돌린 편집도 결과물이 파일과 같으면 잃을 것이 없다.
+  it('editing the title and typing it back comes out clean', async () => {
+    // An edit undone by hand also has nothing to lose once output matches file.
     await useEditor.getState().loadDropped(dropped());
     const title = useEditor.getState().blocks.find((x) => x.rcdata);
     useEditor.getState().onEdit(title?.id ?? -1, '새 제목');
@@ -280,20 +281,20 @@ describe('editor · 저장했는지 아는가', () => {
     expect(useEditor.getState().unsaved).toBe(false);
   });
 
-  it('저장할 것이 없으면 저장하지 않는다', async () => {
+  it('does not save with nothing to save', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((x) => x.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
     await useEditor.getState().save();
 
-    // 같은 내용을 다시 쓰는 헛일을 막는다.
+    // Blocks the wasted rewrite of identical content.
     expect(await useEditor.getState().save()).toBe(false);
   });
 });
 
-describe('editor · zip 오류는 언어팩을 거쳐 알린다', () => {
-  it('zip 이 아닌 파일을 zip 으로 열면 사유가 문장이 아니라 메시지 키로 온다 (spec §1)', async () => {
-    // ZipError 의 원문을 그대로 붙이면 영어 UI 에 한국어 내부 문장이 샌다.
+describe('editor · zip errors are notified through the language pack', () => {
+  it('opening a non-zip as a zip carries the reason as a message key, not a sentence (spec §1)', async () => {
+    // Attaching ZipError's raw text would leak an internal Korean sentence into the English UI.
     await useEditor.getState().loadDropped(new File(['이건 zip 이 아니다'], 'bad.zip'));
 
     expect(useEditor.getState().notice).toEqual({
@@ -303,10 +304,10 @@ describe('editor · zip 오류는 언어팩을 거쳐 알린다', () => {
   });
 });
 
-describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
-  it('저장한 뒤 폴더를 연결해도 저장한 내용이 살아 있다', async () => {
-    // source 는 열었을 때 그대로다(INV-1). 그 상태로 다시 그리면 저장한 편집이 화면에서
-    // 사라지고, 그 뒤에 저장하면 디스크의 내용을 옛 내용으로 덮어쓴다.
+describe('editor · re-reads the disk when attaching assets', () => {
+  it('the saved content survives linking a folder after a save', async () => {
+    // source stays as opened (INV-1). Redrawn from it, saved edits vanish from
+    // the screen, and a later save overwrites the disk with the old content.
     const saved = '<html><body><p>저장된 뒤의 내용</p></body></html>';
     const handle = {
       name: 'deck.html',
@@ -333,9 +334,9 @@ describe('editor · 자원을 붙일 때 디스크를 다시 읽는다', () => {
   });
 });
 
-describe('editor · <base href> 가 옮긴 기준으로 자원을 찾는다 (spec §5.1)', () => {
-  it('base 디렉터리 기준으로 붙일 파일을 찾는다', async () => {
-    // 문서 자리만 보면 assets/style.css 가 옆에 있는데도 style.css 가 없다고 센다.
+describe('editor · finds assets from the base <base href> moved (spec §5.1)', () => {
+  it('finds files to attach relative to the base directory', async () => {
+    // Looking only at the document's place counts style.css missing even with assets/style.css right there.
     vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
     await useEditor.getState().loadFolder({
       files: new Map([
@@ -360,7 +361,7 @@ describe('editor · <base href> 가 옮긴 기준으로 자원을 찾는다 (spe
     vi.unstubAllGlobals();
   });
 
-  it('바깥을 가리키는 base 면 상대 참조를 없는 파일로 세지 않는다', async () => {
+  it('with base pointing outside, relative references are not counted as missing files', async () => {
     await useEditor.getState().loadFolder({
       files: new Map([
         [
@@ -379,15 +380,16 @@ describe('editor · <base href> 가 옮긴 기준으로 자원을 찾는다 (spe
     });
 
     expect(useEditor.getState().assetPaths).toEqual([]);
-    // 치환할 것이 없으니 프리뷰에 blob: 이 들어가지 않는다.
+    // Nothing to swap, so no blob: enters the preview.
     expect(useEditor.getState().previewDoc).not.toContain('blob:');
   });
 });
 
-describe('editor · 핸들 없는 문서의 저장본은 내려받은 사본이다 (spec §5)', () => {
-  it('내려받기로 저장한 뒤 폴더를 연결해도 저장한 내용이 살아 있다', async () => {
-    // 핸들이 없으면 reread 가 file.text 를 그대로 돌려준다. 저장이 그 text 를
-    // 결과물로 갈아 끼우지 않으면, 폴더 연결이 저장 전 내용으로 프리뷰를 되돌린다.
+describe('editor · for a handleless document the saved file is the downloaded copy (spec §5)', () => {
+  it('the saved content survives linking a folder after a download save', async () => {
+    // Without a handle, reread returns file.text as-is. Unless saving swaps that
+    // text for the output, folder linking rolls the preview back to the pre-save
+    // content.
     vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
     await useEditor.getState().adopt({
       name: 'deck.html',
@@ -410,9 +412,9 @@ describe('editor · 핸들 없는 문서의 저장본은 내려받은 사본이�
   });
 });
 
-describe('editor · 리뷰가 짚은 자리', () => {
-  it('묻는 동안에는 busy 가 아니다 — 대화상자의 저장 버튼이 눌려야 한다', async () => {
-    // busy 면 "저장하고 계속하기" 가 비활성이라 남는 선택지가 버리기와 취소뿐이 된다.
+describe('editor · spots a review pointed out', () => {
+  it('not busy while asking — the dialog save button must be pressable', async () => {
+    // Busy, "save and continue" is disabled and the remaining choices are only discard and cancel.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -437,9 +439,10 @@ describe('editor · 리뷰가 짚은 자리', () => {
     expect(replacingWhileAsking).toBe(false);
   });
 
-  it('갈아 끼우는 동안의 편집은 거절하고 알린다', async () => {
-    // 물음에 답한 뒤 새 문서를 읽는 사이의 편집은 새 상태가 설치되는 순간 사라진다.
-    // 받아 두었다가 버리면 조용히 사라지는 것이다 (대원칙 3) — 받지 않고 알린다.
+  it('edits during a replacement are refused with a notice', async () => {
+    // Edits made after the answer, while the new document is being read, disappear
+    // the moment the new state installs. Accepted and then dropped, they vanish
+    // silently (Principle 3) — so they are refused with a notice instead.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useReplacement.setState({ replacing: true });
@@ -453,9 +456,10 @@ describe('editor · 리뷰가 짚은 자리', () => {
     );
   });
 
-  it('갈아 끼우는 동안의 되돌리기는 거절하고 알린다', async () => {
-    // 목록이 보여주는 것은 아직 이전 문서다 — 되돌린 패치도, 프리뷰로 보낼 되돌림도
-    // 설치 순간 갈 곳이 없다. 버튼은 잠기지만 Ctrl+Z 는 언제든 눌린다 (spec §4).
+  it('reverts during a replacement are refused with a notice', async () => {
+    // What the list shows is still the previous document — the reverted patches
+    // and the revert bound for the preview alike have nowhere to go at install.
+    // The buttons lock, but Ctrl+Z can fire any time (spec §4).
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -472,9 +476,9 @@ describe('editor · 리뷰가 짚은 자리', () => {
     );
   });
 
-  it('여는 동안 replacing 이 서고, 끝나면 풀린다', async () => {
-    // 화면(제목 칸·프리뷰)이 이 값을 보고 잠근다. 서지 않으면 잠글 근거가 없고,
-    // 안 풀리면 새 문서를 영영 못 고친다.
+  it('replacing stands while opening and clears when done', async () => {
+    // The screen (title field, preview) locks on this value. Never raised, there
+    // is nothing to lock on; never cleared, the new document can never be edited.
     const seen: boolean[] = [];
     const unsub = useReplacement.subscribe((s) => seen.push(s.replacing));
     await useEditor.getState().loadDropped(dropped());
@@ -484,7 +488,7 @@ describe('editor · 리뷰가 짚은 자리', () => {
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('여는 데 실패해도 replacing 이 풀린다 — 보던 문서를 계속 고칠 수 있어야 한다', async () => {
+  it('replacing clears even when opening fails — the current document must stay editable', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
 
@@ -495,8 +499,8 @@ describe('editor · 리뷰가 짚은 자리', () => {
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('눌렀다 그냥 빠져나온 것은 고친 것이 아니다', async () => {
-    // 그것까지 저장할 것으로 세면 아무것도 안 고치고도 되묻는다.
+  it('clicking in and just leaving is not an edit', async () => {
+    // Counted as something to save, it would re-ask with nothing edited at all.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
 
@@ -507,7 +511,7 @@ describe('editor · 리뷰가 짚은 자리', () => {
   });
 });
 
-/** 대화상자가 뜨기를 기다렸다가 대신 답한다 — 사람이 버튼을 누르는 자리다 */
+/** Waits for the dialog and answers in the user's stead — where a person would press a button */
 async function answerWith(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
   for (let tries = 0; useUnsaved.getState().why === null; tries++) {
     if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
@@ -516,7 +520,7 @@ async function answerWith(choice: 'save' | 'discard' | 'cancel'): Promise<void> 
   useUnsaved.getState().reply(choice);
 }
 
-/** 안이 문자열이면 파일, 객체면 하위 폴더인 showDirectoryPicker 폴더 흉내 */
+/** Mimics a showDirectoryPicker folder: a string is a file, an object a subfolder */
 type Tree = { [name: string]: string | Tree };
 function fakeTree(name: string, tree: Tree): unknown {
   const entries = Object.entries(tree).map(([entryName, value]) => [
@@ -552,8 +556,9 @@ function pickerReturns(dir: unknown): void {
 }
 
 /**
- * 되쓸 수 있는 파일 핸들 흉내. 쓴 내용을 밖에서 볼 수 있다.
- * `sameEntry` 의 기본은 false — 같은 파일임은 테스트가 명시적으로 선언해야 한다.
+ * Mimics a writable file handle. What was written is visible from outside.
+ * `sameEntry` defaults to false — being the same file is something a test must
+ * declare explicitly.
  */
 function fakeHandle(
   name: string,
@@ -576,9 +581,9 @@ function fakeHandle(
   };
 }
 
-describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
-  it('폴더의 문서를 다시 읽다 실패하면 빈 문서를 열지 않고 이유를 말한다', async () => {
-    // 옛 코드는 실패를 삼키고 빈 자리 표시로 계속 가서, 고른 문서가 빈 화면으로 열렸다.
+describe('editor · stops when the disk cannot be re-read', () => {
+  it('a failed re-read of a folder document says why instead of opening blank', async () => {
+    // The old code swallowed the failure and continued with the empty placeholder, opening the chosen document as a blank screen.
     let reads = 0;
     const handle = {
       name: 'index.html',
@@ -615,9 +620,9 @@ describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('폴더 연결에서 다시 읽다 실패하면 옛 바이트로 다시 그리지 않는다', async () => {
-    // 옛 바이트로 그리면 저장한 편집이 화면에서 사라지고, 그 뒤에 저장하면
-    // 디스크의 새 내용을 옛 내용으로 덮어쓴다.
+  it('a failed re-read during folder linking does not redraw from the old bytes', async () => {
+    // Drawn from the old bytes, saved edits vanish from the screen, and a later
+    // save overwrites the disk's new content with the old.
     const handle = {
       name: 'deck.html',
       getFile: () => Promise.reject(new Error('디스크에서 사라졌다')),
@@ -637,15 +642,15 @@ describe('editor · 디스크를 다시 못 읽으면 멈춘다', () => {
       key: 'notice.openFailedDetail',
       params: { detail: '디스크에서 사라졌다' },
     });
-    // 보던 화면은 그대로 살아 있어야 한다.
+    // The screen being viewed must stay alive as it was.
     expect(useEditor.getState().source).toContain('열었을 때의 내용');
     expect(useReplacement.getState().replacing).toBe(false);
   });
 });
 
-describe('editor · 잘린 스캔에서 문서를 못 찾으면 그 사정도 말한다 (spec §5.1)', () => {
-  it('놓은 폴더가 잘렸으면 "문서가 없다" 라고만 하지 않는다', async () => {
-    // 문서는 한도 밖에 있었을 수 있다 — 없다고 단정하면 거짓말이 된다 (대원칙 3).
+describe('editor · finding no document in a truncated scan tells that circumstance too (spec §5.1)', () => {
+  it('a truncated dropped folder does not just say "no document"', async () => {
+    // The document may have been beyond the limit — declaring it absent would be a lie (Principle 3).
     await useEditor.getState().loadFolder({
       files: new Map([['notes.txt', new File(['메모'], 'notes.txt')]]),
       handles: new Map(),
@@ -658,7 +663,7 @@ describe('editor · 잘린 스캔에서 문서를 못 찾으면 그 사정도 �
     });
   });
 
-  it('열기 대화상자로 고른 폴더도 같다 — 깊이 한도 밖의 문서는 못 찾은 것이 아니다', async () => {
+  it('same for a folder picked through the dialog — a document beyond the depth limit is not "not found"', async () => {
     let tree: Tree = { 'index.html': '<p>깊다</p>' };
     for (let i = 0; i < 9; i++) tree = { [`d${i}`]: tree };
     pickerReturns(fakeTree('deck', tree));
@@ -672,9 +677,9 @@ describe('editor · 잘린 스캔에서 문서를 못 찾으면 그 사정도 �
   });
 });
 
-describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () => {
-  it('고치던 것이 있으면 대화상자를 띄우고, 취소하면 지금 문서에 머문다', async () => {
-    // launchQueue 로 들어와도 다른 파일 열기다. 조용히 갈아타면 편집이 사라진다 (spec §4).
+describe('editor · a file the OS opened also asks about edits', () => {
+  it('with edits in progress it shows the dialog, and cancelling stays on the current document', async () => {
+    // Even via launchQueue this is opening another file. A silent switch loses the edits (spec §4).
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -689,7 +694,7 @@ describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () =
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('버리기를 고르면 새 파일로 갈아탄다', async () => {
+  it('choosing discard switches to the new file', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -707,10 +712,11 @@ describe('editor · OS 가 열어준 파일도 편집을 두고 묻는다', () =
   });
 });
 
-describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', () => {
-  it('연결한 폴더의 다른 문서로 갈아타면 핸들 없이 열린다', async () => {
-    // 연결은 읽기 전용(read)이다. 그 핸들이 묶음에 남으면 갈아탄 문서의 저장이
-    // "덮어쓰기" 라면서 쓰기 권한이 없어 그제서야 실패한다.
+describe('editor · folder linking leaves no handles in the bundle', () => {
+  it('switching to another document in the linked folder opens without a handle', async () => {
+    // Linking is read-only (read). With its handle left in the bundle, the
+    // switched-to document's save would claim "overwrite" and only then fail for
+    // lack of write permission.
     const handle = fakeHandle('deck.html', () => '<html><body><p>본문</p></body></html>');
     await useEditor.getState().adopt({
       name: 'deck.html',
@@ -730,10 +736,11 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     expect(useEditor.getState().file?.handle).toBeNull();
   });
 
-  it('파일 하나로 연 문서도 제 폴더를 연결하면 핸들이 산다 — 이름이 곧 경로다', async () => {
-    // 파일 열기로 연 문서에는 묶음 경로가 없다. 그대로 두면 keep 이 비어, 폴더를
-    // 연결하고 다른 문서로 갔다 돌아올 때 핸들 없이 열린다 — 덮어쓰기라던 저장이
-    // 조용히 사본 내려받기로 격하된다 (spec §5.1 · 핸들 유지).
+  it('a document opened as a single file keeps its handle alive when its own folder is linked — the name is the path', async () => {
+    // A document opened via the file dialog has no bundle path. Left as-is, keep
+    // ends up empty, and after linking a folder and a round trip to another
+    // document it opens without a handle — a save that claimed overwrite is
+    // silently demoted to download-a-copy (spec §5.1 · keeping the handle).
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
     const handle = fakeHandle(
@@ -742,7 +749,7 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
       [],
       () => true
     );
-    // adopt(파일 열기·OS 열기)와 같은 모양 — path 가 없다.
+    // The same shape as adopt (file open, OS open) — no path.
     useEditor.setState({ file: { name: 'index.html', text, handle } });
     pickerReturns(
       fakeTree('deck', {
@@ -759,13 +766,13 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     await useEditor.getState().openFromBundle('index.html');
 
     expect(useEditor.getState().file?.handle).toBe(handle);
-    // 묶음의 옛 바이트가 아니라 디스크의 지금 내용으로 돌아와야 한다.
+    // It must come back to the disk's current content, not the bundle's old bytes.
     expect(useEditor.getState().source).toBe(onDisk);
   });
 
-  it('지금 문서의 쓰기 핸들만은 남긴다 — 갔다 돌아와도 덮어쓰기가 산다 (spec §5.1)', async () => {
-    // 핸들을 다 버리면 돌아온 문서가 연결할 때 읽어 둔 옛 바이트로 열리고,
-    // 저장은 조용히 사본 내려받기로 격하된다.
+  it("only the current document's write handle is kept — overwrite survives a round trip (spec §5.1)", async () => {
+    // With every handle dropped, the returning document opens from the old bytes
+    // read at link time, and saving is silently demoted to download-a-copy.
     const text = '<html><body><p>본문</p></body></html>';
     const onDisk = '<html><body><p>저장한 뒤의 본문</p></body></html>';
     const handle = fakeHandle(
@@ -789,15 +796,16 @@ describe('editor · 폴더 연결은 묶음에 핸들을 남기지 않는다', (
     await useEditor.getState().openFromBundle('index.html');
 
     expect(useEditor.getState().file?.handle).toBe(handle);
-    // 묶음의 옛 바이트가 아니라 디스크의 지금 내용으로 돌아와야 한다.
+    // It must come back to the disk's current content, not the bundle's old bytes.
     expect(useEditor.getState().source).toBe(onDisk);
   });
 });
 
-describe('editor · 핸들은 같은 파일임을 증명한 자리에만 남는다 (spec §5.1)', () => {
-  it('이름만 같은 남의 index.html 경로에 쓰기 핸들을 걸지 않는다', async () => {
-    // 기본명 폴백이 고른 경로는 남의 파일일 수 있다. 핸들이 남으면 갔다 돌아올 때
-    // 그 자리에서 이 파일이 대신 열리고, 저장이 남의 자리 내용을 덮는다.
+describe('editor · handles are kept only where the same file is proven (spec §5.1)', () => {
+  it("does not hang the write handle on someone else's index.html path that merely shares the name", async () => {
+    // The path the basename fallback picked may be someone else's file. With the
+    // handle kept, this file opens there instead on the round trip, and saves
+    // overwrite someone else's spot.
     const mine = '<html><body><p>내 문서</p></body></html>';
     const theirs = '<html><body><p>남의 index</p></body></html>';
     const handle = fakeHandle('index.html', () => mine); // isSameEntry → false
@@ -813,17 +821,18 @@ describe('editor · 핸들은 같은 파일임을 증명한 자리에만 남는�
 
     expect(useEditor.getState().bundleHandles.size).toBe(0);
 
-    // 갔다 돌아오면 폴더에 실제로 담긴 그 문서가 열려야 한다 — 내 핸들의 내용이 아니라.
+    // The round trip must open the document actually in the folder — not my handle's content.
     await useEditor.getState().openFromBundle('other.html');
     await useEditor.getState().openFromBundle('index.html');
     expect(useEditor.getState().file?.handle).toBeNull();
     expect(useEditor.getState().source).toBe(theirs);
   });
 
-  it('증명 못 한 문서는 묶음의 일원이 아니다 — 저장이 폴더의 다른 문서를 갈아 끼우지 않는다', async () => {
-    // 옛 코드는 핸들만 안 남기고 docPath 는 겹친 경로로 잡았다. 그러면 저장이 그
-    // 경로의 묶음 내용을 이 문서의 결과물로 바꿔치기하고, 목록에서 폴더의 진짜
-    // index.html 을 여는 길은 "이미 열려 있다" 며 조용히 막혔다 (spec §5.1).
+  it('an unproven document is not a bundle member — saving does not swap out another document in the folder', async () => {
+    // The old code withheld only the handle while adopting the overlapping path
+    // as docPath. Saving then swapped that path's bundle content for this
+    // document's output, and opening the folder's real index.html from the list
+    // was silently blocked as "already open" (spec §5.1).
     const mine = '<html><body><p>내 문서</p></body></html>';
     const theirs = '<html><body><p>남의 index</p></body></html>';
     const writes: string[] = [];
@@ -839,22 +848,22 @@ describe('editor · 핸들은 같은 파일임을 증명한 자리에만 남는�
     await useEditor.getState().linkFolder();
     expect(useEditor.getState().docPath).toBe('');
 
-    // 내 문서를 고쳐 저장한다 — 결과물은 내 파일(핸들)로 가고, 묶음은 그대로여야 한다.
+    // Edit and save my document — the output goes to my file (the handle), and the bundle must stay untouched.
     const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
     expect(await useEditor.getState().save()).toBe(true);
     expect(writes[0]).toContain('고친 값');
 
-    // 겹친 경로의 문서는 지금 문서가 아니므로 목록에서 열 수 있고, 폴더의 내용이 나와야 한다.
+    // The document at the overlapping path is not the current one, so it can be opened from the list, and the folder's content must appear.
     await useEditor.getState().openFromBundle('index.html');
     expect(useEditor.getState().source).toBe(theirs);
   });
 });
 
-describe('editor · 저장하는 사이의 편집', () => {
-  it('파일을 쓰는 동안 확정된 편집은 저장 안 된 채로 남는다', async () => {
-    // unsaved 를 무조건 지우면 그 편집이 "이미 저장됨" 으로 읽혀, 다음 파일을 열 때
-    // 묻지도 않고 사라진다.
+describe('editor · edits made during a save', () => {
+  it('an edit committed while the file is being written remains unsaved', async () => {
+    // Clearing unsaved unconditionally would read that edit as "already saved",
+    // and it would vanish without a question when the next file opens.
     let releaseWrite: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const handle = {
@@ -878,9 +887,10 @@ describe('editor · 저장하는 사이의 편집', () => {
     expect(useEditor.getState().unsaved).toBe(true);
   });
 
-  it('쓰는 동안 되돌려도 더러움은 풀리지 않는다 — 디스크는 곧 그 결과물을 든다', async () => {
-    // 옛 savedText 와 견주면 되돌린 순간 "잃을 것 없음" 으로 읽혀, 그 창에서 탭을
-    // 닫으면 경고 없이 닫히고 화면(원본)과 디스크(결과물)가 어긋난다 (spec §5).
+  it('reverting mid-write does not clear the dirtiness — the disk is about to hold that output', async () => {
+    // Compared to the old savedText, the moment of the revert reads as
+    // nothing-to-lose; closing the tab in that window closes without warning, and
+    // screen (original) and disk (output) disagree (spec §5).
     let releaseWrite: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const handle = {
@@ -899,7 +909,7 @@ describe('editor · 저장하는 사이의 편집', () => {
     const saving = useEditor.getState().save();
     useEditor.getState().revert(target?.id ?? -1);
 
-    // 쓰는 동안에도, 쓰기가 끝난 뒤에도 화면은 디스크와 다르다.
+    // During the write and after it, the screen differs from the disk.
     expect(useEditor.getState().unsaved).toBe(true);
     releaseWrite?.();
     await saving;
@@ -907,9 +917,10 @@ describe('editor · 저장하는 사이의 편집', () => {
     expect(useEditor.getState().pendingText).toBeNull();
   });
 
-  it('쓰기가 실패하면 옛 내용 기준으로 되잰다 — 파일은 그대로다', async () => {
-    // 실패한 결과물을 기준으로 남겨 두면, 쓰는 사이 그 결과물과 같아진 화면이
-    // 저장된 척 남는다. 되돌려 파일과 같아진 화면은 잃을 것이 없다.
+  it('a failed write re-measures against the old content — the file is untouched', async () => {
+    // Left measured against the failed output, a screen that came to match it
+    // mid-write would pose as saved. A screen reverted back to matching the file
+    // has nothing to lose.
     let failWrite: ((e: Error) => void) | undefined;
     const gate = new Promise<void>((_, reject) => (failWrite = reject));
     const handle = {
@@ -934,7 +945,7 @@ describe('editor · 저장하는 사이의 편집', () => {
     expect(useEditor.getState().pendingText).toBeNull();
   });
 
-  it('쓰는 동안 아무 일도 없었으면 깨끗해진다', async () => {
+  it('comes out clean when nothing happened during the write', async () => {
     const handle = fakeHandle('deck.html', () => '<html><body><p>하나</p></body></html>');
     await useEditor.getState().adopt({
       name: 'deck.html',
@@ -950,10 +961,11 @@ describe('editor · 저장하는 사이의 편집', () => {
   });
 });
 
-describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5)', () => {
-  it('쓰는 동안 다른 문서를 열면 뒤늦게 끝난 저장이 새 문서의 상태에 적히지 않는다', async () => {
-    // 옛 코드는 저장 완료 콜백에 문서 확인이 없어, 옛 결과물이 새 문서의
-    // savedText·file.text 에 들어가고 알림까지 "저장했다" 고 떴다.
+describe('editor · a save result arriving after a switch is discarded (spec §5)', () => {
+  it('opening another document mid-write keeps the late-finishing save out of the new state', async () => {
+    // The old code's save-completion callback never checked the document, so the
+    // old output landed in the new document's savedText and file.text, with a
+    // "saved" notice on top.
     let releaseWrite: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const oldText = '<html><body><p>옛 문서</p></body></html>';
@@ -968,7 +980,7 @@ describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
 
     const saving = useEditor.getState().save();
-    // 파일을 쓰는 사이에 다른 문서로 갈아탄다 — 고치던 것은 버리기로 답한다.
+    // Switch to another document while the file is being written — the edits in progress are answered with discard.
     const adopting = useEditor.getState().adopt({ name: 'new.html', text: newText, handle: null });
     await answerWith('discard');
     await adopting;
@@ -977,17 +989,17 @@ describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5
 
     const s = useEditor.getState();
     expect(s.file?.name).toBe('new.html');
-    // 새 문서의 저장본·내용은 새 문서의 것 그대로여야 한다.
+    // The new document's saved text and content must stay exactly the new document's.
     expect(s.savedText).toBe(newText);
     expect(s.file?.text).toBe(newText);
     expect(s.unsaved).toBe(false);
-    // 이전 문서의 "저장했다" 가 새 문서 위에 뜨지 않는다.
+    // The previous document's "saved" never appears over the new one.
     expect(s.notice).toBeNull();
     expect(s.saving).toBe(false);
   });
 
-  it('갈아탄 뒤 도착한 저장 실패도 새 문서에 알리지 않는다', async () => {
-    // 이름도 없는 실패 알림은 지금 문서의 일로 읽힌다 — 멀쩡한 새 문서를 두고 헤매게 한다.
+  it('a save failure arriving after a switch is not notified on the new document either', async () => {
+    // A nameless failure notice reads as the current document's — sending the user hunting around a perfectly fine new document.
     let failWrite: ((e: Error) => void) | undefined;
     const gate = new Promise<void>((_, reject) => (failWrite = reject));
     const oldText = '<html><body><p>옛 문서</p></body></html>';
@@ -1016,10 +1028,11 @@ describe('editor · 갈아탄 뒤 도착한 저장 결과는 버린다 (spec §5
   });
 });
 
-describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리지 않는다 (spec §5)', () => {
-  it('갈아 끼우는 사이에 끝난 저장은 제 표시(saving)만 내린다', async () => {
-    // 옛 코드는 저장의 finally 가 공용 busy 를 내려, 새 문서를 읽는 중인데
-    // 열기·문서 고르기가 풀렸다. 잠금은 예약의 것이라 저장이 건드릴 수 없다 (ADR-010).
+describe('editor · an earlier save finishing never lowers the replacement lock (spec §5)', () => {
+  it('a save finishing mid-replacement lowers only its own indicator (saving)', async () => {
+    // The old code's save finally lowered the shared busy, unlocking open and the
+    // document picker while the new document was still being read. The lock
+    // belongs to the reservation and saving may not touch it (ADR-010).
     let releaseWrite: (() => void) | undefined;
     const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const handle = {
@@ -1037,7 +1050,7 @@ describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
     const saving = useEditor.getState().save();
 
-    // 저장이 아직 쓰는 사이에 새 갈아 끼우기가 확정된다 — 읽기는 멈춰 있다.
+    // A new replacement is confirmed while the save is still writing — the read is held.
     let releaseRead!: () => void;
     const readGate = new Promise<void>((r) => (releaseRead = r));
     const read = {
@@ -1045,7 +1058,7 @@ describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리
         [
           'index.html',
           {
-            // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+            // Documents are read from bytes (spec §1 · document encoding) — the gate sits on that road.
             arrayBuffer: async () => {
               await readGate;
               return new TextEncoder().encode('<html><body><p>새 폴더</p></body></html>').buffer;
@@ -1062,7 +1075,7 @@ describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리
     releaseWrite?.();
     expect(await saving).toBe(true);
 
-    // 저장은 끝났지만 화면 잠금은 그대로다 — 저장이 내린 것은 제 표시뿐이다.
+    // The save finished but the screen lock stands — saving lowered only its own indicator.
     expect(useEditor.getState().saving).toBe(false);
     expect(useReplacement.getState().replacing).toBe(true);
 
@@ -1073,10 +1086,10 @@ describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리
   });
 });
 
-describe('editor · 저장한 편집을 되돌린 것도 저장할 수 있다', () => {
-  it('패치가 0개여도 원본 그대로를 되써서 파일을 화면과 같게 만든다', async () => {
-    // 패치 개수로 막으면 "저장하고 계속하기" 가 false 로 끝나, 대화상자에서
-    // 빠져나갈 길이 취소와 버리기뿐이 된다 (spec §5).
+describe('editor · reverting a saved edit can also be saved', () => {
+  it('even with zero patches, rewrites the pristine original to make the file match the screen', async () => {
+    // Blocked by patch count, "save and continue" would end in false, leaving
+    // cancel and discard as the only ways out of the dialog (spec §5).
     const source = '<html><body><p>본문</p></body></html>';
     const writes: string[] = [];
     const handle = fakeHandle('deck.html', () => source, writes);
@@ -1094,12 +1107,13 @@ describe('editor · 저장한 편집을 되돌린 것도 저장할 수 있다', 
   });
 });
 
-describe('editor · 내려받기로 저장한 편집은 묶음에도 남는다', () => {
-  it('다른 문서로 갔다 돌아와도 저장한 결과물이 열린다', async () => {
-    // 묶음(zip·드롭 폴더)의 문서에는 핸들이 없어 저장이 사본 내려받기로 간다.
-    // 묶음이 열 때의 바이트를 그대로 들고 있으면, 갈아탔다 돌아올 때 그 옛 바이트가
-    // 다시 열려 저장한 편집이 화면에서 조용히 사라진다 — 핸들 문서는 디스크에서
-    // 다시 읽어 맞추지만, 내려받기 저장은 묶음이 유일한 원천이다.
+describe('editor · edits saved via download persist in the bundle too', () => {
+  it('the saved output opens after a round trip to another document', async () => {
+    // A bundle (zip, dropped folder) document has no handle, so saving goes to
+    // download-a-copy. With the bundle holding the open-time bytes, a round trip
+    // reopens those old bytes and the saved edits silently vanish from the
+    // screen — handle documents realign by re-reading the disk, but for a
+    // download save the bundle is the only source of truth.
     vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
     const doc = (body: string) => new File([`<html><body><p>${body}</p></body></html>`], 'x');
     await useEditor.getState().loadFolder({
@@ -1123,11 +1137,12 @@ describe('editor · 내려받기로 저장한 편집은 묶음에도 남는다',
   });
 });
 
-describe('editor · 물음에 저장으로 답한 갈아타기는 저장 뒤의 묶음으로 연다 (spec §5)', () => {
-  it('갈아탔다 돌아오면 방금 저장한 결과물이 열린다', async () => {
-    // 옛 코드는 묻기 전에 받아 둔 묶음으로 열었다 — 물음의 저장이 묶음을 결과물로
-    // 갈아 끼워도(내려받기 저장은 묶음이 유일한 원천), 설치가 저장 전 바이트를
-    // 되살려 돌아왔을 때 저장한 내용이 조용히 사라졌다.
+describe('editor · a switch answered with save opens from the post-save bundle (spec §5)', () => {
+  it('the round trip opens the output just saved', async () => {
+    // The old code opened from the bundle captured before asking — even though
+    // the question's save swapped the bundle for the output (for a download save
+    // the bundle is the only source of truth), the install revived the pre-save
+    // bytes and the saved content silently vanished on return.
     vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
     const doc = (body: string) => new File([`<html><body><p>${body}</p></body></html>`], 'x');
     await useEditor.getState().loadFolder({
@@ -1154,11 +1169,12 @@ describe('editor · 물음에 저장으로 답한 갈아타기는 저장 뒤의 
   });
 });
 
-describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다', () => {
-  it('저장한 편집이 있는 블록에서 pristine 으로 나와도 패치가 살아 있다', async () => {
-    // 프리뷰의 pristine 은 "편집을 열 때의 화면과 같다" 다. 화면은 저장한 편집을
-    // 보여주고 있으므로, 패치를 지우면 다음 저장이 그 블록을 원본으로 되돌린다 —
-    // 화면에는 저장한 내용이 남은 채 파일만 옛날로 가는 분열이다.
+describe('editor · committed edits survive clicking in and just leaving', () => {
+  it('leaving pristine from a block with a saved edit keeps the patch alive', async () => {
+    // The preview's pristine means "same as the screen when editing opened". The
+    // screen is showing the saved edit, so deleting the patch would have the next
+    // save roll that block back to the original — a split where the saved content
+    // stays on screen while only the file goes back in time.
     const source = '<html><body><p>본문</p></body></html>';
     const writes: string[] = [];
     const handle = fakeHandle('deck.html', () => source, writes);
@@ -1167,20 +1183,21 @@ describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다'
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
     await useEditor.getState().save();
 
-    // 저장한 블록에 들어갔다 그냥 나온다 — 에이전트는 화면 내용과 pristine 을 보낸다.
+    // Click into the saved block and just leave — the agent sends the screen content and pristine.
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값', true);
 
     expect(useEditor.getState().patches.get(target?.id ?? -1)).toBe('고친 값');
     expect(useEditor.getState().unsaved).toBe(false);
-    // 파일은 이미 화면과 같다 — 다음 저장이 원본을 되쓰는 일은 없어야 한다.
+    // The file already matches the screen — the next save must never rewrite the original.
     expect(await useEditor.getState().save()).toBe(false);
     expect(writes).toHaveLength(1);
   });
 
-  it('저장한 적 없는 편집도 들어갔다 나오면 사라지지 않는다', async () => {
-    // 옛 코드는 pristine 에서 패치를 지워, 화면에는 편집이 남은 채 저장할 것이
-    // 없다고 읽혔다 — 닫으면 묻지도 않고 편집이 사라졌다.
-    // 제목(rcdata)은 프리뷰가 아니라 호스트 필드에서 고치므로 pristine 경로가 아니다.
+  it('a never-saved edit also survives clicking in and out', async () => {
+    // The old code deleted the patch on pristine, reading as nothing-to-save
+    // while the edit stayed on screen — closing lost the edit without a question.
+    // The title (rcdata) is edited in the host field, not the preview, so it is
+    // not on the pristine path.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((x) => x.locked === null && !x.rcdata);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1191,8 +1208,8 @@ describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다'
     expect(useEditor.getState().unsaved).toBe(true);
   });
 
-  it('pristine 으로 나온 것은 편집 순서도 바꾸지 않는다', async () => {
-    // 들어갔다 나온 것을 "가장 최근 변경" 으로 올리면 Ctrl+Z 가 엉뚱한 블록을 되돌린다.
+  it('leaving pristine does not change the edit order either', async () => {
+    // Promoting an in-and-out to "the most recent change" would have Ctrl+Z revert the wrong block.
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null && !x.rcdata);
     useEditor.getState().onEdit(a?.id ?? -1, 'A 수정');
@@ -1207,10 +1224,10 @@ describe('editor · 들어갔다 그냥 나와도 확정한 편집은 남는다'
   });
 });
 
-describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
-  it('옛 경로가 없으면 새 폴더에 실제로 있는 꼬리 경로로 옮긴다', async () => {
-    // 이름만 남기면 deck/slides/index.html 을 deck 폴더에 연결했을 때 slides/ 가
-    // 사라져, 문서 옆의 자원을 전부 못 찾는다 (spec §5.1).
+describe('editor · folder linking recovers the place of the document', () => {
+  it('with the old path absent, rebases to a tail path actually in the new folder', async () => {
+    // Keeping only the name, linking deck/slides/index.html to the deck folder
+    // would drop slides/ and lose every asset next to the document (spec §5.1).
     const text =
       '<html><head><link rel="stylesheet" href="style.css"></head><body><p>본문</p></body></html>';
     useEditor.setState({
@@ -1222,8 +1239,9 @@ describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
 
     await useEditor.getState().linkFolder();
 
-    // 되찾은 자리는 자원을 찾는 기준(docDir)으로만 쓴다. 같은 파일임을 증명하지
-    // 못했으므로 묶음 경로(docPath)로는 삼지 않는다 (spec §5.1).
+    // The recovered spot is used only as the asset-finding base (docDir). The
+    // same file was not proven, so it is not adopted as the bundle path (docPath)
+    // (spec §5.1).
     expect(useEditor.getState().docDir).toBe('slides');
     expect(useEditor.getState().docPath).toBe('');
     expect(useEditor.getState().notice).toEqual({
@@ -1233,8 +1251,8 @@ describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
   });
 });
 
-describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴다 (spec §5)', () => {
-  /** 읽기가 release 를 부를 때까지 멈춰 있는 폴더 — 흐름의 완료 순서를 손에 쥔다 */
+describe('editor · of overlapping replacements, the one started later wins (spec §5)', () => {
+  /** A folder whose read is held until release is called — puts the flows' finish order in hand */
   function gatedFolder(tag: string) {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -1243,7 +1261,7 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
       [
         'index.html',
         {
-          // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+          // Documents are read from bytes (spec §1 · document encoding) — the gate sits on that road.
           arrayBuffer: async () => {
             await gate;
             return new TextEncoder().encode(html).buffer;
@@ -1258,7 +1276,7 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
     };
   }
 
-  /** blob URL 의 생성·회수를 기록한다 — 누가 무엇을 놓아줬는지 봐야 한다 */
+  /** Records blob URL creation and revocation — who released what must be visible */
   function trackUrls() {
     let at = 0;
     const created: string[] = [];
@@ -1275,9 +1293,10 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
     return { created, revoked };
   }
 
-  it('옛 흐름이 뒤늦게 끝나도 새 문서를 덮지 않고, 새 문서의 blob 도 놓지 않는다', async () => {
-    // 표(doc)는 설치될 때 바뀌므로 겹친 둘은 같은 표를 들고 시작한다 — 그걸로 가리면
-    // 뒤늦게 끝난 옛 흐름이 새 문서의 blob 을 놓아 버리고 제 상태를 덮어쓴다.
+  it('an old flow finishing late neither overwrites the new document nor releases its blobs', async () => {
+    // The token changes at install, so two overlapping flows start holding the
+    // same one — screened by that, the old flow finishing late would release the
+    // new document's blobs and overwrite with its own state.
     const { created, revoked } = trackUrls();
     try {
       const first = gatedFolder('첫 폴더');
@@ -1288,15 +1307,15 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
       second.release();
       await opening2;
       const installed = useReplacement.getState().installed;
-      // 첫 폴더의 읽기는 아직 멈춰 있다 — 지금까지 만든 URL 은 전부 둘째 폴더의 것이다.
+      // The first folder's read is still held — every URL made so far belongs to the second folder.
       const secondUrls = [...created];
       first.release();
       await opening1;
 
       expect(useEditor.getState().source).toContain('둘째 폴더');
-      // 옛 흐름은 설치하지 않는다 — 설치 세대도 그대로다.
+      // The old flow does not install — the install generation stays put.
       expect(useReplacement.getState().installed).toBe(installed);
-      // 옛 흐름은 제가 만든 것만 놓아준다 — 화면이 쓰는 둘째 폴더의 blob 은 살아 있다.
+      // The old flow releases only what it made — the second folder's blobs, which the screen uses, stay alive.
       const firstUrls = created.filter((url) => !secondUrls.includes(url));
       expect(firstUrls.length).toBeGreaterThan(0);
       expect(firstUrls.every((url) => revoked.includes(url))).toBe(true);
@@ -1307,7 +1326,7 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
     }
   });
 
-  it('옛 흐름이 먼저 끝나도 설치하지 않는다 — 마지막에 놓은 폴더가 열린다', async () => {
+  it('the old flow does not install even when it finishes first — the folder dropped last opens', async () => {
     trackUrls();
     try {
       const first = gatedFolder('첫 폴더');
@@ -1317,9 +1336,9 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
 
       first.release();
       await opening1;
-      // 사용자의 마지막 선택은 둘째 폴더다 — 먼저 끝났다고 첫 폴더를 세우면 안 된다.
+      // The user's last choice is the second folder — finishing first is no license to put up the first.
       expect(useEditor.getState().source).not.toContain('첫 폴더');
-      // 물러난 흐름이 화면 잠금을 풀면, 아직 읽는 중인데 편집이 들어온다.
+      // If the retreating flow lowered the screen lock, edits would come in while the read is still running.
       expect(useReplacement.getState().replacing).toBe(true);
 
       second.release();
@@ -1333,7 +1352,7 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
   });
 });
 
-describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼우기 예약)', () => {
+describe('editor · a drop reserves at the moment of the drop (spec §5 · replacement reservation)', () => {
   const page = (body: string): FolderRead => ({
     files: new Map([
       ['index.html', new File([`<html><body><p>${body}</p></body></html>`], 'index.html')],
@@ -1342,9 +1361,10 @@ describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼
     truncated: false,
   });
 
-  it('먼저 놓은 폴더의 훑기가 늦게 끝나도 나중에 놓은 폴더를 덮지 않는다', async () => {
-    // 예약을 훑기 뒤에 받으면, 먼저 놓았지만 늦게 훑힌 폴더가 더 새 예약을 받아
-    // 사용자의 마지막 선택(나중에 놓은 폴더)을 덮는다.
+  it('a folder dropped earlier whose scan finishes late does not overwrite the one dropped later', async () => {
+    // Reserved after the scan, a folder dropped first but scanned late would take
+    // a newer reservation and overwrite the user's last choice (the folder
+    // dropped later).
     let releaseScan!: (read: FolderRead) => void;
     const slowScan = new Promise<FolderRead | null>((r) => (releaseScan = r));
     const first = useEditor.getState().openDropped(undefined, slowScan);
@@ -1361,9 +1381,10 @@ describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('물음에 답하고 훑기를 기다리는 동안 화면이 잠긴다', async () => {
-    // 답한 뒤에도 훑기가 도는 사이 화면에는 이전 문서가 떠 있다 — 이때의 편집은
-    // 설치 순간 갈 곳이 없어, 잠그고 들어온 확정은 거절한다 (spec §4).
+  it('the screen is locked while waiting for the scan after answering the question', async () => {
+    // Even after the answer, the previous document is on screen while the scan
+    // runs — edits then have nowhere to go at install, so it locks and refuses
+    // any commit that gets in (spec §4).
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1372,7 +1393,7 @@ describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼
     const slowScan = new Promise<FolderRead | null>((r) => (releaseScan = r));
     const opening = useEditor.getState().openDropped(undefined, slowScan);
     await answerWith('discard');
-    // 답이 keepEdits 를 지나 잠금이 서기까지 마이크로태스크를 흘려보낸다.
+    // Let microtasks drain until the answer passes keepEdits and the lock stands.
     for (let tries = 0; !useReplacement.getState().replacing && tries < 1000; tries++) {
       await Promise.resolve();
     }
@@ -1391,10 +1412,11 @@ describe('editor · 드롭은 놓은 순간 예약된다 (spec §5 · 갈아 끼
   });
 });
 
-describe('editor · 물음에 저장으로 답한 순간부터 잠긴다 (spec §4)', () => {
-  it('저장이 파일을 쓰는 사이의 편집도 거절하고 알린다', async () => {
-    // 이 저장은 갈아 끼우기의 일부다 — 이어질 설치가 상태를 통째로 갈아, 쓰는 사이에
-    // 받은 편집은 조용히 사라질 자리다. 홀로 도는 저장(편집이 살아남는 쪽)과 다르다.
+describe('editor · locked from the moment the question is answered with save (spec §4)', () => {
+  it('edits made while the save writes the file are also refused with a notice', async () => {
+    // This save is part of a replacement — the install that follows swaps the
+    // whole state, so an edit accepted mid-write is a spot for a silent loss.
+    // Different from a standalone save (where edits survive).
     let releaseWrite: (() => void) | undefined;
     const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const handle = {
@@ -1421,7 +1443,7 @@ describe('editor · 물음에 저장으로 답한 순간부터 잠긴다 (spec �
     for (let tries = 0; !useReplacement.getState().replacing && tries < 1000; tries++) {
       await Promise.resolve();
     }
-    // 답한 순간부터 잠겨 있다 — 쓰기는 아직 끝나지 않았다.
+    // Locked from the moment of the answer — the write has not finished yet.
     expect(useReplacement.getState().replacing).toBe(true);
 
     useEditor.getState().onEdit(b?.id ?? -1, '사라질 편집');
@@ -1437,10 +1459,11 @@ describe('editor · 물음에 저장으로 답한 순간부터 잠긴다 (spec �
   });
 });
 
-describe('editor · 밀려난 드롭의 훑기 실패는 알리지 않는다 (spec §5)', () => {
-  it('남이 세운 문서 위에 "못 열었다" 를 띄우지 않는다', async () => {
-    // 취소한 경우의 실패 알림(대원칙 3)은 그대로다 — 취소는 예약을 새로 만들지
-    // 않으므로, 알리지 않는 것은 더 새 흐름에 밀려난 드롭의 실패뿐이다.
+describe('editor · the scan failure of a displaced drop is not notified (spec §5)', () => {
+  it('never shows "could not open" over a document someone else put up', async () => {
+    // The failure notice for the cancelled case (Principle 3) is untouched —
+    // cancelling creates no new reservation, so the only failure left unnotified
+    // is a drop displaced by a newer flow.
     let failScan!: (e: Error) => void;
     const slowScan = new Promise<FolderRead | null>((_, reject) => (failScan = reject));
     const first = useEditor.getState().openDropped(undefined, slowScan);
@@ -1457,11 +1480,12 @@ describe('editor · 밀려난 드롭의 훑기 실패는 알리지 않는다 (sp
   });
 });
 
-describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 이긴다 (spec §5)', () => {
-  it('물음에 저장으로 답한 열기는 저장을 마치고 돌아와도 밀려났으면 물러난다', async () => {
-    // 옛 코드는 keepEdits 가 돌아온 **뒤에** 세대를 받아, 먼저 시작한 열기가 더 새
-    // 세대를 쥐고 나중에 시작한 드롭의 문서를 덮었다. 예약은 행동의 순간에 받고,
-    // 물음에서 돌아오면 최신인지부터 확인한다.
+describe('editor · a newer flow started while waiting on the save wins (spec §5)', () => {
+  it('an open answered with save retreats when it returns from the save displaced', async () => {
+    // The old code took the generation **after** keepEdits returned, so the open
+    // that started first held the newer generation and overwrote the document of
+    // the drop that started later. Reserve at the moment of the action, and check
+    // for newest first upon returning from the question.
     let releaseWrite: (() => void) | undefined;
     const writeGate = new Promise<void>((resolve) => (releaseWrite = resolve));
     const handle = {
@@ -1479,7 +1503,7 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
     const target = useEditor.getState().blocks.find((b) => b.locked === null && !b.rcdata);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
 
-    // A: 열기 — 물음에 저장으로 답한다. 쓰기는 아직 멈춰 있다.
+    // A: the open — the question is answered with save. The write is still held.
     const adopting = useEditor.getState().adopt({
       name: 'a.html',
       text: '<html><body><p>A 문서</p></body></html>',
@@ -1487,7 +1511,7 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
     });
     await answerWith('save');
 
-    // B: 저장이 도는 사이의 더 새 드롭 — 읽기는 멈춰 있다.
+    // B: a newer drop while the save runs — its read is held.
     let releaseRead!: () => void;
     const readGate = new Promise<void>((r) => (releaseRead = r));
     const read = {
@@ -1495,7 +1519,7 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
         [
           'index.html',
           {
-            // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+            // Documents are read from bytes (spec §1 · document encoding) — the gate sits on that road.
             arrayBuffer: async () => {
               await readGate;
               return new TextEncoder().encode('<html><body><p>B 문서</p></body></html>').buffer;
@@ -1508,11 +1532,11 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
     } as unknown as FolderRead;
     const opening = useEditor.getState().loadFolder(read);
 
-    // A 의 저장이 B 의 설치보다 먼저 끝난다 — 옛 코드가 지던 바로 그 순서다.
+    // A's save finishes before B's install — exactly the order the old code lost.
     releaseWrite?.();
     await adopting;
 
-    // A 는 밀려났다 — 설치하지 않고, B 의 잠금도 풀지 않는다.
+    // A is displaced — it neither installs nor lowers B's lock.
     expect(useEditor.getState().file?.name).toBe('old.html');
     expect(useReplacement.getState().replacing).toBe(true);
 
@@ -1523,8 +1547,8 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
   });
 });
 
-describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (spec §4)', () => {
-  it('저장한 패치는 세지 않는다 — 패치는 저장해도 남는다 (INV-1)', async () => {
+describe('editor · the "{count} spots" in the question is the number of blocks differing from the file (spec §4)', () => {
+  it('saved patches are not counted — patches survive a save (INV-1)', async () => {
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
     useEditor.getState().onEdit(a?.id ?? -1, '고침 A');
@@ -1532,12 +1556,12 @@ describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (s
 
     useEditor.getState().onEdit(b?.id ?? -1, '고침 B');
 
-    // 패치는 둘이지만 파일과 다른 곳은 저장하지 않은 한 곳뿐이다.
+    // Two patches, but only the one unsaved spot differs from the file.
     expect(useEditor.getState().patches.size).toBe(2);
     expect(unsavedCount(useEditor.getState())).toBe(1);
   });
 
-  it('저장한 편집을 되돌린 자리는 패치가 없어도 한 곳으로 센다', async () => {
+  it('a reverted saved edit counts as one spot even without a patch', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((x) => x.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1545,16 +1569,17 @@ describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (s
 
     useEditor.getState().revert(target?.id ?? -1);
 
-    // 패치는 0개지만 파일에는 옛 편집이 남아 있다 — 0곳이라고 말하면 거짓말이다.
+    // Zero patches, but the file still holds the old edit — saying zero spots would be a lie.
     expect(useEditor.getState().patches.size).toBe(0);
     expect(useEditor.getState().unsaved).toBe(true);
     expect(unsavedCount(useEditor.getState())).toBe(1);
   });
 
-  it('원본 그대로를 저장해 둔 자리를 되돌리면 세지 않는다 — 파일도 그 자리가 원본이다', async () => {
-    // 고쳐 저장 → 원본 내용으로 다시 고쳐 저장 → 되돌리기. savedPatches 에는 항목이
-    // 남지만 파일의 그 자리는 원본 그대로다 — 항목의 있고 없음으로 세면 다른 블록
-    // 하나를 고쳤을 때 물음이 두 곳이라고 말한다 (spec §4).
+  it('reverting a spot saved as the original is not counted — the file holds the original there too', async () => {
+    // Edit and save → edit back to the original content and save → revert. An
+    // entry stays in savedPatches but that spot in the file is the pristine
+    // original — counting mere presence, the question would say two spots when
+    // one other block is edited (spec §4).
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
     if (!a || !b) throw new Error('편집 가능한 블록이 둘 필요하다');
@@ -1566,21 +1591,22 @@ describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (s
 
     useEditor.getState().onEdit(b.id, '고침 B');
 
-    // 파일과 다른 곳은 b 하나뿐이다 — a 의 남은 savedPatches 항목은 원본과 같다.
+    // Only b differs from the file — a's leftover savedPatches entry equals the original.
     expect(unsavedCount(useEditor.getState())).toBe(1);
   });
 });
 
-describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는다 (spec §4)', () => {
-  it('뒤늦게 잠긴 블록의 패치는 프리뷰 되돌리기와 알림을 남긴다', async () => {
-    // 정상 경로에서는 대조 전에 편집이 열리지 않는다. 그래도 패치가 있었다면
-    // 지우기만 하면 화면에는 고친 것이 남아, 화면과 저장본이 갈라진다 (대원칙 3).
+describe('editor · patches the cross-check deletes never vanish silently (spec §4)', () => {
+  it('a patch on a late-locked block leaves a preview revert and a notice', async () => {
+    // On the normal path editing does not open before the cross-check. If a patch
+    // existed anyway, deleting alone would leave the edit on screen and split
+    // screen from saved file (Principle 3).
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     if (!target) throw new Error('편집 가능한 블록이 필요하다');
     useEditor.getState().onEdit(target.id, '대조 전의 편집');
 
-    // 스크립트가 그 블록의 글자를 바꿔치기한 라이브 텍스트를 흉내 낸다.
+    // Mimics live text where a script swapped that block's characters.
     const live = useEditor.getState().blocks.map((b) => ({
       id: b.id,
       text: b.id === target.id ? '스크립트가 바꾼 글자' : b.sourceText,
@@ -1590,17 +1616,17 @@ describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는�
     const s = useEditor.getState();
     expect(s.scanned).toBe(true);
     expect(s.patches.has(target.id)).toBe(false);
-    // 프리뷰도 소스 내용으로 함께 되돌아간다.
+    // The preview goes back to the source content along with it.
     expect(s.revertQueue).toContainEqual({ id: target.id, html: target.sourceInner });
-    // 그리고 되돌렸다는 사실을 말한다.
+    // And the revert is announced.
     expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editsReverted')).toBe(
       true
     );
-    // 지운 패치는 저장할 것도 아니다 — 화면·저장본·파일이 전부 같은 상태다.
+    // A deleted patch is nothing to save either — screen, saved text and file all agree.
     expect(s.unsaved).toBe(false);
   });
 
-  it('지울 패치가 없으면 알림도 되돌리기도 없다', async () => {
+  it('with no patches to delete, no notice and no revert', async () => {
     await useEditor.getState().loadDropped(dropped());
 
     useEditor
@@ -1611,7 +1637,7 @@ describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는�
     expect(useToasts.getState().toasts).toHaveLength(0);
   });
 
-  it('대조 전의 클릭은 편집이 열리지 않았다고 말한다', () => {
+  it('a click before the cross-check says editing did not open', () => {
     useEditor.getState().onNotReady();
 
     expect(useToasts.getState().toasts.some((t) => t.notice.key === 'app.editBeforeScan')).toBe(
@@ -1620,15 +1646,15 @@ describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는�
   });
 });
 
-describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 끼우기 예약)', () => {
-  it('OS 파일을 읽는 사이 사용자가 연 파일이 이긴다', async () => {
-    // 읽기가 끝난 뒤에 예약하면, 읽는 사이 사용자가 연 더 새 흐름을 OS 흐름이
-    // 밀어내 사용자의 마지막 선택이 조용히 버려진다.
+describe('editor · an OS launch reserves before the read (spec §5 · replacement reservation)', () => {
+  it('a file the user opens while the OS file is being read wins', async () => {
+    // Reserved after the read, the OS flow would displace the newer flow the user
+    // opened during it, silently discarding the user's last choice.
     let finishRead!: (file: OpenedFile) => void;
     const reading = new Promise<OpenedFile>((resolve) => (finishRead = resolve));
     const adopting = useEditor.getState().adopt(reading);
 
-    // 읽는 사이 사용자가 다른 파일을 놓는다 — 이것이 마지막 선택이다.
+    // During the read the user drops another file — this is the last choice.
     await useEditor.getState().loadDropped(dropped());
     finishRead({
       name: 'slow.html',
@@ -1638,11 +1664,11 @@ describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 
     await adopting;
 
     expect(useEditor.getState().file?.name).toBe('artifact.html');
-    // 밀려난 흐름은 잠금도 건드리지 않는다 — 최신 흐름의 화면이 잠긴 채 남으면 안 된다.
+    // The displaced flow does not touch the lock either — the newest flow's screen must not stay locked.
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('읽기가 실패하면 알린다 — 프라미스로 받아도 조용히 굳지 않는다', async () => {
+  it('a failed read is notified — received as a promise, it still never freezes silently', async () => {
     await useEditor.getState().adopt(Promise.reject(new Error('디스크에서 사라졌다')));
 
     expect(useEditor.getState().notice).toEqual({
@@ -1652,8 +1678,8 @@ describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('밀려난 OS 흐름의 읽기 실패는 알리지 않는다', async () => {
-    // 남(최신 흐름)이 멀쩡히 세운 문서 위에 "못 열었다" 가 뜬다 (spec §5).
+  it('the read failure of a displaced OS flow is not notified', async () => {
+    // "Could not open" would appear over a document the other (newest) flow put up perfectly well (spec §5).
     let failRead!: (e: Error) => void;
     const reading = new Promise<OpenedFile>((_, reject) => (failRead = reject));
     const adopting = useEditor.getState().adopt(reading);
@@ -1667,8 +1693,8 @@ describe('editor · OS 열기는 읽기 전에 예약한다 (spec §5 · 갈아 
   });
 });
 
-describe('editor · 블록 안의 자원과 양방향 경계 (ADR-011)', () => {
-  /** 자원 참조가 편집 가능한 블록 안에 든 묶음 */
+describe('editor · assets inside blocks and the two-way boundary (ADR-011)', () => {
+  /** A bundle whose asset reference sits inside an editable block */
   async function openWithInlineAsset() {
     const files = new Map<string, File>([
       [
@@ -1687,26 +1713,26 @@ describe('editor · 블록 안의 자원과 양방향 경계 (ADR-011)', () => {
     return { blobUrl, block };
   }
 
-  it('프리뷰에서 돌아온 blob URL 은 원문 표기로 되돌아간 뒤에야 패치가 된다 (INV-9)', async () => {
+  it('a blob URL returning from the preview becomes a patch only after restoring the original notation (INV-9)', async () => {
     const { blobUrl, block } = await openWithInlineAsset();
 
-    // 프리뷰가 보내는 innerHTML 그대로 — 블록 안의 src 는 blob 표기다.
+    // Exactly the innerHTML the preview sends — the src inside the block is in blob notation.
     useEditor.getState().onEdit(block.id, `고친 설명 <span>사진 <img src="${blobUrl}"></span>`);
 
-    // 패치에도, 저장 결과물에도 blob 이 없다 — 탭을 닫으면 죽는 주소다.
+    // No blob in the patch or the saved output — an address that dies when the tab closes.
     expect(useEditor.getState().patches.get(block.id)).toBe(
       '고친 설명 <span>사진 <img src="img/logo.png"></span>'
     );
   });
 
-  it('되돌리기가 프리뷰로 보내는 조각은 blob 치환을 단 채로 간다', async () => {
+  it('the fragment a revert sends to the preview goes out wearing the blob swap', async () => {
     const { blobUrl, block } = await openWithInlineAsset();
     useEditor.getState().onEdit(block.id, '고친 설명');
 
     useEditor.getState().revert(block.id);
 
-    // 원문(sourceInner)을 그대로 보내면 프리뷰의 치환이 풀려 그림이 앱 주소에서
-    // 404 로 깨진다 — 나가는 길도 경계를 지나야 한다.
+    // Sent as the raw original (sourceInner), the preview's swap comes undone and
+    // the image 404s against the app origin — the way out must pass the boundary too.
     const sent = useEditor.getState().revertQueue.at(-1);
     expect(sent?.id).toBe(block.id);
     expect(sent?.html).toContain(`src="${blobUrl}"`);
@@ -1714,14 +1740,14 @@ describe('editor · 블록 안의 자원과 양방향 경계 (ADR-011)', () => {
   });
 });
 
-describe('editor · 저장이 도는 동안의 저장 (spec §5)', () => {
-  it('겹쳐 시작하지 않는다 — 옛 스냅샷이 디스크에서 이기지 못하게', async () => {
+describe('editor · saving while a save is running (spec §5)', () => {
+  it('never starts on top — so an old snapshot cannot win on disk', async () => {
     await useEditor.getState().loadDropped(dropped());
     const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
     if (!a || !b) throw new Error('편집 가능한 블록이 둘 필요하다');
     useEditor.getState().onEdit(a.id, '첫 편집');
 
-    // 파일 쓰기를 붙잡아 두는 핸들 — 첫 저장이 쓰는 동안이라는 상황을 만든다.
+    // A handle that holds the file write — creates the situation of the first save mid-write.
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const writes: string[] = [];
@@ -1740,24 +1766,24 @@ describe('editor · 저장이 도는 동안의 저장 (spec §5)', () => {
     useEditor.setState({ file: { ...file, handle } });
 
     const first = useEditor.getState().save();
-    // 쓰는 사이의 편집은 허용된다 (spec §4) — unsaved 가 다시 서서 Ctrl+S 가
-    // 조기 반환을 지나 여기까지 온다.
+    // Edits during the write are allowed (spec §4) — unsaved rises again and
+    // Ctrl+S gets past the early return to this point.
     useEditor.getState().onEdit(b.id, '쓰는 동안의 편집');
 
-    // 겹친 저장은 시작하지 않는다 — 다른 스냅샷 둘이 나란히 쓰이면 끝나는 순서에
-    // 따라 옛 결과물이 디스크에서 이긴다.
+    // The overlapping save does not start — two different snapshots written side
+    // by side let the old output win on disk depending on finish order.
     await expect(useEditor.getState().save()).resolves.toBe(false);
 
     release();
     await expect(first).resolves.toBe(true);
     expect(writes).toHaveLength(1);
-    // 쓰는 동안의 편집은 잃지 않는다 — 저장 안 된 것으로 남아 다시 저장하면 된다.
+    // The mid-write edit is not lost — it remains unsaved and can be saved again.
     expect(useEditor.getState().unsaved).toBe(true);
   });
 });
 
-describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 물러난다 (spec §5)', () => {
-  /** 물음이 뜨기를 기다리기만 한다 — 답은 테스트가 직접 고른다 */
+describe('editor · a displaced dialog flow retreats on return without asking (spec §5)', () => {
+  /** Only waits for the question to appear — the test picks the answer itself */
   async function promptShown(): Promise<void> {
     for (let tries = 0; useUnsaved.getState().why === null; tries++) {
       if (tries > 1000) throw new Error('물음이 뜨지 않았다');
@@ -1765,23 +1791,23 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     }
   }
 
-  /** "안 물었다" 를 보이려면 조건 없이 흘려보내야 한다 — 매크로태스크까지 기다린다 */
+  /** Showing "it did not ask" requires draining unconditionally — waits through macrotasks too */
   async function settle(turns = 20): Promise<void> {
     for (let i = 0; i < turns; i++) await new Promise((r) => setTimeout(r, 0));
   }
 
-  it('늦게 닫힌 열기 대화상자가 새 드롭의 물음을 취소하지 않는다', async () => {
+  it('an open dialog closed late does not cancel the question of the new drop', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
 
-    // 대화상자는 열린 채 멈춰 있다 — 사용자가 고르는 데는 시간이 걸린다.
+    // The dialog is held open — picking takes a person time.
     let finishPick!: (handles: unknown[]) => void;
     (window as unknown as { showOpenFilePicker: unknown }).showOpenFilePicker = () =>
       new Promise((resolve) => (finishPick = resolve));
     const opening = useEditor.getState().openFile();
 
-    // 그 사이 다른 파일을 놓는다 — 이것이 마지막 선택이고, 편집이 있어 물음이 뜬다.
+    // Meanwhile another file is dropped — this is the last choice, and with edits present the question appears.
     const droppedFlow = useEditor.getState().openDropped(
       new File(['<html><body><p>마지막-선택-문서</p></body></html>'], 'b.html', {
         type: 'text/html',
@@ -1790,8 +1816,9 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     );
     await promptShown();
 
-    // 이제야 대화상자가 닫힌다. 밀려난 흐름이 keepEdits 로 들어가면 그 물음이
-    // 드롭의 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 부른다.
+    // Only now does the dialog close. If the displaced flow entered keepEdits,
+    // its question would cancel the drop's, and answered with save the displaced
+    // flow would call save().
     finishPick([
       {
         name: 'old.html',
@@ -1801,7 +1828,7 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     ]);
     await settle();
 
-    // 드롭의 물음이 그대로 떠 있고, 버리기로 답하면 드롭 문서가 선다.
+    // The drop's question is still up, and answered with discard the dropped document stands.
     expect(useUnsaved.getState().why).not.toBeNull();
     useUnsaved.getState().reply('discard');
     await droppedFlow;
@@ -1810,13 +1837,13 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     expect(useReplacement.getState().replacing).toBe(false);
   });
 
-  it('늦게 닫힌 폴더 열기 대화상자는 새 문서의 편집을 두고 묻지 않는다', async () => {
+  it('a folder-open dialog closed late does not ask about the edits on the new document', async () => {
     let finishPick!: (dir: unknown) => void;
     (window as unknown as { showDirectoryPicker: unknown }).showDirectoryPicker = () =>
       new Promise((resolve) => (finishPick = resolve));
     const opening = useEditor.getState().openFolder();
 
-    // 대화상자가 열린 사이 다른 파일을 놓고 고친다 — 이 편집은 최신 흐름의 것이다.
+    // While the dialog was open, another file is dropped and edited — this edit belongs to the newest flow.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1824,14 +1851,14 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
     finishPick(fakeTree('deck', { 'index.html': '<html><body><p>폴더 문서</p></body></html>' }));
     await settle();
 
-    // 밀려난 흐름은 묻지 않는다 — 물음 자체가 최신 흐름의 편집을 볼모로 잡는 일이다.
+    // The displaced flow does not ask — the question itself would hold the newest flow's edits hostage.
     expect(useUnsaved.getState().why).toBeNull();
     await opening;
     expect(useEditor.getState().source).toBe(fixtureSource());
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('늦게 닫힌 폴더 연결 대화상자도 같다 — 밀려났으면 묻지 않는다', async () => {
+  it('same for a folder-link dialog closed late — displaced, it does not ask', async () => {
     await useEditor.getState().loadDropped(dropped());
 
     let finishPick!: (dir: unknown) => void;
@@ -1839,7 +1866,7 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
       new Promise((resolve) => (finishPick = resolve));
     const linking = useEditor.getState().linkFolder();
 
-    // 그 사이 다른 파일을 놓고 고친다 — 연결하려던 문서는 이미 화면에 없다.
+    // Meanwhile another file is dropped and edited — the document being linked is already off screen.
     await useEditor
       .getState()
       .loadDropped(new File(['<html><body><p>마지막-선택-문서</p></body></html>'], 'b.html'));
@@ -1856,8 +1883,8 @@ describe('editor · 밀려난 대화상자 흐름은 돌아오면 묻지 않고 
   });
 });
 
-describe('editor · 문서 닫기', () => {
-  it('처음 화면으로 돌아간다 — 이전 문서의 것이 남지 않는다', async () => {
+describe('editor · closing the document', () => {
+  it('returns to the initial screen — nothing of the previous document survives', async () => {
     await useEditor.getState().loadDropped(dropped());
     expect(useEditor.getState().blocks.length).toBeGreaterThan(0);
 
@@ -1874,7 +1901,7 @@ describe('editor · 문서 닫기', () => {
     expect(s.unsaved).toBe(false);
   });
 
-  it('붙여 둔 자원을 놓아준다 — 안 놓으면 탭을 닫을 때까지 남는다', async () => {
+  it('releases the attached assets — unreleased, they stay until the tab closes', async () => {
     await useEditor.getState().loadDropped(dropped());
     const dispose = vi.fn();
     useEditor.setState({ assets: { urls: new Map(), missing: [], dispose } });
@@ -1884,7 +1911,7 @@ describe('editor · 문서 닫기', () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it('저장하지 않은 편집이 있으면 묻는다 — 닫기만 예외일 수 없다', async () => {
+  it('asks about unsaved edits — closing cannot be the one exception', async () => {
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1897,20 +1924,21 @@ describe('editor · 문서 닫기', () => {
     useUnsaved.getState().reply('cancel');
     await closing;
 
-    // 취소했으므로 문서는 그대로다.
+    // Cancelled, so the document stays.
     expect(useEditor.getState().file).not.toBeNull();
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('열어 둔 문서가 없으면 아무 일도 하지 않는다', async () => {
+  it('does nothing without an open document', async () => {
     await useEditor.getState().closeFile();
 
     expect(useEditor.getState().file).toBeNull();
   });
 
-  it('물음이 떠 있는 사이 깨끗해진 뒤의 저장 답도 닫기를 잇는다 (spec §4)', async () => {
-    // 닫기도 다른 진입점과 같은 물음을 지난다 — 그 사이 단축키 저장이 끝났거나
-    // 편집을 되돌려 이미 깨끗해졌다면, 저장의 "쓸 것 없음" 이 닫기를 취소하면 안 된다.
+  it('a save answer after the document became clean mid-question still continues the close (spec §4)', async () => {
+    // Closing walks the same question as the other entry points — if a shortcut
+    // save finished meanwhile or the edit was reverted and it is already clean,
+    // the save's "nothing to write" must not cancel the close.
     await useEditor.getState().loadDropped(dropped());
     const target = useEditor.getState().blocks.find((b) => b.locked === null);
     useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
@@ -1920,7 +1948,7 @@ describe('editor · 문서 닫기', () => {
       if (tries > 1000) throw new Error('묻지 않았다');
       await Promise.resolve();
     }
-    // 물음이 떠 있는 사이 문서가 깨끗해졌다 (되돌리기 — 저장한 적 없는 편집이라 잃을 것이 없다).
+    // The document became clean while the question was up (a revert — a never-saved edit, nothing to lose).
     useEditor.getState().revert(target?.id ?? -1);
     expect(useEditor.getState().unsaved).toBe(false);
     useUnsaved.getState().reply('save');
@@ -1930,13 +1958,13 @@ describe('editor · 문서 닫기', () => {
   });
 });
 
-describe('editor · BOM 과 인코딩 (spec §1 · 문서 인코딩)', () => {
+describe('editor · BOM and encoding (spec §1 · document encoding)', () => {
   const BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
 
-  it('파일 하나로 연 문서의 BOM 이 소스에 남는다 (대원칙 1)', async () => {
-    // Blob.text() 로 읽으면 BOM 이 지워져, 고치지 않은 문서의 첫 바이트가
-    // 저장본에서 사라진다 — 저장은 source 를 그대로 되쓰므로(INV-1) 소스에
-    // 남아 있으면 저장본에도 남는다.
+  it('the BOM of a document opened as a single file stays in the source (Principle 1)', async () => {
+    // Read via Blob.text(), the BOM is stripped and the first byte of an unedited
+    // document vanishes from the saved file — saving rewrites source as-is
+    // (INV-1), so if it stays in the source it stays in the saved file.
     const file = new File([BOM, fixtureSource()], 'bom.html', { type: 'text/html' });
     await useEditor.getState().loadDropped(file);
 
@@ -1946,7 +1974,7 @@ describe('editor · BOM 과 인코딩 (spec §1 · 문서 인코딩)', () => {
     expect(savedText.charCodeAt(0)).toBe(0xfeff);
   });
 
-  it('묶음(폴더·zip) 항목의 BOM 도 남는다', async () => {
+  it('the BOM of a bundle (folder, zip) entry stays too', async () => {
     const read: FolderRead = {
       files: new Map([
         ['doc.html', new File([BOM, '<html><body><p>본문</p></body></html>'], 'doc.html')],
@@ -1961,29 +1989,29 @@ describe('editor · BOM 과 인코딩 (spec §1 · 문서 인코딩)', () => {
     expect(source.charCodeAt(0)).toBe(0xfeff);
   });
 
-  it('UTF-8 이 아닌 문서는 이유를 들고 거절한다 (대원칙 3)', async () => {
-    // UTF-16LE 문서 — UTF-8 로 풀면 깨진 글자가 문서 행세를 하고, 저장이
-    // 그 깨진 결과를 되써서 원본을 조용히 망가뜨린다.
+  it('a non-UTF-8 document is rejected with the reason (Principle 3)', async () => {
+    // A UTF-16LE document — decoded as UTF-8, mojibake would pose as the document
+    // and saving would write that broken result back, quietly ruining the original.
     const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x70, 0x00, 0x3e, 0x00]);
     await useEditor.getState().loadDropped(new File([utf16], 'utf16.html'));
 
     expect(useEditor.getState().notice).toEqual({ key: 'notice.notUtf8' });
-    // 문서는 열리지 않았다 — 보던 화면(빈 화면)이 그대로다.
+    // The document was not opened — the screen being viewed (the empty screen) stays.
     expect(useEditor.getState().file).toBeNull();
   });
 });
 
-describe('editor · 문서마다 다른 프리뷰 표 (spec §5)', () => {
-  it('문서를 세울 때마다 새 표를 만들어 프리뷰 문서에 싣는다', async () => {
+describe('editor · a preview token per document (spec §5)', () => {
+  it('mints a new token each time a document stands and carries it in the preview document', async () => {
     await useEditor.getState().loadDropped(dropped());
     const first = useEditor.getState().previewToken;
     expect(first).not.toBe('');
-    // 에이전트 호출 인자로 실려 있어야 프리뷰가 그 표로 메시지를 보낸다.
+    // It must ride in the agent call arguments for the preview to send messages with that token.
     expect(useEditor.getState().previewDoc).toContain(`("${first}")`);
 
     await useEditor.getState().loadDropped(dropped());
     const second = useEditor.getState().previewToken;
-    // 같은 표면 옛 프리뷰의 메시지를 못 가린다 — 갈아탈 때마다 달라야 한다.
+    // The same token cannot screen out old preview messages — it must differ on every switch.
     expect(second).not.toBe(first);
     expect(useEditor.getState().previewDoc).toContain(`("${second}")`);
   });

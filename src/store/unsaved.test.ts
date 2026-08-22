@@ -12,10 +12,11 @@ import {
 } from './unsaved.js';
 
 /**
- * 대화상자가 뜨기를 기다렸다가 대신 답한다 — 사람이 버튼을 누르는 자리다.
+ * Waits for the dialog to appear and answers in the user's stead — this is where
+ * a person would press a button.
  *
- * 영영 기다리지 않는다. 물어야 하는데 묻지 않았다면 그 자리에서 실패해야
- * 무엇이 잘못됐는지 보인다. 무한정 돌면 테스트가 멈춘 것처럼만 보인다.
+ * It never waits forever. If a question was due but never asked, failing right
+ * here shows what went wrong. Spinning indefinitely only looks like a hung test.
  */
 async function answerWith(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
   for (let tries = 0; useUnsaved.getState().why === null; tries++) {
@@ -25,7 +26,7 @@ async function answerWith(choice: 'save' | 'discard' | 'cancel'): Promise<void> 
   useUnsaved.getState().reply(choice);
 }
 
-/** 아직 파일에 없는 편집이 있는 상태 */
+/** A state with edits not yet in the file */
 function edited(extra: Record<string, unknown> = {}): void {
   useEditor.setState({ patches: new Map([[0, '고친 값']]), unsaved: true, ...extra });
 }
@@ -38,23 +39,23 @@ beforeEach(() => {
 });
 
 describe('keepEdits', () => {
-  it('고친 것이 없으면 묻지 않는다', async () => {
-    // 물을 것이 없는데 뜨는 대화상자는 방해일 뿐이다.
+  it('does not ask when nothing was edited', async () => {
+    // A dialog with nothing to ask is nothing but an obstruction.
     const go = await keepEdits({ key: 'confirm.whyOpen' });
 
     expect(go).toBe(true);
     expect(useUnsaved.getState().why).toBeNull();
   });
 
-  it('이미 저장했으면 묻지 않는다 — 잃을 것이 없다', async () => {
-    // 저장해도 patches 는 남는다(INV-1). 그걸 "저장 안 함" 으로 읽으면 저장한 뒤에도 되묻는다.
+  it('does not ask when already saved — there is nothing to lose', async () => {
+    // patches survive a save (INV-1). Read as "not saved", it would keep asking even after saving.
     useEditor.setState({ patches: new Map([[0, '고친 값']]), unsaved: false });
 
     expect(await keepEdits({ key: 'confirm.whyOpen' })).toBe(true);
     expect(useUnsaved.getState().why).toBeNull();
   });
 
-  it('취소하면 하던 자리에 그대로 있는다', async () => {
+  it('cancelling stays right where the user was', async () => {
     edited();
 
     const asked = keepEdits({ key: 'confirm.whyOpen' });
@@ -64,7 +65,7 @@ describe('keepEdits', () => {
     expect(useEditor.getState().patches.size).toBe(1);
   });
 
-  it('버리기를 고르면 계속한다', async () => {
+  it('choosing discard continues', async () => {
     edited();
 
     const asked = keepEdits({ key: 'confirm.whyOpen' });
@@ -73,7 +74,7 @@ describe('keepEdits', () => {
     expect(await asked).toBe(true);
   });
 
-  it('저장을 고르면 저장한 뒤에 계속한다', async () => {
+  it('choosing save continues after saving', async () => {
     const save = vi.fn().mockResolvedValue(true);
     edited({ save });
 
@@ -84,8 +85,8 @@ describe('keepEdits', () => {
     expect(save).toHaveBeenCalledOnce();
   });
 
-  it('저장이 실패하면 계속하지 않는다', async () => {
-    // 그대로 넘어가면 저장한 줄 알았던 편집이 사라진다.
+  it('does not continue when the save fails', async () => {
+    // Going ahead would lose edits the user believed were saved.
     const save = vi.fn().mockResolvedValue(false);
     edited({ save });
 
@@ -95,9 +96,10 @@ describe('keepEdits', () => {
     expect(await asked).toBe(false);
   });
 
-  it('물음이 떠 있는 사이 이미 깨끗해졌으면 저장한 것으로 치고 계속한다', async () => {
-    // 단축키로 부른 저장이 그 사이 끝났거나 마지막 편집을 되돌렸을 수 있다. 그때
-    // save() 의 "쓸 것 없음" false 를 실패로 읽으면 하려던 일이 조용히 취소된다 (spec §4).
+  it('counts a document that became clean while the question was up as saved and continues', async () => {
+    // A shortcut save may have finished in the meantime, or the last edit was
+    // reverted. Reading save()'s "nothing to write" false as failure would then
+    // silently cancel what the user was doing (spec §4).
     const save = vi.fn().mockResolvedValue(false);
     edited({ save });
 
@@ -106,16 +108,16 @@ describe('keepEdits', () => {
       if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
       await Promise.resolve();
     }
-    // 물음이 떠 있는 사이 문서가 깨끗해졌다.
+    // The document became clean while the question was up.
     useEditor.setState({ unsaved: false });
     useUnsaved.getState().reply('save');
 
     expect(await asked).toBe(true);
-    // 청한 저장은 이미 충족됐다 — 헛되이 다시 쓰지 않는다.
+    // The requested save is already satisfied — no pointless rewrite.
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('무엇 때문에 사라지는지를 그대로 들고 있는다', async () => {
+  it('carries what the edits would be lost to, untouched', async () => {
     edited();
 
     const asked = keepEdits({ key: 'confirm.whySwitch', params: { path: 'deck/b.html' } });
@@ -124,8 +126,8 @@ describe('keepEdits', () => {
     expect(await asked).toBe(false);
   });
 
-  it('묻는 중에 또 물으면 앞의 물음은 취소로 닫는다', async () => {
-    // 답을 기다리는 프라미스를 그대로 두면 부른 쪽이 영영 풀리지 않는다.
+  it('asking again while asking closes the earlier question as cancelled', async () => {
+    // Leaving the pending answer promise alone would leave its caller waiting forever.
     edited();
 
     const first = keepEdits({ key: 'confirm.whyOpen' });
@@ -137,8 +139,8 @@ describe('keepEdits', () => {
   });
 });
 
-describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () => {
-  it('물음이 없으면 그냥 저장이다', () => {
+describe('shortcutSave · Ctrl+S while the question is up (spec §4)', () => {
+  it('without a question it is a plain save', () => {
     const save = vi.fn().mockResolvedValue(true);
     useEditor.setState({ save });
 
@@ -147,9 +149,10 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     expect(save).toHaveBeenCalledOnce();
   });
 
-  it('갈아 끼우는 동안의 Ctrl+S 는 거절하고 알린다 — 이전 문서를 쓰는 일이다', () => {
-    // 버리기로 답한 편집이 아직 화면에 떠 있다. 여기서 저장하면 방금 버린 내용이
-    // 파일에 적힌다 — 저장 버튼은 잠겨 있고, 단축키도 같은 기준을 따라야 한다.
+  it('Ctrl+S during a replacement is refused with a notice — it would write the previous document', () => {
+    // Edits answered with discard are still on screen. Saving here writes the
+    // just-discarded content to the file — the save button is locked, and the
+    // shortcut must follow the same rule.
     const save = vi.fn().mockResolvedValue(true);
     useEditor.setState({ save, unsaved: true });
     useReplacement.setState({ replacing: true });
@@ -162,9 +165,10 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     );
   });
 
-  it('물음이 떠 있으면 "저장하고 계속" 으로 흘러 하려던 일이 이어진다', async () => {
-    // 여기서 그냥 저장만 하면 unsaved 가 풀린 채 물음이 남고, 그 뒤의 저장 버튼이
-    // 저장할 것이 없다며 false 로 돌아 하려던 일(열기·갈아타기)이 취소된다.
+  it('with the question up it flows into "save and continue", so the pending action goes on', async () => {
+    // A plain save here clears unsaved while the question stays up, and the save
+    // button afterwards returns false with nothing to save, cancelling what the
+    // user was doing (opening, switching).
     const save = vi.fn().mockResolvedValue(true);
     edited({ save });
     const asked = keepEdits({ key: 'confirm.whyOpen' });
@@ -180,7 +184,7 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     expect(useUnsaved.getState().why).toBeNull();
   });
 
-  it('저장이 실패하면 여전히 계속하지 않는다', async () => {
+  it('still does not continue when the save fails', async () => {
     const save = vi.fn().mockResolvedValue(false);
     edited({ save });
     const asked = keepEdits({ key: 'confirm.whyOpen' });
@@ -194,7 +198,7 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
     expect(await asked).toBe(false);
   });
 
-  it('저장이 도는 동안(saving)에는 답하지 않는다 — 대화상자의 저장 버튼과 같은 기준', async () => {
+  it('does not answer while a save is running (saving) — same rule as the dialog save button', async () => {
     const save = vi.fn().mockResolvedValue(true);
     edited({ save, saving: true });
     const asked = keepEdits({ key: 'confirm.whyOpen' });
@@ -212,7 +216,7 @@ describe('shortcutSave · 물음이 떠 있는 동안의 Ctrl+S (spec §4)', () 
   });
 });
 
-describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
+describe('keepEdits · waits for the preview commit (spec §4)', () => {
   let unregister: (() => void) | null = null;
 
   afterEach(() => {
@@ -221,11 +225,12 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     vi.useRealTimers();
   });
 
-  it('확정이 아직 도착 전이면 기다렸다가 묻는다', async () => {
-    // focusout 확정은 postMessage 라 unsaved 판정보다 늦을 수 있다 — 청 없이
-    // 판정하면 묻지 않고 갈아 끼워, 고치던 내용이 조용히 사라진다 (대원칙 3).
+  it('waits for a commit still in flight before asking', async () => {
+    // The focusout commit rides postMessage and can arrive after the unsaved
+    // check — judging without asking would replace without a question, and the
+    // edit in progress would vanish silently (Principle 3).
     unregister = registerPreviewFlush(async () => {
-      // 청을 받고서야 확정이 스토어에 닿는다 — 실제로는 edit 메시지가 이 사이에 온다.
+      // The commit reaches the store only after the request — in reality the edit message arrives in between.
       edited();
     });
 
@@ -235,12 +240,12 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(await asked).toBe(false);
   });
 
-  it('청이 풀리기 전에는 판정하지 않는다', async () => {
+  it('does not judge before the request settles', async () => {
     let release: () => void = () => {};
     unregister = registerPreviewFlush(() => new Promise((r) => (release = r)));
 
     const asked = keepEdits({ key: 'confirm.whyOpen' });
-    // 답이 오기 전 — 아직 묻지도, 진행하지도 않았다.
+    // Before the answer — nothing asked, nothing progressed yet.
     await Promise.resolve();
     await Promise.resolve();
     expect(useUnsaved.getState().why).toBeNull();
@@ -252,9 +257,9 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(await asked).toBe(true);
   });
 
-  it('프리뷰가 답하지 않으면 한도까지만 기다리고 지금 아는 상태로 진행한다', async () => {
-    // 답 못 하는 프리뷰는 확정도 못 보낸다 — 더 기다려도 지킬 편집이 오지 않고,
-    // 기다림은 사용자의 클릭만 붙든다 (spec §4).
+  it('with no answer from the preview, waits only to the limit and proceeds on what is known', async () => {
+    // A preview that cannot answer cannot send commits either — waiting longer
+    // brings no edits worth protecting, and only holds the user's click hostage (spec §4).
     vi.useFakeTimers();
     unregister = registerPreviewFlush(() => new Promise(() => {}));
 
@@ -265,24 +270,25 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(useUnsaved.getState().why).toBeNull();
   });
 
-  it('확정을 기다리는 사이 더 새 흐름이 예약했으면 묻지 않고 물러난다 (spec §5)', async () => {
-    // 밀려난 채 물으면 이 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면
-    // 밀려난 흐름이 save() 를 불러 사용자의 마지막 선택이 사라진다.
+  it('retreats without asking when a newer flow reserved during the commit wait (spec §5)', async () => {
+    // Asking while displaced would cancel the newest flow's question, and answered
+    // with save the displaced flow would call save(), losing the user's last choice.
     edited();
     const mine = reserveReplacement();
     unregister = registerPreviewFlush(async () => {
-      // 답을 기다리는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+      // While waiting for the answer the user dropped another file — a newer reservation stands.
       reserveReplacement();
     });
 
     expect(await keepEdits({ key: 'confirm.whyOpen' }, mine)).toBe(false);
-    // 물음은 뜨지 않았다 — 밀려난 흐름의 물음은 최신 흐름의 물음을 취소해 버린다.
+    // No question appeared — a displaced flow's question would cancel the newest flow's.
     expect(useUnsaved.getState().why).toBeNull();
   });
 
-  it('물음의 답을 기다리는 사이 밀려났으면 저장으로 답해도 save() 를 부르지 않는다 (spec §5)', async () => {
-    // 답이 돌아온 순간 예약을 다시 본다 — 안 보면 밀려난 흐름의 "저장" 답이 그대로
-    // save() 를 불러, 옛 흐름의 결과물이 파일에 적히고 사용자의 마지막 선택을 덮는다.
+  it('displaced while awaiting the answer, even a save answer does not call save() (spec §5)', async () => {
+    // The reservation is re-checked the moment the answer returns — otherwise the
+    // displaced flow's "save" answer would call save(), writing the old flow's
+    // output to the file over the user's last choice.
     const save = vi.fn().mockResolvedValue(true);
     edited({ save });
     const mine = reserveReplacement();
@@ -292,7 +298,7 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
       if (tries > 1000) throw new Error('대화상자가 뜨지 않았다');
       await Promise.resolve();
     }
-    // 물음이 떠 있는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+    // While the question was up the user dropped another file — a newer reservation stands.
     reserveReplacement();
     useUnsaved.getState().reply('save');
 
@@ -300,11 +306,12 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('저장을 기다리는 사이 밀려났으면 계속하지 않는다 (spec §5)', async () => {
-    // 파일에는 이미 썼고 그건 그 파일의 몫이다 — 하지만 이어질 설치는 최신 흐름의
-    // 것이라, 여기서 true 로 돌아가면 밀려난 흐름이 옛 문서를 설치하려 든다.
+  it('displaced while waiting on the save, it does not continue (spec §5)', async () => {
+    // The file was written and that belongs to the file — but the install that
+    // follows belongs to the newest flow; returning true here would have the
+    // displaced flow try to install the old document.
     const save = vi.fn().mockImplementation(async () => {
-      // 쓰는 사이 사용자가 다른 파일을 놓았다 — 더 새 예약이 선다.
+      // While writing, the user dropped another file — a newer reservation stands.
       reserveReplacement();
       return true;
     });
@@ -318,7 +325,7 @@ describe('keepEdits · 프리뷰의 확정을 기다린다 (spec §4)', () => {
     expect(save).toHaveBeenCalledOnce();
   });
 
-  it('떼고 나면 청하지 않는다 — 프리뷰가 없으면 확정시킬 편집도 없다', async () => {
+  it('does not ask once unregistered — without a preview there is no edit to commit', async () => {
     const flush = vi.fn().mockResolvedValue(undefined);
     registerPreviewFlush(flush)();
 

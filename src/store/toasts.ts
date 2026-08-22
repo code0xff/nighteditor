@@ -1,13 +1,14 @@
 /**
- * 화면 오른쪽 위에 뜨는 알림 목록 (spec §4).
+ * The stack of notifications at the top right of the screen (spec §4).
  *
- * 문장이 아니라 **메시지 키**를 담는다. 언어를 바꾸면 이미 떠 있는 알림도 함께 바뀌어야
- * 한다 — 스토어가 문장을 만들어 두면 그때 언어가 굳는다 (spec §1 · UI 언어).
+ * It holds **message keys**, not sentences. Switching the language must also
+ * change notifications already on screen — if the store built the sentences, the
+ * language would be frozen at that moment (spec §1 · UI language).
  */
 import { create } from 'zustand';
 import type { Notice } from '@/lib/messages';
 
-/** `error` 는 스스로 사라지지 않는다. `locked` 는 잠긴 블록을 눌렀을 때다 */
+/** `error` never disappears on its own. `locked` is for clicking a locked block */
 export type ToastTone = 'info' | 'error' | 'locked';
 
 export interface Toast {
@@ -23,14 +24,15 @@ interface ToastState {
   clear: () => void;
 }
 
-/** 한 번에 이만큼만 쌓는다. 넘치면 오래된 것부터 밀어낸다 */
+/** Only this many stack at once. Overflow pushes out the oldest first */
 const MAX = 4;
 
 /**
- * 넘친 만큼 오래된 것부터 비우되, **오류는 밀어내지 않는다** (spec §4).
+ * Evicts the oldest past the limit, but **never evicts errors** (spec §4).
  *
- * 오류는 사람이 닫기 전까지 화면에 있어야 한다 — 잠긴 블록 몇 번 눌렀다고 저장
- * 실패가 사라지면, 스스로 사라진 것과 다르지 않다. 전부 오류면 한도를 넘겨서라도 남긴다.
+ * An error must stay on screen until a person dismisses it — if a few clicks on a
+ * locked block could push out a save failure, it might as well have vanished on
+ * its own. If everything is an error, keep them all even past the limit.
  */
 function evict(toasts: Toast[]): Toast[] {
   let over = toasts.length - MAX;
@@ -49,8 +51,9 @@ export const useToasts = create<ToastState>((set) => ({
 
   show: (notice, tone = 'info') =>
     set((state) => {
-      // 같은 알림이 연달아 오면 새로 쌓지 않고 맨 위의 것을 갈아 끼운다.
-      // 잠긴 블록을 여러 번 누르면 같은 문장이 화면을 덮는다.
+      // Consecutive identical notifications replace the top one instead of stacking.
+      // Clicking a locked block a few times would otherwise cover the screen with
+      // the same sentence.
       const last = state.toasts[state.toasts.length - 1];
       const same = last && last.notice.key === notice.key && last.tone === tone;
       const kept = same ? state.toasts.slice(0, -1) : state.toasts;

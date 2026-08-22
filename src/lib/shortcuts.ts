@@ -1,9 +1,11 @@
 /**
- * 호스트 창의 키 단축키. 프리뷰(iframe) 안의 키는 여기 닿지 않으므로
- * 에이전트가 따로 가로채 메시지로 넘긴다 (ADR-007, spec §4).
+ * Keyboard shortcuts for the host window. Keys pressed inside the preview (iframe)
+ * never reach here, so the agent intercepts them separately and forwards a message
+ * (ADR-007, spec §4).
  *
- * 조합 판정은 이 파일과 에이전트 두 곳에 있다. 에이전트는 문자열화돼 주입되므로
- * 코드를 공유할 수 없다 — 그래서 조합을 바꿀 땐 두 곳을 같이 고친다.
+ * The combo checks live both here and in the agent. The agent is injected as a
+ * stringified function, so code cannot be shared — when changing a combo, change
+ * both places together.
  */
 
 export interface EditorShortcuts {
@@ -11,13 +13,14 @@ export interface EditorShortcuts {
   save: () => void;
   /** Ctrl+Shift+S · ⌘⇧S */
   downloadCopy: () => void;
-  /** Ctrl+Z · ⌘Z — 마지막으로 확정한 변경 되돌리기 */
+  /** Ctrl+Z · ⌘Z — revert the most recently committed change */
   undo: () => void;
 }
 
 /**
- * 입력 칸 안에서는 단축키를 가로채지 않는다.
- * 제목을 고치다 누른 Ctrl+Z 는 그 칸의 undo 여야 한다 — 남의 블록을 되돌리면 안 된다.
+ * Shortcuts are not intercepted inside text fields.
+ * Ctrl+Z pressed while fixing the title must be that field's own undo — it must
+ * not revert some other block.
  */
 function inTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -26,9 +29,10 @@ function inTextField(target: EventTarget | null): boolean {
 }
 
 /**
- * 저장·사본 내려받기 단축키를 잡는다. 브라우저의 "페이지 저장" 대화상자는 막는다.
+ * Captures the save and download-a-copy shortcuts. Blocks the browser's own
+ * "save page" dialog.
  *
- * @returns 리스너를 떼는 함수
+ * @returns a function that removes the listener
  */
 export function onEditorShortcuts({ save, downloadCopy, undo }: EditorShortcuts): () => void {
   const onKey = (e: KeyboardEvent) => {
@@ -41,7 +45,7 @@ export function onEditorShortcuts({ save, downloadCopy, undo }: EditorShortcuts)
       return;
     }
 
-    // 되돌리기는 입력 칸을 비껴간다. 저장은 어디서 눌러도 저장이라 비껴가지 않는다.
+    // Undo steps aside in text fields. Save does not — saving is saving wherever it is pressed.
     if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey && !inTextField(e.target)) {
       e.preventDefault();
       undo();

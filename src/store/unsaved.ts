@@ -1,12 +1,12 @@
 /**
- * 저장하지 않은 편집이 있을 때 무엇을 할지 묻는다 (spec §4).
+ * Asks what to do when there are unsaved edits (spec §4).
  *
- * 브라우저의 `confirm` 은 버튼이 둘뿐이라 "버릴래?" 밖에 못 묻는다. 사용자가 정작
- * 하고 싶은 것은 대개 **저장하고 계속**인데, 그 선택지가 없어 취소하고 저장하고
- * 다시 시도하는 세 걸음을 걷게 만든다.
+ * The browser's `confirm` has only two buttons, so it can only ask "discard?".
+ * What the user usually wants is **save and continue** — without that choice they
+ * are made to walk three steps: cancel, save, try again.
  *
- * 부르는 쪽은 `ask()` 한 줄로 답을 기다린다. 화면에 대화상자를 그리는 것은
- * `UnsavedDialog` 하나뿐이고, 상태는 여기 한곳에 있다.
+ * Callers wait for the answer with a single `ask()` line. Only `UnsavedDialog`
+ * draws the dialog on screen, and the state lives here in one place.
  */
 import { create } from 'zustand';
 import type { Notice } from '@/lib/messages';
@@ -16,14 +16,16 @@ import { refuseWhileReplacing, Superseded, type Replacement } from './replacemen
 export type UnsavedChoice = 'save' | 'discard' | 'cancel';
 
 /**
- * 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하는 통로 (spec §4).
+ * The channel for asking the preview to "commit whatever is being edited and
+ * report back" (spec §4).
  *
- * 프리뷰를 그리는 화면(PreviewFrame)이 자기 iframe 으로 청하는 함수를 걸어 둔다 —
- * 스토어는 iframe 을 모른다. 돌려주는 프라미스는 프리뷰의 답(flushed)에 풀린다.
+ * The screen that draws the preview (PreviewFrame) registers a function that asks
+ * its own iframe — the store knows nothing of iframes. The returned promise
+ * settles on the preview's answer (flushed).
  */
 let flushPreview: (() => Promise<void>) | null = null;
 
-/** @returns 걸어둔 함수를 떼는 함수 — 더 새 등록을 덮어 떼지는 않는다 */
+/** @returns a function that unregisters — it never removes a newer registration over its own */
 export function registerPreviewFlush(fn: () => Promise<void>): () => void {
   flushPreview = fn;
   return () => {
@@ -32,21 +34,23 @@ export function registerPreviewFlush(fn: () => Promise<void>): () => void {
 }
 
 /**
- * 프리뷰 확정 답을 기다리는 한도 (spec §4).
+ * The limit on waiting for the preview's commit answer (spec §4).
  *
- * 정상 프리뷰의 답은 한 순회(수 ms)에 온다 — 한도는 프리뷰가 죽었거나 아티팩트
- * 스크립트가 이벤트 루프를 붙들고 있을 때만 발동한다. 그 상태의 프리뷰는
- * 확정(focusout)도 보낼 수 없으므로 더 기다려도 지킬 편집이 새로 오지 않는다 —
- * 기다림은 사용자의 클릭만 붙든다. 1초는 무거운 아티팩트 스크립트의 긴 작업
- * 한 번쯤은 넘기고, 죽은 프리뷰 앞에서의 멈칫거림으로는 참을 만한 값이다.
+ * A healthy preview answers within one event-loop turn (a few ms) — the limit
+ * only fires when the preview is dead or an artifact script is hogging its event
+ * loop. A preview in that state cannot send commits (focusout) either, so waiting
+ * longer brings no edits worth protecting — the wait only holds the user's click
+ * hostage. One second survives a heavy artifact script's occasional long task,
+ * and is a tolerable stutter in front of a dead preview.
  */
 export const FLUSH_TIMEOUT = 1000;
 
 /**
- * 프리뷰에 열려 있는 편집을 확정시키고 그 답을 (한도까지만) 기다린다.
+ * Asks the preview to commit any open edit and waits (up to the limit) for its answer.
  *
- * 확정과 답은 같은 postMessage 통로로 순서대로 오므로, 답이 왔다면 확정도 이미
- * 스토어에 닿아 있다 — 이 뒤에 읽는 `unsaved` 는 그 편집을 안다.
+ * The commit and the answer travel the same postMessage channel in order, so if
+ * the answer arrived the commit has already reached the store — the `unsaved`
+ * read after this knows about that edit.
  */
 export async function flushPreviewEdits(): Promise<void> {
   const ask = flushPreview;
@@ -55,7 +59,7 @@ export async function flushPreviewEdits(): Promise<void> {
 }
 
 interface UnsavedState {
-  /** 무엇을 하려다 멈췄는지. null 이면 묻는 중이 아니다 */
+  /** What was about to happen when we stopped to ask. null means no question is up */
   why: Notice | null;
   answer: ((choice: UnsavedChoice) => void) | null;
   ask: (why: Notice) => Promise<UnsavedChoice>;
@@ -68,8 +72,8 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
 
   ask: (why) =>
     new Promise<UnsavedChoice>((resolve) => {
-      // 이미 묻고 있었다면 그 물음은 취소로 닫는다. 답을 기다리는 프라미스를
-      // 그대로 두면 부른 쪽이 영영 풀리지 않는다.
+      // If a question was already up, it is closed as cancelled. Leaving its
+      // promise pending would leave that caller waiting forever.
       get().answer?.('cancel');
       set({ why, answer: resolve });
     }),
@@ -82,85 +86,98 @@ export const useUnsaved = create<UnsavedState>((set, get) => ({
 }));
 
 /**
- * 편집을 잃을 수 있는 일을 하기 전에 부른다. 계속해도 되면 true.
+ * Called before anything that could lose edits. Returns true if it is safe to continue.
  *
- * 고친 것이 없거나 이미 저장했으면 묻지 않는다 — 물을 것이 없는데 묻는 대화상자는 방해다.
- * 저장을 골랐는데 저장이 실패하면 **계속하지 않는다.** 그대로 넘어가면
- * 저장한 줄 알았던 편집이 사라진다.
+ * With nothing edited, or everything already saved, it does not ask — a dialog
+ * with nothing to ask is an obstruction. If the user chose save and the save
+ * fails, **it does not continue.** Going ahead would lose edits the user believed
+ * were saved.
  *
- * @param why 무엇 때문에 사라지는지 — 물음에 그대로 들어간다
- * @param mine 이 물음이 딸린 갈아 끼우기 예약. 긴 단계(확정 기다림·물음·저장)가
- *   전부 guarded 를 지나므로, true 로 돌아왔다면 마지막 긴 단계까지 이 예약이
- *   최신이었다 — 부르는 쪽이 돌아온 직후를 다시 확인할 필요가 없다 (spec §5).
- *   저장으로 답하면 **그 순간** 잠근다
- *   (spec §4) — 저장이 파일을 쓰는 사이의 편집도 이어질 설치 순간 갈 곳이 없다.
- *   여기서 잠그지 않으면 그 사이의 편집이 받아졌다가 설치에 조용히 쓸려 나간다.
- *   홀로 도는 저장과 다르다 — 그쪽 편집은 살아남으므로 잠그지 않는다.
+ * @param why what the edits would be lost to — goes into the question as-is
+ * @param mine the replacement reservation this question belongs to. Every long
+ *   step (waiting for the commit, the question, the save) goes through guarded,
+ *   so a true return means this reservation was still the newest through the last
+ *   long step — the caller need not re-check right after returning (spec §5).
+ *   Answering with save locks **at that moment** (spec §4) — edits made while the
+ *   save writes the file have nowhere to go at the install that follows. Without
+ *   locking here, they would be accepted and then silently swept away by the
+ *   install. This differs from a standalone save — those edits survive, so it
+ *   does not lock.
  */
 export async function keepEdits(why: Notice, mine?: Replacement): Promise<boolean> {
-  // 예약이 딸린 흐름의 긴 단계는 guarded 를 지난다 (spec §5 · 갈아 끼우기 예약) —
-  // 기다리는 사이에도 더 새 흐름은 예약하고, 밀려난 채 물으면 이 물음이 최신 흐름의
-  // 물음을 취소하고, 저장으로 답하면 밀려난 흐름이 save() 를 불러 사용자의 마지막
-  // 선택이 사라진다. 예약 없이 부르면 판정할 것이 없어 그대로 기다린다.
+  // Long steps of a flow with a reservation go through guarded (spec §5 ·
+  // replacement reservation) — newer flows keep reserving during the wait, and a
+  // displaced flow that asks anyway cancels the newest flow's question; answered
+  // with save, the displaced flow would call save() and the user's last choice
+  // would be lost. Called without a reservation there is nothing to judge, so it
+  // just waits.
   const pass = <T>(p: Promise<T>): Promise<T> => (mine ? mine.guarded(p) : p);
   try {
-    // 프리뷰에서 편집 중이던 블록의 확정(focusout)은 postMessage 로 떠 있을 뿐이라
-    // 아직 도착 전일 수 있다 — 그대로 unsaved 를 읽으면 묻지 않고 갈아 끼우고, 늦게
-    // 온 확정은 프리뷰가 내려가며 조용히 사라진다 (대원칙 3). 판정 전에 확정을 청해
-    // 그 답까지 기다린다. 이미 unsaved 여도 청한다 — "저장하고 계속" 이 열려 있던
-    // 편집까지 담아야 하기 때문이다 (spec §4).
+    // The commit (focusout) of a block being edited in the preview may still be in
+    // flight as a postMessage — reading unsaved as-is would replace without asking,
+    // and the late commit would vanish silently as the preview goes down
+    // (Principle 3). Ask for the commit before judging and wait for its answer.
+    // Ask even when already unsaved — "save and continue" must include the edit
+    // that was still open (spec §4).
     await pass(flushPreviewEdits());
     const { unsaved, save } = useEditor.getState();
-    // 이미 파일에 들어간 편집은 잃을 것이 없다. 저장한 뒤에도 되물으면 사람을 지치게 한다.
+    // Edits already in the file have nothing to lose. Asking again after saving wears people down.
     if (!unsaved) return true;
 
-    // 물음도 긴 단계다 — 답을 기다리는 사이 더 새 흐름이 예약하면, 밀려난 흐름의
-    // "저장" 답이 그대로 save() 를 불러 옛 흐름의 결과물이 파일에 적힌다 (spec §5).
-    // guarded 가 답이 돌아온 순간 예약을 다시 본다.
+    // The question is a long step too — if a newer flow reserves while the answer
+    // is pending, the displaced flow's "save" answer would call save() and write
+    // the old flow's output to the file (spec §5). guarded re-checks the
+    // reservation the moment the answer returns.
     const choice = await pass(useUnsaved.getState().ask(why));
     if (choice === 'cancel') return false;
     if (choice === 'save') {
       mine?.engage();
-      // 물음이 떠 있는 사이에도 상태는 움직인다 — 단축키로 부른 저장이 그 사이 끝났거나,
-      // 마지막 편집을 되돌려 이미 파일과 같아졌을 수 있다. 그때 save() 는 "쓸 것 없음"
-      // 으로 false 를 돌려주는데, 그것을 실패로 읽으면 청한 저장이 이미 충족됐는데도
-      // 하려던 일이 조용히 취소된다. 깨끗하면 저장된 것으로 치고 계속한다 (spec §4).
+      // State moves while the question is up — a save started by the shortcut may
+      // have finished, or the last edit was reverted and the document already
+      // matches the file. Then save() returns false as "nothing to write", and
+      // reading that as failure silently cancels the very thing the user asked to
+      // continue, even though the requested save is already satisfied. A clean
+      // document counts as saved; continue (spec §4).
       if (!useEditor.getState().unsaved) return true;
-      // 저장을 기다리는 사이 밀려났으면 계속하지 않는다 — 파일에는 이미 썼고 그건
-      // 그 파일의 몫이지만, 이어질 설치는 최신 흐름의 것이다 (spec §5).
+      // Displaced while waiting on the save: do not continue — the file was
+      // written and that belongs to the file, but the install that follows belongs
+      // to the newest flow (spec §5).
       return await pass(save());
     }
     return true;
   } catch (e) {
-    // 이 함수의 답은 불리언이다 — 밀려남의 표식을 그대로 던지면 예약 없이 부르는
-    // 쪽까지 try 를 갖춰야 한다. 여기서 "계속하지 않는다" 로 접는다 (조용한 물러남).
+    // This function answers in booleans — rethrowing the displacement marker would
+    // force even reservation-less callers to wrap in try. Fold it into "do not
+    // continue" here (the quiet retreat).
     if (e instanceof Superseded) return false;
     throw e;
   }
 }
 
 /**
- * 저장 단축키(`Ctrl+S`)의 저장. **물음이 떠 있으면 그 물음의 "저장하고 계속" 이다**
- * (spec §4 · 저장하지 않은 편집을 지킨다).
+ * The save shortcut's (`Ctrl+S`) save. **While the question is up, it is that
+ * question's "save and continue"** (spec §4 · protecting unsaved edits).
  *
- * 물음 옆에서 그냥 `save()` 를 부르면 `unsaved` 만 풀린 채 물음이 남는다. 그 뒤에
- * 대화상자의 저장 버튼을 눌러도 `save()` 가 저장할 것이 없다며 false 를 돌려,
- * 하려던 일(열기·갈아타기)이 조용히 취소된다. 단축키를 물음의 답으로 돌리면
- * 저장도 되고 하려던 일도 이어진다.
+ * Calling plain `save()` beside the question clears `unsaved` while the question
+ * stays up. The dialog's save button then finds nothing to save, `save()` returns
+ * false, and the thing the user was doing (opening, switching) is silently
+ * cancelled. Routing the shortcut into the question's answer both saves and lets
+ * the user's action continue.
  */
 export function shortcutSave(): void {
   const { why, reply } = useUnsaved.getState();
   if (why === null) {
-    // 갈아 끼우는 동안의 저장은 아직 화면에 떠 있는 **이전** 문서를 쓰는 일이다 —
-    // 버리기로 답한 편집이 파일에 적힐 수 있다. 저장 버튼은 잠겨 있지만 단축키는
-    // 언제든 눌리므로, 되돌리기(Ctrl+Z)와 같은 자리에서 거절하고 알린다 (spec §4).
-    // 물음이 떠 있을 때의 "저장하고 계속" 은 다르다 — 그 저장은 갈아 끼우기의
-    // 일부라 막지 않는다.
+    // Saving during a replacement writes the **previous** document, the one still
+    // on screen — edits the user chose to discard could land in the file. The save
+    // button is locked, but the shortcut can fire any time, so refuse and notify
+    // here, in the same place as undo (Ctrl+Z) (spec §4). "Save and continue"
+    // while the question is up is different — that save is part of the
+    // replacement, so it is not blocked.
     if (refuseWhileReplacing('app.saveWhileReplacing')) return;
     void useEditor.getState().save();
     return;
   }
-  // 대화상자의 저장 버튼과 같은 기준 — 저장이 도는 동안(saving)에는 겹쳐 답하지 않는다.
+  // Same rule as the dialog's save button — never answer on top of a running save (saving).
   if (useEditor.getState().saving) return;
   reply('save');
 }

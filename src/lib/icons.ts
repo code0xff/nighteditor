@@ -1,10 +1,12 @@
-/** 아이콘 단일 출처 — lucide 를 직접 import 하는 앱 코드는 이 파일뿐이다.
+/** Single source for icons — no app code imports lucide directly except this file.
  *
- *  UI 는 그림 이름(`Save`, `Undo2`)이 아니라 **의미 이름**(`IconSave`, `IconRevert`)만 쓴다.
- *  그림을 갈아끼울 땐 아래 매핑 한 줄만 고치면 되고, 같은 뜻에 다른 그림이 섞이는 일도 없다.
+ *  The UI uses **semantic names** (`IconSave`, `IconRevert`), never picture names
+ *  (`Save`, `Undo2`). Swapping a picture means changing one mapping line below, and
+ *  the same meaning can never end up with two different pictures.
  *
- *  예외: `components/ui/*` 는 shadcn 생성물이라 업스트림 갱신을 위해 원본 import 를 유지한다.
- *  그쪽 아이콘은 컴포넌트의 내부 부품(셀렉트의 체크·화살표)이고 화면의 어휘가 아니다. */
+ *  Exception: `components/ui/*` is shadcn-generated and keeps its original imports
+ *  for upstream updates. Those icons are internal parts of a component (a select's
+ *  check and chevron), not part of the screen's vocabulary. */
 import { createElement } from 'react';
 import {
   Boxes,
@@ -33,53 +35,55 @@ import {
 
 export type { LucideIcon };
 
-/** 브랜드 — 앱 아이콘 파일은 public/ 한곳에 있고, index.html 과 PWA 매니페스트가 같은 파일을 쓴다.
- *  경로는 BASE_URL 로 맞춘다. GitHub Pages 는 하위 경로(/nighteditor/)로 서빙되므로
- *  절대 경로로 박으면 배포본에서 404 다 (index.html 안의 링크는 Vite 가 고쳐주지만 이건 런타임 문자열이다).
- *  IconBrand 는 이미지를 쓰지 않을 때의 대체 그림이다. */
+/** Brand — the app icon file lives in public/ only, shared by index.html and the PWA
+ *  manifest. The path is resolved with BASE_URL: GitHub Pages serves from a subpath
+ *  (/nighteditor/), so a hard-coded absolute path 404s in the deployed build (Vite
+ *  rewrites the links inside index.html, but this is a runtime string).
+ *  IconBrand is the fallback picture when the image is not used. */
 export const APP_ICON = import.meta.env.BASE_URL + 'apple-touch-icon.png';
 export const IconBrand = FilePen;
 
-/** 파일 */
+/** Files */
 export const IconOpen = FolderOpen;
-/** 폴더째 열기 — 파일 하나가 아니라 묶음을 연다 */
+/** Open a whole folder — a bundle, not a single file */
 export const IconOpenFolder = FolderTree;
 export const IconDrop = FileUp;
 export const IconSave = Save;
 export const IconDownloadCopy = Download;
 
-/** 되돌리기 */
+/** Revert */
 export const IconRevert = Undo2;
 export const IconRevertAll = RotateCcw;
 
-/** 상태 — 잠금(대원칙 3)과 안내는 다른 그림을 쓴다 */
+/** Status — locks (Principle 3) and notices use different pictures */
 export const IconLocked = Lock;
 export const IconNotice = Info;
-/** 알림 닫기 */
+/** Dismiss a notification */
 export const IconClose = X;
-/** 열어 둔 문서를 닫는다 — 알림 닫기(IconClose)와 뜻이 달라 그림도 다르다 */
+/** Close the open document — different meaning from dismissing a toast (IconClose), so a different picture */
 export const IconCloseDoc = FileX;
-/** 자원을 못 붙였다 — 참조는 있는데 파일이 없다 */
+/** An asset could not be attached — the reference exists but the file does not */
 export const IconUnlinked = Unplug;
 export const IconLinkFolder = FolderSearch;
-/** 묶음 안의 문서 하나 */
+/** One document inside a bundle */
 export const IconDocument = FileCode2;
 export const IconScanning = LoaderCircle;
 
-/** 블록 집계 */
+/** Block tallies */
 export const IconBlocks = Boxes;
 export const IconEditable = PencilLine;
 
-/** 언어 */
+/** Language */
 export const IconLanguage = Languages;
 
-/** 테마 — 누르면 바뀌는 쪽을 보여준다 */
+/** Theme — shows the side you would switch to */
 export const IconThemeLight = Sun;
 export const IconThemeDark = Moon;
 
 /**
- * 깃허브 마크. lucide 는 상표 아이콘을 더 이상 싣지 않아 여기서 직접 그린다
- * (octicons `mark-github`). 다른 아이콘과 같은 자리에 두어야 갈아끼울 곳이 하나로 남는다.
+ * The GitHub mark. lucide no longer ships brand icons, so it is drawn here directly
+ * (octicons `mark-github`). Keeping it alongside the other icons leaves a single
+ * place to swap it.
  */
 export function IconGithub({ className }: { className?: string }) {
   return createElement(

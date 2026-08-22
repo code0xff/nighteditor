@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { FOLDER_LIMITS, NotUtf8Error, pickFolder, readDroppedFolder, readText } from './fs.js';
 
-/** 내용은 읽지 않고 크기만 세므로, 실제로 64MB 를 만들지 않는다 */
+/** Only sizes are counted, never contents — no actual 64MB is allocated */
 function fakeFile(name: string, size: number): File {
   return { name, size } as File;
 }
@@ -46,8 +46,8 @@ function drop(root: FileSystemEntry): DataTransferItemList {
 
 const MB = 1024 * 1024;
 
-describe('readDroppedFolder · 한도', () => {
-  it('폴더 안의 파일을 경로째 읽는다', async () => {
+describe('readDroppedFolder · limits', () => {
+  it('reads the files in a folder, paths included', async () => {
     const read = await readDroppedFolder(
       drop(
         dirEntry('deck', [fileEntry('index.html', 10), dirEntry('css', [fileEntry('a.css', 5)])])
@@ -58,8 +58,8 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.truncated).toBe(false);
   });
 
-  it('한도보다 큰 파일 하나는 담지 않는다', async () => {
-    // 담고 나서 누계를 더하면 한 파일이 한도보다 커도 그대로 들어간다.
+  it('does not keep a single file larger than the limit', async () => {
+    // Adding to the total after keeping would let a file larger than the limit straight in.
     const huge = FOLDER_LIMITS.bytes + MB;
     const read = await readDroppedFolder(drop(dirEntry('deck', [fileEntry('big.mp4', huge)])));
 
@@ -67,7 +67,7 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.truncated).toBe(true);
   });
 
-  it('선을 넘는 파일만 빼고 나머지는 담는다', async () => {
+  it('keeps everything except the file that crosses the line', async () => {
     const read = await readDroppedFolder(
       drop(
         dirEntry('deck', [
@@ -82,9 +82,10 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.truncated).toBe(true);
   });
 
-  it('한도 넘는 파일만 가득해도 끝까지 걷지 않는다', async () => {
-    // 담긴 수(files.size)만 보면 하나도 못 담은 채 폴더 전체를 계속 읽었다 —
-    // 큰 파일 만 개짜리 폴더에서 한도가 순회를 전혀 묶지 못했다 (spec §5.1).
+  it('does not walk to the end even when the folder is full of over-limit files', async () => {
+    // Watching only the kept count (files.size), the whole folder kept being read
+    // with nothing kept — in a folder of ten thousand large files the limit never
+    // bounded the traversal at all (spec §5.1).
     let touched = 0;
     const huge = FOLDER_LIMITS.bytes + MB;
     const children = Array.from(
@@ -108,14 +109,16 @@ describe('readDroppedFolder · 한도', () => {
     expect(touched).toBeLessThanOrEqual(FOLDER_LIMITS.visits);
   });
 
-  it('숨김 항목만 가득해도 끝까지 걷지 않는다', async () => {
-    // 거르기(continue)가 예산(walkOn)보다 먼저면 visits 가 늘지 않아, 숨김 항목
-    // 수천 개짜리 폴더에서 순회가 한도를 비켜 가 끝나지 않았다 (spec §5.1).
+  it('does not walk to the end even when the folder is full of hidden entries', async () => {
+    // With filtering (continue) before the budget (walkOn), visits never grew, so
+    // a folder of thousands of hidden entries dodged the limit and the traversal
+    // never ended (spec §5.1).
     const children = Array.from({ length: FOLDER_LIMITS.visits + 500 }, (_, i) =>
       fileEntry(`.hidden${i}`, 1)
     );
-    // 예산이 숨김 항목에 다 쓰이므로 그 뒤의 진짜 문서에는 닿지 못한다 — 대신
-    // 잘렸다는 사실이 남아 사용자에게 그 사정을 말할 수 있다.
+    // The budget is spent entirely on hidden entries, so the real document behind
+    // them is never reached — but the truncation is recorded, so the user can be
+    // told what happened.
     children.push(fileEntry('index.html', 1));
 
     const read = await readDroppedFolder(drop(dirEntry('deck', children)));
@@ -124,7 +127,7 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.files.size).toBe(0);
   });
 
-  it('숨김 파일과 node_modules 는 지나친다', async () => {
+  it('skips hidden files and node_modules', async () => {
     const read = await readDroppedFolder(
       drop(
         dirEntry('deck', [
@@ -138,9 +141,9 @@ describe('readDroppedFolder · 한도', () => {
     expect([...(read?.files.keys() ?? [])]).toEqual(['deck/index.html']);
   });
 
-  it('열기 대화상자로 고른 폴더도 숨김 항목에 예산을 쓴다', async () => {
-    // 대화상자 쪽 순회(walk)는 드롭 쪽(walkEntry)과 별개 루프다 — 같은 결함이
-    // 양쪽에 있었으므로 양쪽 다 잡는다 (spec §5.1).
+  it('a folder chosen through the open dialog also spends budget on hidden entries', async () => {
+    // The dialog-side traversal (walk) is a separate loop from the drop side
+    // (walkEntry) — the same flaw lived in both, so both are pinned down (spec §5.1).
     const names = Array.from({ length: FOLDER_LIMITS.visits + 500 }, (_, i) => `.hidden${i}`);
     names.push('index.html');
     const dir = {
@@ -177,19 +180,19 @@ describe('readDroppedFolder · 한도', () => {
     expect(read?.files.size).toBe(0);
   });
 
-  it('폴더가 아니면 null — 그때는 파일로 연다', async () => {
+  it('null when nothing is a folder — then it opens as a file', async () => {
     expect(await readDroppedFolder(drop(fileEntry('deck.html', 1)))).toBeNull();
   });
 
-  it('드롭한 폴더에는 되쓸 핸들이 없다 — 저장은 사본으로 간다', async () => {
+  it('a dropped folder has no writable handles — saving goes to a copy', async () => {
     const read = await readDroppedFolder(drop(dirEntry('deck', [fileEntry('index.html', 1)])));
 
     expect(read?.handles.size).toBe(0);
   });
 });
 
-describe('폴더 깊이 한도 (spec §5.1)', () => {
-  /** 뿌리 아래에 폴더를 levels 층 겹치고 가장 안쪽에 파일 하나를 둔다 */
+describe('folder depth limit (spec §5.1)', () => {
+  /** Nests levels folders under the root, with one file at the innermost */
   function nestedDrop(levels: number): FileSystemEntry {
     let entry: FileSystemEntry = fileEntry('deep.css', 1);
     for (let i = levels; i >= 1; i--) entry = dirEntry(`d${i}`, [entry]);
@@ -232,24 +235,25 @@ describe('폴더 깊이 한도 (spec §5.1)', () => {
       'deep.css',
     ].join('/');
 
-  it('여덟째 층(depth)의 파일까지 담는다 — 드롭', async () => {
-    // `>=` 로 재면 한도 층이 통째로 잘려, depth: 8 이 사실상 7 이었다.
+  it('keeps files down to the eighth level (depth) — drop', async () => {
+    // Measured with `>=`, the limit level was cut off wholesale, so depth: 8 was effectively 7.
     const read = await readDroppedFolder(drop(nestedDrop(FOLDER_LIMITS.depth)));
 
     expect([...(read?.files.keys() ?? [])]).toEqual([deepPath('deck')]);
     expect(read?.truncated).toBe(false);
   });
 
-  it('아홉째 층은 담지 않고 잘렸다고 적는다 — 드롭', async () => {
+  it('does not keep the ninth level and records the truncation — drop', async () => {
     const read = await readDroppedFolder(drop(nestedDrop(FOLDER_LIMITS.depth + 1)));
 
     expect(read?.files.size).toBe(0);
     expect(read?.truncated).toBe(true);
   });
 
-  it('고른 폴더도 같은 층에서 잘린다 — 드롭 경로의 뿌리 이름은 깊이가 아니다', async () => {
-    // 드롭 쪽은 접두사가 뿌리 이름으로 시작하고 대화상자 쪽은 빈 접두사로 시작했다.
-    // 접두사에서 깊이를 되세면 같은 폴더가 고르면 되는데 놓으면 잘렸다 (spec §5.1).
+  it('a picked folder is cut at the same level — the root name in a drop path is not depth', async () => {
+    // The drop side's prefix starts with the root name, the dialog side's with an
+    // empty prefix. Re-deriving depth from the prefix meant the same folder fit
+    // when picked but was cut when dropped (spec §5.1).
     const w = window as unknown as { showDirectoryPicker: unknown };
 
     w.showDirectoryPicker = () => Promise.resolve(nestedPick(FOLDER_LIMITS.depth));
@@ -264,10 +268,11 @@ describe('폴더 깊이 한도 (spec §5.1)', () => {
   });
 });
 
-describe('readText · 바이트 그대로 읽는다 (spec §1 · 문서 인코딩)', () => {
-  it('앞머리의 BOM 을 지운 채 열지 않는다 (대원칙 1)', async () => {
-    // Blob.text() 는 BOM 을 지운다 — 그러면 고치지도 않은 문서의 첫 바이트가
-    // 저장본에서 사라진다. U+FEFF 가 문자열 맨 앞에 그대로 남아야 한다.
+describe('readText · reads the bytes as they are (spec §1 · document encoding)', () => {
+  it('never opens with the leading BOM stripped (Principle 1)', async () => {
+    // Blob.text() strips the BOM — the first byte of a document the user never
+    // touched would vanish from the saved file. U+FEFF must stay at the front of
+    // the string.
     const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const text = await readText(new Blob([bom, '<html><body>본문</body></html>']));
 
@@ -275,18 +280,18 @@ describe('readText · 바이트 그대로 읽는다 (spec §1 · 문서 인코�
     expect(text).toContain('<html>');
   });
 
-  it('CRLF 줄바꿈을 정리하지 않는다 (대원칙 1)', async () => {
+  it('does not tidy CRLF line endings (Principle 1)', async () => {
     const text = await readText(new Blob(['<p>줄1</p>\r\n<p>줄2</p>\r\n']));
     expect(text).toBe('<p>줄1</p>\r\n<p>줄2</p>\r\n');
   });
 
-  it('UTF-8 이 아니면 거절한다 — 깨진 채 열면 저장이 원본을 망가뜨린다 (대원칙 3)', async () => {
-    // EUC-KR 로 적힌 "한글" — 이어짐 바이트가 홀로 와서 올바른 UTF-8 열이 아니다.
+  it('rejects non-UTF-8 — opened broken, saving would ruin the original (Principle 3)', async () => {
+    // "한글" written in EUC-KR — stray continuation bytes make it invalid UTF-8.
     const eucKr = new Uint8Array([0xc7, 0xd1, 0xb1, 0xdb]);
     await expect(readText(new Blob([eucKr]))).rejects.toBeInstanceOf(NotUtf8Error);
   });
 
-  it('UTF-16 BOM 으로 시작하는 문서도 거절한다', async () => {
+  it('also rejects a document starting with a UTF-16 BOM', async () => {
     const utf16 = new Uint8Array([0xff, 0xfe, 0x41, 0x00, 0x42, 0x00]);
     await expect(readText(new Blob([utf16]))).rejects.toBeInstanceOf(NotUtf8Error);
   });

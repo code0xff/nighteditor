@@ -1,10 +1,12 @@
 /**
- * UI 언어 상태. localStorage 에 남기고 `<html lang>` 을 함께 갱신한다 (spec §1 · UI 언어).
+ * UI language state. Persisted in localStorage, updating `<html lang>` alongside
+ * (spec §1 · UI language).
  *
- * 테마(`lib/theme.ts`)와 달리 훅 로컬 상태로는 부족하다. 언어는 툴바·사이드바·알림이
- * 동시에 다시 그려져야 해서 공유 스토어가 필요하다.
+ * Unlike the theme (`lib/theme.ts`), hook-local state is not enough. A language
+ * change must redraw the toolbar, sidebar and notifications at once, so a shared
+ * store is needed.
  *
- * 첫 페인트 전에 <html lang> 을 맞추려면 (src/main.tsx, createRoot 앞에서):
+ * To set <html lang> before first paint (in src/main.tsx, before createRoot):
  *   import { initialLocale, applyLang } from "@/store/locale";
  *   applyLang(initialLocale());
  */
@@ -19,12 +21,12 @@ function readStored(): Locale | null {
   return isLocale(v) ? v : null;
 }
 
-/** 저장된 선택이 없으면 브라우저 언어를 따른다. 한국어가 아니면 영어 */
+/** Without a stored choice, follow the browser language. English unless it is Korean */
 export function initialLocale(): Locale {
   return readStored() ?? (navigator.language?.startsWith('ko') ? 'ko' : 'en');
 }
 
-/** 스크린리더·맞춤법 검사가 이 값을 본다 */
+/** Screen readers and spellcheckers read this value */
 export function applyLang(locale: Locale): void {
   document.documentElement.lang = locale;
 }
@@ -45,8 +47,9 @@ export const useLocale = create<LocaleState>((set) => ({
 }));
 
 /**
- * 화면에서 문구를 꺼내는 유일한 경로. 언어가 바뀌면 쓰는 컴포넌트가 다시 그려진다.
- * `t` 는 키로, `tn` 은 스토어가 들고 있는 `Notice` 로 문장을 만든다.
+ * The only path the screen takes to get its copy. A language change redraws every
+ * component that uses it. `t` builds a sentence from a key, `tn` from a `Notice`
+ * held by a store.
  */
 export function useI18n(): {
   locale: Locale;

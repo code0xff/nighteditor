@@ -5,23 +5,25 @@ import { previewAgent } from '@/preview/agent';
 import type { Block } from '@/core/types';
 
 /**
- * iframe 에 넣을 프리뷰 문서를 만든다.
+ * Builds the preview document for the iframe.
  *
- * `previewAgent` 를 **호출하지 않고 문자열화만** 한다 (ADR-007). 실행은 iframe 안에서
- * 일어나므로 호스트와 프리뷰는 여전히 별개 실행 컨텍스트이고, 통신은 postMessage 뿐이다.
+ * It **stringifies `previewAgent` without calling it** (ADR-007). Execution happens
+ * inside the iframe, so host and preview remain separate execution contexts and
+ * postMessage is their only channel.
  *
- * 자원 치환은 완성된 목록(`assetSwaps`)으로 받는다 (ADR-011) — 여기서 따로 계산하면
- * 되돌림 경계(assetBoundary)가 쓰는 표기와 어긋나는 짝이 생긴다. 없으면 문서를
- * 그대로 보여준다 (spec §5.1).
+ * Asset swaps arrive as a finished list (`assetSwaps`) (ADR-011) — computing them
+ * here separately would create pairs that disagree with the notation the reverse
+ * boundary (assetBoundary) uses. Without swaps the document is shown as-is (spec §5.1).
  *
- * 마커 주입과 자원 치환은 둘 다 원본 offset 을 쓴다. 따로 적용하면 앞선 편집이
- * 뒤쪽 offset 을 밀어 엉뚱한 자리를 자르므로 한 목록으로 모아 적용한다 (ADR-009).
+ * Marker injection and asset swaps both use original-source offsets. Applied
+ * separately, an earlier edit would shift later offsets and cut the wrong place,
+ * so they are merged into one list and applied together (ADR-009).
  */
 export function buildPreviewDocument(
   source: string,
   blocks: readonly Block[],
   swaps: readonly AssetSwap[] = [],
-  /** 이 문서의 표 — 에이전트가 모든 메시지에 붙인다 (spec §5 · 갈아 끼우기 예약) */
+  /** This document's token — the agent attaches it to every message (spec §5 · replacement reservation) */
   token = ''
 ): string {
   const edits = [

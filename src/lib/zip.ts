@@ -1,20 +1,22 @@
 /**
- * zip 해제. 압축 알고리즘은 브라우저가 가지고 있다 (`DecompressionStream`).
+ * zip extraction. The browser already owns the decompression algorithm
+ * (`DecompressionStream`).
  *
- * 라이브러리를 더하지 않는다 — zip 안의 압축은 헤더 없는 deflate 그대로라
- * `deflate-raw` 스트림에 그대로 흘려보내면 된다. 이 기기 밖으로는 아무것도 나가지 않는다.
+ * No library is added — the compressed data inside a zip is headerless deflate,
+ * so it can be piped straight into a `deflate-raw` stream. Nothing leaves this machine.
  */
 import { crc32, readZip, ZipError } from '@/core/zip';
 import { mimeOf } from './assets';
 import { FOLDER_LIMITS } from './fs';
 
-/** 그대로 담김(0) 과 deflate(8) 만 쓰인다. 그 밖은 실무에서 거의 없다 */
+/** Only stored (0) and deflate (8) are used. Anything else is nearly unheard of in practice */
 const STORED = 0;
 const DEFLATE = 8;
 
 /**
- * 한도를 들고 푼다. 목차의 크기는 조작될 수 있으므로 **실제로 나온 바이트**를 세고,
- * 넘는 순간 끊는다 — 다 풀어 놓고 재면 그 사이 탭이 이미 굳는다.
+ * Inflates under a budget. Sizes in the index can be forged, so count the **bytes
+ * actually produced** and cut off the moment they exceed the budget — measuring
+ * after inflating everything freezes the tab in the meantime.
  */
 async function inflate(data: Uint8Array, budget: number): Promise<{ blob: Blob; crc: number }> {
   const stream = new Blob([data as BlobPart])
@@ -23,8 +25,9 @@ async function inflate(data: Uint8Array, budget: number): Promise<{ blob: Blob; 
   const reader = stream.getReader();
   const chunks: BlobPart[] = [];
   let bytes = 0;
-  // CRC 는 조각이 나오는 자리에서 이어 잰다 — 다 모아 놓고 재면 한 버퍼로 다시
-  // 모으는 복사가 생기고, 그 복사가 곧 한도만큼의 메모리다.
+  // The CRC is accumulated where each chunk arrives — measuring after collecting
+  // everything means recopying into one buffer, and that copy costs a full budget
+  // worth of memory.
   let crc = 0;
   for (;;) {
     const { done, value } = await reader.read();
@@ -41,25 +44,29 @@ async function inflate(data: Uint8Array, budget: number): Promise<{ blob: Blob; 
 }
 
 /**
- * zip 을 경로 → 파일 묶음으로 푼다.
+ * Unpacks a zip into a path → file map.
  *
- * 푸는 데도 폴더와 같은 한도를 둔다. 압축은 작아도 풀면 얼마든지 커질 수 있어서,
- * 한도 없이 풀면 파일 몇 개짜리 zip 하나로 탭이 굳는다.
+ * Extraction runs under the same limits as folders. Compressed data can inflate to
+ * any size, so without a limit a zip of just a few files can freeze the tab.
  *
- * 목차(중앙 디렉터리)의 크기는 **빨리 거르는 데만** 쓴다. 목차만 믿으면 작다고 적어
- * 두고 크게 부푸는 조작된 zip 이 통과하므로, 한도는 실제로 나온 바이트로 다시 세고
- * 목차와 다르면 조작으로 보고 멈춘다 (대원칙 3).
+ * Sizes in the index (central directory) are used **only for early rejection**.
+ * Trusting the index alone lets a forged zip that claims to be small but inflates
+ * large slip through, so the limit is re-measured against the bytes actually
+ * produced, and a mismatch with the index is treated as forgery and stops the
+ * extraction (Principle 3).
  */
 /**
- * 압축 파일 자체에 허락하는 크기. 내용 한도에 헤더 몫(항목마다 로컬+중앙 헤더,
- * 끝에 최대 64KB 주석)을 조금 얹은 값이다 — deflate 는 원본보다 의미 있게 커지지
- * 않으므로, 이보다 큰 zip 은 풀어 봐야 어차피 내용 한도를 넘는다.
+ * The size allowed for the archive itself. It is the content limit plus a little
+ * headroom for headers (a local + central header per entry, up to a 64KB comment
+ * at the end) — deflate never grows meaningfully past the original, so a larger
+ * zip would exceed the content limit anyway once inflated.
  */
 const ARCHIVE_LIMIT = FOLDER_LIMITS.bytes + 1024 * 1024;
 
 export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
-  // 통째로 메모리에 올리기 **전에** 크기부터 본다. arrayBuffer() 는 전체 복사라,
-  // 한도를 훨씬 넘는 zip 은 목차를 읽기도 전에 복사만으로 탭을 굳힌다 (spec §5.1).
+  // Check the size **before** loading the whole thing into memory. arrayBuffer()
+  // is a full copy, so a zip far past the limit would freeze the tab on the copy
+  // alone, before the index is even read (spec §5.1).
   if (zip.size > ARCHIVE_LIMIT) {
     throw new ZipError('tooBig', {}, `archive is ${zip.size} bytes (limit ${ARCHIVE_LIMIT})`);
   }
@@ -67,9 +74,10 @@ export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
   const files = new Map<string, Blob>();
   let bytes = 0;
 
-  // 파일 수 한도는 readZip 이 목차를 읽는 동안 센다. 여기서 결과를 놓고 세면
-  // 거절할 zip 의 항목을 전부 만든 뒤에야 거절하게 되고, 같은 이름이 겹친 항목은
-  // files.size 에 눌려 한도를 비껴간다 (spec §5.1).
+  // The file-count limit is enforced while readZip walks the index. Counting the
+  // results here instead would mean building every entry of a zip we are about to
+  // reject, and duplicate names would collapse into files.size and dodge the
+  // limit (spec §5.1).
   for (const entry of readZip(new Uint8Array(await zip.arrayBuffer()), FOLDER_LIMITS.files)) {
     if (bytes + entry.size > FOLDER_LIMITS.bytes) {
       throw new ZipError('tooBig', {}, 'inflates past the budget');
@@ -91,13 +99,14 @@ export async function unzip(zip: Blob): Promise<Map<string, Blob>> {
         `unknown compression method (${entry.method}): ${entry.name}`
       );
     }
-    // 반쯤 맞는 파일을 조용히 붙이느니 여기서 멈춘다.
+    // Better to stop here than to silently attach a half-right file.
     if (blob.size !== entry.size) {
       throw new ZipError('sizeMismatch', { name: entry.name }, `size mismatch: ${entry.name}`);
     }
-    // 크기만으로는 모자란다 — 그대로 담긴 항목은 한 바이트가 뒤집혀도 크기가 같고,
-    // 깨진 deflate 스트림도 기대한 크기로 풀릴 수 있다. 목차의 CRC 로 실제 바이트를
-    // 검사해, 깨진 파일을 조용히 열지 않는다 (대원칙 3).
+    // Size alone is not enough — a stored entry keeps its size even with a flipped
+    // byte, and a corrupted deflate stream can still inflate to the expected size.
+    // Check the actual bytes against the index CRC so a broken file is never
+    // opened silently (Principle 3).
     if (crc !== entry.crc) {
       throw new ZipError('crcMismatch', { name: entry.name }, `crc mismatch: ${entry.name}`);
     }

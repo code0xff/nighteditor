@@ -1,13 +1,14 @@
 /**
- * 읽어들인 파일들을 프리뷰에 붙일 수 있는 `blob:` URL 묶음으로 만든다 (ADR-009).
+ * Turns the files that were read into a bundle of `blob:` URLs the preview can
+ * attach (ADR-009).
  *
- * 파일은 이 기기를 떠나지 않는다 (대원칙 5). blob URL 은 이 탭 안에서만 유효한
- * 이름표일 뿐, 어디로도 올라가지 않는다.
+ * Files never leave this machine (Principle 5). A blob URL is just a name tag
+ * valid inside this tab — nothing is uploaded anywhere.
  */
 import { cssAssetPaths, dirOf, rewriteCssUrls } from '@/core/assets';
 import type { AssetBundle } from './bundle';
 
-/** 확장자로 유추한 형식 */
+/** MIME type inferred from the extension */
 const MIME: Record<string, string> = {
   css: 'text/css',
   js: 'text/javascript',
@@ -34,8 +35,8 @@ const MIME: Record<string, string> = {
 };
 
 /**
- * 스타일시트는 형식을 붙여야 한다. 표준 모드의 브라우저는 `text/css` 가 아닌 응답을
- * 스타일시트로 쓰지 않으므로, 형식 없이 만든 blob 은 붙여도 적용되지 않는다.
+ * Stylesheets must carry a type. A standards-mode browser refuses to use a
+ * non-`text/css` response as a stylesheet, so a typeless blob attaches but never applies.
  */
 export function mimeOf(path: string): string {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -43,12 +44,13 @@ export function mimeOf(path: string): string {
 }
 
 /**
- * 이 파일의 blob 에 붙일 형식 — **아는 확장자면 확장자가 이긴다** (spec §5.1).
+ * The type for this file's blob — **a known extension wins** (spec §5.1).
  *
- * 폴더·드롭이 준 `File` 의 보고된 형식은 못 믿는다 — `.js` 를 `text/plain` 으로
- * 주는 환경이 있고, 그대로 blob 에 실으면 브라우저가 링크된 스크립트를 형식이
- * 다르다며 거절해 파일이 옆에 있는데도 프리뷰에서 돌지 않는다. 문서가 확장자로
- * 참조한 파일에 기대하는 형식은 확장자의 것이다. 모르는 확장자만 보고된 형식을 믿는다.
+ * The type reported on a `File` from a folder or a drop cannot be trusted — some
+ * environments report `.js` as `text/plain`, and carried onto the blob as-is the
+ * browser rejects the linked script for its type, so the preview fails even though
+ * the file is right there. The type a document expects for a file it references by
+ * extension is the extension's type. Only unknown extensions trust the reported type.
  */
 function typeFor(path: string, blob: Blob): string {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -60,14 +62,14 @@ function isCss(path: string): boolean {
 }
 
 /**
- * 파일 묶음을 blob URL 묶음으로 바꾼다.
+ * Turns a file map into a blob-URL bundle.
  *
- * CSS 는 나중에 만든다. 그 안의 `url()` 을 다른 자원의 blob URL 로 바꿔야
- * 하는데, 그러려면 그 자원들의 URL 이 먼저 있어야 한다.
+ * CSS is built last. The `url()` references inside it must be rewritten to the
+ * other assets' blob URLs, which means those URLs have to exist first.
  */
 export async function buildAssets(
   files: ReadonlyMap<string, Blob>,
-  /** 문서가 실제로 부르는 경로. 여기서 닿는 스타일시트만 훑는다 */
+  /** The paths the document actually references. Only stylesheets reachable from here are scanned */
   reachable?: readonly string[]
 ): Promise<AssetBundle> {
   const urls = new Map<string, string>();
@@ -84,28 +86,31 @@ export async function buildAssets(
     add(path, blob.type === type ? blob : new Blob([blob], { type }));
   }
 
-  // 스타일시트끼리도 서로를 부른다 (`@import url(…)`). 부르는 쪽의 blob 을 먼저
-  // 만들면 불리는 쪽의 URL 이 아직 없어 참조가 상대 경로로 남는다 — blob 문서에서
-  // 상대 경로는 풀리지 않는다. 그래서 무엇이 무엇을 부르는지 먼저 읽어 둔다.
+  // Stylesheets also reference each other (`@import url(…)`). Building the caller's
+  // blob first leaves the callee's URL missing, so the reference stays relative —
+  // and relative paths never resolve in a blob document. So read who references
+  // whom first.
   const sheets = new Map<string, { text: string; wants: string[] }>();
   for (const [path, blob] of files) {
     if (isCss(path)) sheets.set(path, { text: await blob.text(), wants: [] });
   }
   for (const [path, sheet] of sheets) {
-    // 스타일시트는 자기가 놓인 자리를 기준으로 자기 안의 경로를 푼다.
+    // A stylesheet resolves the paths inside it relative to where it sits.
     sheet.wants = cssAssetPaths(sheet.text, dirOf(path)).filter((p) => p !== path && sheets.has(p));
   }
 
-  // 불리는 쪽부터 만든다. 순환이면 더 기다려도 URL 은 생기지 않으므로 고리를 그대로
-  // 만들어야 하는데, 그때 **남은 것 전부**를 만들면 안 된다 — 고리를 밖에서 부르는
-  // 시트(문서의 진입 시트 등)까지 고리 멤버의 URL 이 생기기 전에 만들어져, 그 @import
-  // 가 상대 경로로 남아 blob 문서에서 영영 풀리지 않는다. 고리도 여럿일 수 있다 —
-  // 서로 얽힌 시트들(강결합 덩어리)이 한 단위고, 다른 고리에 기대는 고리를 한꺼번에
-  // 만들면 그 @import 도 같은 이유로 상대 경로로 남는다. 그래서 남은 시트에 더는
-  // 기대지 않는 **덩어리 하나**만 만들고, 기대던 쪽(고리든 낱장이든)은 다음 바퀴에서
-  // 방금 생긴 URL 을 달고 만든다 (spec §5.1).
+  // Build callees first. In a cycle, waiting longer never produces a URL, so the
+  // cycle must be built as-is — but not by building **everything left**: a sheet
+  // that references the cycle from outside (the document's entry sheet, say) would
+  // be built before the cycle members' URLs exist, leaving its @import relative
+  // and forever unresolved in a blob document. There can also be several cycles —
+  // mutually entangled sheets (a strongly connected component) are one unit, and
+  // building a cycle that leans on another cycle at the same time leaves that
+  // @import relative for the same reason. So build only **one component** that no
+  // longer leans on any remaining sheet; whatever leaned on it (cycle or single
+  // sheet) is built on the next lap with the freshly minted URLs (spec §5.1).
   const left = new Map(sheets);
-  /** start 에서 남은 시트의 @import 만 따라가 닿는 시트들 (자기 자신 포함 가능) */
+  /** Sheets reachable from start following only remaining sheets' @imports (may include start itself) */
   const reach = (start: string): Set<string> => {
     const seen = new Set<string>();
     const queue = [...(left.get(start)?.wants ?? [])];
@@ -118,27 +123,29 @@ export async function buildAssets(
     return seen;
   };
   /**
-   * 남은 시트끼리 서로 닿는 덩어리(강결합 덩어리) 중, 남은 다른 시트에 더는 기대지
-   * 않는 것 하나. ready 가 비었을 때만 부른다 — 그때 남은 모두가 남은 시트를
-   * 기다리는 중이라 고리가 반드시 있고, 덩어리 사이의 의존에는 고리가 없으므로
-   * (있다면 이미 한 덩어리다) 밖에 기댈 곳 없는 덩어리도 반드시 있다.
+   * One strongly connected component of the remaining sheets that no longer leans
+   * on any other remaining sheet. Called only when ready is empty — at that point
+   * everything left is waiting on a remaining sheet, so a cycle must exist, and
+   * since dependencies between components are acyclic (otherwise they would be one
+   * component) a component with nothing to lean on must exist too.
    */
   const sinkCycle = (): [string, { text: string; wants: string[] }][] => {
     for (const start of left.keys()) {
       const forward = reach(start);
-      if (!forward.has(start)) continue; // 고리의 멤버가 아니다
+      if (!forward.has(start)) continue; // not a member of a cycle
       const scc = new Set([start, ...[...forward].filter((p) => reach(p).has(start))]);
       const leans = [...scc].some((member) =>
         (left.get(member)?.wants ?? []).some((want) => left.has(want) && !scc.has(want))
       );
       if (!leans) return [...left].filter(([path]) => scc.has(path));
     }
-    // 여기 올 수 없다 — 그래도 온다면 남은 전부를 만들어 순회만은 끝낸다 (탭을 굳히지 않는다).
+    // Unreachable — but if we ever get here, build everything left so the loop at
+    // least terminates (never freeze the tab).
     return [...left];
   };
   while (left.size > 0) {
     const ready = [...left].filter(([, sheet]) => !sheet.wants.some((p) => left.has(p)));
-    // 매 바퀴 최소 한 장(ready 한 장 또는 덩어리 하나)은 만들어져 루프는 끝난다.
+    // Every lap builds at least one sheet (a ready one or one component), so the loop ends.
     const batch = ready.length > 0 ? ready : sinkCycle();
     for (const [path, sheet] of batch) {
       const css = rewriteCssUrls(sheet.text, dirOf(path), (p) => urls.get(p));
@@ -147,12 +154,14 @@ export async function buildAssets(
     }
   }
 
-  // 못 붙인 것은 **이 문서가 부르는** 스타일시트에서만 센다. 폴더에 굴러다니는 남의
-  // 스타일시트가 부르는 글꼴까지 세면, 이 문서와 아무 상관 없는 파일을 찾으라고 조른다.
+  // Missing assets are counted only from stylesheets **this document references**.
+  // Counting fonts wanted by some stranded stylesheet lying around the folder would
+  // nag the user to find files that have nothing to do with this document.
   const wanted = reachable ? new Set(reachable) : null;
-  // "부르는" 은 한 다리가 아니다 — 문서가 부른 시트가 @import 로 다른 시트를 부르면
-  // 그 시트가 부르는 것도 이 문서의 것이다. 문서에서 바로 닿는 시트만 보면 한 다리
-  // 건너의 깨진 참조가 조용히 넘어가, 화면은 깨졌는데 못 붙였다는 말이 없다 (대원칙 3).
+  // "References" is not one hop — if a sheet the document references @imports
+  // another sheet, what that sheet references belongs to this document too. Looking
+  // only at directly referenced sheets lets a broken reference one hop away slip
+  // through silently: the page is broken with no word about it (Principle 3).
   if (wanted) {
     const queue = [...wanted].filter((p) => sheets.has(p));
     for (let at = 0; at < queue.length; at++) {

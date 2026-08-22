@@ -9,7 +9,7 @@ afterEach(() => {
   dispose = null;
 });
 
-/** 실제 브라우저 키처럼 cancelable 로 보낸다 — preventDefault 여부를 봐야 한다 */
+/** Sent cancelable, like a real browser key — we must see whether preventDefault ran */
 function press(init: KeyboardEventInit): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
   window.dispatchEvent(e);
@@ -24,15 +24,15 @@ function mount() {
   return { save, downloadCopy, undo };
 }
 
-/** 입력 칸에 포커스가 있는 상황을 만든다 */
+/** Puts focus inside a text field */
 function field(tag: 'input' | 'textarea'): HTMLElement {
   const el = document.createElement(tag);
   document.body.append(el);
   return el;
 }
 
-describe('onEditorShortcuts · 저장', () => {
-  it('Ctrl+S 와 ⌘S 를 잡고 브라우저 기본 저장을 막는다', () => {
+describe('onEditorShortcuts · save', () => {
+  it('captures Ctrl+S and ⌘S and blocks the browser default save', () => {
     const { save, downloadCopy } = mount();
 
     expect(press({ key: 's', ctrlKey: true }).defaultPrevented).toBe(true);
@@ -41,7 +41,7 @@ describe('onEditorShortcuts · 저장', () => {
     expect(downloadCopy).not.toHaveBeenCalled();
   });
 
-  it('대문자 S 도 같다 — CapsLock 이 켜져 있어도 저장돼야 한다', () => {
+  it('uppercase S works too — saving must work with CapsLock on', () => {
     const { save } = mount();
 
     press({ key: 'S', ctrlKey: true });
@@ -50,8 +50,8 @@ describe('onEditorShortcuts · 저장', () => {
   });
 });
 
-describe('onEditorShortcuts · 사본 내려받기', () => {
-  it('Shift 가 끼면 사본 내려받기다 — 덮어쓰기와 갈라져야 한다', () => {
+describe('onEditorShortcuts · download a copy', () => {
+  it('with Shift it downloads a copy — it must diverge from overwriting', () => {
     const { save, downloadCopy } = mount();
 
     const e = press({ key: 's', ctrlKey: true, shiftKey: true });
@@ -62,8 +62,8 @@ describe('onEditorShortcuts · 사본 내려받기', () => {
   });
 });
 
-describe('onEditorShortcuts · 건드리지 않는 것', () => {
-  it('수식키 없는 s 와 Alt 조합은 흘려보낸다', () => {
+describe('onEditorShortcuts · what it leaves alone', () => {
+  it('lets plain s and Alt combos pass through', () => {
     const { save, downloadCopy } = mount();
 
     const plain = press({ key: 's' });
@@ -74,7 +74,7 @@ describe('onEditorShortcuts · 건드리지 않는 것', () => {
     expect([plain.defaultPrevented, alt.defaultPrevented]).toEqual([false, false]);
   });
 
-  it('떼면 더 이상 잡지 않는다', () => {
+  it('stops capturing once removed', () => {
     const save = vi.fn();
     const downloadCopy = vi.fn();
     const undo = vi.fn();
@@ -86,8 +86,8 @@ describe('onEditorShortcuts · 건드리지 않는 것', () => {
   });
 });
 
-describe('onEditorShortcuts · 되돌리기', () => {
-  it('Ctrl+Z 는 마지막 변경을 되돌린다', () => {
+describe('onEditorShortcuts · undo', () => {
+  it('Ctrl+Z reverts the last change', () => {
     const { undo, save } = mount();
 
     const e = press({ key: 'z', ctrlKey: true });
@@ -97,7 +97,7 @@ describe('onEditorShortcuts · 되돌리기', () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('입력 칸 안에서는 비껴간다 — 제목을 고치다 누른 Ctrl+Z 는 그 칸의 undo 다', () => {
+  it("steps aside inside text fields — Ctrl+Z while fixing the title is that field's undo", () => {
     const { undo } = mount();
     const input = field('input');
 
@@ -114,7 +114,7 @@ describe('onEditorShortcuts · 되돌리기', () => {
     input.remove();
   });
 
-  it('Ctrl+Shift+Z(redo)는 잡지 않는다 — 다시 실행은 없다', () => {
+  it('does not capture Ctrl+Shift+Z (redo) — there is no redo', () => {
     const { undo } = mount();
 
     const e = press({ key: 'z', ctrlKey: true, shiftKey: true });

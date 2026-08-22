@@ -1,19 +1,20 @@
 /**
- * 파일 열기/저장. File System Access API 를 쓰고, 없으면 내려받기로 폴백한다 (ADR-006).
+ * File open/save. Uses the File System Access API, falling back to downloads
+ * without it (ADR-006).
  *
- * 원본 파일을 그대로 덮어쓰려면 핸들이 필요하다. Chromium 계열만 지원하므로
- * 그 외 브라우저에서는 "열었던 파일에 저장"이 성립하지 않는다.
+ * Overwriting the original file in place requires a handle. Only Chromium-based
+ * browsers support it, so elsewhere "save back to the opened file" does not exist.
  */
 
 interface FileHandle {
   readonly name: string;
   getFile(): Promise<File>;
   createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void> }>;
-  /** 같은 파일을 가리키는지. 폴더 연결이 핸들을 남기기 전의 증명에 쓴다 (spec §5.1) */
+  /** Whether this points at the same file. Used as proof before folder linking keeps a handle (spec §5.1) */
   isSameEntry?(other: FileHandle): Promise<boolean>;
 }
 
-/** 폴더 안을 훑기 위한 최소한의 모양 (lib.dom 에 아직 없다) */
+/** The minimal shape needed to walk a folder (not in lib.dom yet) */
 interface DirectoryHandle {
   readonly name: string;
   entries(): AsyncIterableIterator<[string, FileHandle | DirectoryHandle]>;
@@ -28,7 +29,7 @@ interface PickerWindow {
   showDirectoryPicker?: (options?: unknown) => Promise<DirectoryHandle>;
 }
 
-/** File Handling API — 설치된 PWA 가 OS 에서 파일과 함께 실행될 때 넘어온다 */
+/** File Handling API — arrives when the installed PWA is launched by the OS with a file */
 interface LaunchQueue {
   setConsumer(consumer: (params: { files: FileHandle[] }) => void): void;
 }
@@ -36,30 +37,32 @@ interface LaunchQueue {
 export interface OpenedFile {
   name: string;
   text: string;
-  /** null 이면 덮어쓰기가 불가능해 내려받기로만 저장한다 */
+  /** null means overwriting is impossible; saving goes through downloads only */
   handle: FileHandle | null;
   /**
-   * 묶음(폴더·zip) 안에서의 경로. 자원의 상대 경로를 이 자리 기준으로 푼다.
-   * 파일 하나만 열었으면 없다 — 그때는 이름이 곧 경로다.
+   * The path inside the bundle (folder or zip). Relative asset paths resolve from
+   * here. Absent when a single file was opened — then the name is the path.
    */
   path?: string;
 }
 
 export type SaveResult = 'overwritten' | 'downloaded';
 
-/** UTF-8 이 아닌 문서 — 열지 않는다. 사용자 문장은 언어팩이 만든다 (spec §1) */
+/** A non-UTF-8 document — not opened. The user-facing sentence comes from the language pack (spec §1) */
 export class NotUtf8Error extends Error {}
 
 /**
- * 문서 텍스트를 바이트에서 읽는다 (spec §1 · 문서 인코딩).
+ * Reads document text from bytes (spec §1 · document encoding).
  *
- * `Blob.text()` 를 쓰지 않는다 — 그 해독은 맨 앞의 BOM(EF BB BF)을 조용히 지워,
- * 고치지도 않은 문서의 첫 바이트가 저장본에서 사라진다 (대원칙 1·2). `ignoreBOM` 은
- * "BOM 을 특별 취급하지 말라" 는 뜻이라 U+FEFF 가 문자열 맨 앞에 그대로 남고,
- * 저장이 그 문자열을 UTF-8 로 되쓰면 같은 바이트로 돌아간다.
+ * `Blob.text()` is not used — its decoding silently strips a leading BOM (EF BB
+ * BF), so the first byte of a document the user never touched would vanish from
+ * the saved file (Principles 1 and 2). `ignoreBOM` means "do not treat the BOM
+ * specially", so U+FEFF stays at the front of the string, and when saving writes
+ * that string back as UTF-8 it becomes the same bytes again.
  *
- * UTF-8 이 아니면 여기서 거절한다(fatal) — U+FFFD 로 바꿔 가며 열면 깨진 글자가
- * 문서 행세를 하고, 저장이 그 깨진 결과를 되써서 원본을 조용히 망가뜨린다 (대원칙 3).
+ * Non-UTF-8 input is rejected right here (fatal) — opened with U+FFFD
+ * substitutions, mojibake would pose as the document, and saving would write that
+ * broken result back, quietly ruining the original (Principle 3).
  */
 export async function readText(blob: Blob): Promise<string> {
   const bytes = await blob.arrayBuffer();
@@ -78,14 +81,16 @@ export function canOverwrite(): boolean {
 }
 
 /**
- * 폴더 하나를 통째로 읽는 데 두는 한도.
+ * The limits on reading one whole folder.
  *
- * 사용자가 실수로 홈 디렉터리를 고를 수 있다. 한도가 없으면 탭이 굳는다.
- * 넘치면 조용히 자르지 않고 거기서 멈춘 사실을 부르는 쪽에 알린다 (대원칙 3).
+ * The user can pick their home directory by accident. Without limits, the tab
+ * freezes. On overflow, the caller is told the read stopped there instead of
+ * being cut silently (Principle 3).
  *
- * `visits` 는 담는 수가 아니라 **훑는 항목 수**의 상한이다. 담긴 수(files)만 보면
- * 한도보다 큰 파일이 가득한 폴더에서 하나도 못 담은 채 끝까지 걸어 탭이 굳는다 —
- * 담지 못한 항목도 걷는 값은 치르므로, 순회 자체를 따로 묶는다 (spec §5.1).
+ * `visits` caps **entries walked**, not entries kept. Watching only the kept
+ * count (files), a folder full of over-limit files would be walked to the end
+ * with nothing kept, freezing the tab — entries that are not kept still cost the
+ * walk, so traversal gets its own budget (spec §5.1).
  */
 export const FOLDER_LIMITS = {
   files: 500,
@@ -97,20 +102,21 @@ export const FOLDER_LIMITS = {
 export interface FolderRead {
   files: Map<string, File>;
   /**
-   * 되쓸 수 있는 파일의 핸들.
+   * Handles of files that can be written back.
    *
-   * 열기 대화상자로 고른 폴더에서만 채워진다. 드롭으로 받은 폴더는 옛 API 라
-   * 쓰기 권한을 주지 않아 비어 있고, 그때는 저장이 사본 내려받기로 간다.
+   * Filled only for folders chosen through the open dialog. A dropped folder
+   * comes through the legacy API which grants no write permission, so this stays
+   * empty and saving goes to download-a-copy.
    */
   handles: Map<string, FileHandle>;
-  /** 한도에 걸려 다 읽지 못했다 */
+  /** A limit was hit before everything could be read */
   truncated: boolean;
 }
 
-/** 걸어가는 동안의 누계. 한도를 재귀 사이에서 이어 세려면 한 곳에 모아야 한다 */
+/** Running totals during the walk. Limits must accumulate across recursion, so they live in one place */
 interface Walk extends FolderRead {
   bytes: number;
-  /** 훑은 항목 수 — 담았는지도, 걸렀는지도 무관하게 센다. 순회를 끊는 기준이다 */
+  /** Entries walked — counted whether kept or filtered. The criterion that cuts traversal off */
   visits: number;
 }
 
@@ -119,10 +125,12 @@ function emptyWalk(): Walk {
 }
 
 /**
- * 더 걸어도 되는가. 아니면 잘렸다고 적고 순회 전체를 끊는다.
+ * May the walk continue. If not, records the truncation and cuts the whole
+ * traversal off.
  *
- * 재귀 안에서 예산이 바닥나면 return 은 한 층만 빠져나온다 — 부모 루프도 매 항목마다
- * 이 검사를 다시 하므로, 바닥난 예산이 위층까지 차례로 순회를 멈춘다.
+ * When the budget runs out inside recursion, return only exits one level — but
+ * the parent loop re-runs this check on every entry, so the exhausted budget
+ * stops traversal level by level all the way up.
  */
 function walkOn(into: Walk): boolean {
   if (into.files.size >= FOLDER_LIMITS.files || into.visits >= FOLDER_LIMITS.visits) {
@@ -142,8 +150,9 @@ export function canPickFolder(): boolean {
 }
 
 /**
- * @param depth 고른 폴더를 0층으로 센 현재 층. 접두사에서 되세면 드롭 쪽과 셈이
- *   어긋난다 — 드롭 경로는 뿌리 이름을 담지만 그 이름은 깊이가 아니다 (spec §5.1)
+ * @param depth the current level, with the chosen folder as level 0. Re-deriving
+ *   it from the prefix would disagree with the drop side — drop paths carry the
+ *   root name, but that name is not depth (spec §5.1)
  */
 async function walk(
   dir: DirectoryHandle,
@@ -152,15 +161,17 @@ async function walk(
   into: Walk
 ): Promise<void> {
   for await (const [name, handle] of dir.entries()) {
-    // 예산은 거르기 **전에** 쓴다. 거르는 데도 걷는 값은 들어서, 지나친 항목을 안
-    // 세면 숨김 항목만 수천 개인 폴더에서 순회가 한도를 비켜 가 끝나지 않는다 (spec §5.1).
+    // Spend the budget **before** filtering. Filtering still costs the walk, and
+    // uncounted skipped entries would let a folder of thousands of hidden entries
+    // dodge the limit and never finish (spec §5.1).
     if (!walkOn(into)) return;
-    // 숨김 폴더와 의존성 더미는 자원일 리 없고 파일 수만 폭발시킨다.
+    // Hidden folders and dependency piles cannot be assets and only explode the file count.
     if (name.startsWith('.') || name === 'node_modules') continue;
 
     const path = prefix ? `${prefix}/${name}` : name;
     if (isDirectory(handle)) {
-      // 여덟째 층(depth)까지는 들어간다. >= 로 재면 한도 층이 통째로 잘린다.
+      // Descend as far as the eighth level (depth). Measured with >=, the limit
+      // level would be cut off wholesale.
       if (depth + 1 > FOLDER_LIMITS.depth) {
         into.truncated = true;
         continue;
@@ -173,10 +184,11 @@ async function walk(
 }
 
 /**
- * 한도 안이면 담는다.
+ * Keeps the file if it fits the budget.
  *
- * **크기는 담기 전에 본다.** 담고 나서 누계를 더하면 한 파일이 한도보다 커도 그대로
- * 들어가고, 마지막 파일이 선을 넘어도 넘은 줄 모른 채 끝난다.
+ * **Size is checked before keeping.** Adding to the total after keeping would let
+ * a single file larger than the limit straight in, and the last file could cross
+ * the line without anyone knowing.
  */
 function keep(into: Walk, path: string, file: File, handle?: FileHandle): void {
   if (into.bytes + file.size > FOLDER_LIMITS.bytes) {
@@ -189,14 +201,15 @@ function keep(into: Walk, path: string, file: File, handle?: FileHandle): void {
 }
 
 /**
- * 폴더를 열어 안의 파일을 전부 읽는다. 사용자가 취소하면 null.
+ * Opens a folder and reads every file inside. null if the user cancels.
  *
- * 파일 하나를 여는 것만으로는 형제 파일을 볼 권한이 없다 (spec §5.1).
- * 자원을 붙이려면 사용자가 폴더를 직접 내줘야 한다.
+ * Opening one file grants no right to see its siblings (spec §5.1).
+ * To attach assets, the user must hand over the folder themselves.
  *
- * @param startIn 이 파일이 있던 자리에서 대화상자를 연다 — 대개 그 폴더가 정답이다
- * @param mode `readwrite` 면 브라우저가 편집 허용까지 묻고, 그 대신 되쓸 수 있는 핸들이 온다.
- *   자원만 붙이러 갈 때는 `read` 로 둔다 — 필요 없는 권한을 묻지 않는다
+ * @param startIn opens the dialog where this file lived — usually that folder is the answer
+ * @param mode with `readwrite` the browser also asks to allow editing, and writable
+ *   handles come back in exchange. Going in just to attach assets, leave it at
+ *   `read` — never ask for permissions that are not needed
  */
 export async function pickFolder(
   startIn?: FileHandle | null,
@@ -216,44 +229,46 @@ export async function pickFolder(
   }
 }
 
-/** 핸들에서 읽는다. 핸들이 있으므로 나중에 원본을 덮어쓸 수 있다. */
+/** Reads from a handle. Having the handle means the original can be overwritten later. */
 export async function fromHandle(handle: FileHandle): Promise<OpenedFile> {
   const file = await handle.getFile();
   return { name: handle.name, text: await readText(file), handle };
 }
 
 /**
- * OS 가 이 앱으로 파일을 열었을 때 받는다 (manifest 의 file_handlers).
+ * Receives files the OS opened with this app (file_handlers in the manifest).
  *
- * 파일 선택 대화상자를 거치지 않고도 핸들이 오므로 덮어쓰기 저장이 그대로 된다.
- * 지원하지 않는 환경에서는 아무 일도 하지 않는다.
+ * The handle arrives without a file picker, so overwrite-save just works.
+ * Does nothing in environments without support.
  */
 export function onFileLaunch(handler: (file: Promise<OpenedFile>) => void): void {
   const queue = (window as unknown as { launchQueue?: LaunchQueue }).launchQueue;
   if (!queue) return;
   queue.setConsumer((params) => {
     const handle = params.files[0];
-    // 읽기를 기다리지 않고 프라미스째 건넨다 — 받는 쪽이 갈아 끼우기 예약을 읽기
-    // **전에** 잡아야, 읽는 사이 사용자가 연 더 새 흐름이 밀려나지 않는다 (spec §5).
+    // Hands the promise over without awaiting the read — the receiver must take
+    // its replacement reservation **before** the read, so a newer flow the user
+    // starts during the read is not displaced (spec §5).
     if (handle) handler(fromHandle(handle));
   });
 }
 
 /**
- * 고른 파일 — 아직 HTML 인지 zip 인지 가리지 않은 상태다.
+ * A picked file — not yet sorted into HTML or zip.
  *
- * 내용을 읽어 무엇인지 판단하는 것은 스토어의 몫이다. 여기서는 파일과 핸들만 건넨다.
+ * Reading the content and deciding what it is belongs to the store. Only the file
+ * and its handle are handed over here.
  */
 export interface Picked {
   name: string;
   blob: Blob;
-  /** null 이면 덮어쓸 수 없다 (드롭·zip) */
+  /** null means it cannot be overwritten (drop, zip) */
   handle: FileHandle | null;
 }
 
 export const ACCEPT = '.html,.htm,.zip';
 
-/** 사용자가 취소하면 null 을 돌려준다 */
+/** Returns null when the user cancels */
 export async function pickFile(): Promise<Picked | null> {
   const show = picker();
   if (!show) return pickViaInput();
@@ -271,26 +286,28 @@ export async function pickFile(): Promise<Picked | null> {
     if (!handle) return null;
     return { name: handle.name, blob: await handle.getFile(), handle };
   } catch (e) {
-    // 사용자가 취소한 경우는 오류가 아니다.
+    // The user cancelling is not an error.
     if (e instanceof DOMException && e.name === 'AbortError') return null;
     throw e;
   }
 }
 
-/** 드래그&드롭이나 <input type=file> 로 받은 파일 — 핸들이 없어 덮어쓸 수 없다 */
+/** A file from drag-and-drop or <input type=file> — no handle, so it cannot be overwritten */
 export function droppedFile(file: File): Picked {
   return { name: file.name, blob: file, handle: null };
 }
 
 /**
- * 드롭한 것 중 **폴더**를 읽는다. 폴더가 없으면 null (그때는 파일로 처리한다).
+ * Reads the **folders** among what was dropped. null if there were none (then it
+ * is handled as a file).
  *
- * 드롭은 `showDirectoryPicker` 와 다른 옛 API 로만 폴더를 준다. 쓰기 권한은 없어서
- * 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
+ * Drops hand folders over only through a legacy API, different from
+ * `showDirectoryPicker`. It grants no write permission, so saving goes to
+ * download-a-copy — plenty for attaching assets to look at.
  */
 export async function readDroppedFolder(items: DataTransferItemList): Promise<FolderRead | null> {
   const roots: FileSystemDirectoryEntry[] = [];
-  // items 는 이벤트가 끝나면 비므로 지금 다 꺼내 둔다.
+  // items empties once the event ends, so pull everything out now.
   for (const item of items) {
     const entry = item.webkitGetAsEntry?.();
     if (entry?.isDirectory) roots.push(entry as FileSystemDirectoryEntry);
@@ -302,7 +319,7 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
   return done(read);
 }
 
-/** 옛 API 는 콜백뿐이다. 한 번에 다 주지 않으므로 빈 배열이 올 때까지 다시 읽는다 */
+/** The legacy API is callbacks only. It does not hand everything over at once, so read again until an empty batch */
 function readEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
   return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
 }
@@ -312,9 +329,10 @@ function fileOf(entry: FileSystemFileEntry): Promise<File> {
 }
 
 /**
- * @param depth 놓은 폴더를 0층으로 센 현재 층 — 위의 walk 와 같은 잣대다 (spec §5.1).
- *   접두사에는 뿌리 이름이 들어 있어 되세면 안 된다 — 같은 폴더를 고르면 되는데
- *   놓으면 한 층 일찍 잘린다
+ * @param depth the current level, with the dropped folder as level 0 — the same
+ *   yardstick as walk above (spec §5.1). The prefix contains the root name, so it
+ *   must not be re-derived — the same folder would fit when picked but be cut a
+ *   level early when dropped
  */
 async function walkEntry(
   dir: FileSystemDirectoryEntry,
@@ -329,13 +347,14 @@ async function walkEntry(
     if (batch.length === 0) return;
 
     for (const entry of batch) {
-      // 예산이 거르기보다 먼저다 — 위의 walk 와 같은 이유다 (spec §5.1).
+      // Budget before filtering — same reason as walk above (spec §5.1).
       if (!walkOn(into)) return;
       if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
       const path = `${prefix}/${entry.name}`;
       if (entry.isDirectory) {
-        // 여덟째 층(depth)까지는 들어간다. >= 로 재면 한도 층이 통째로 잘린다.
+        // Descend as far as the eighth level (depth). Measured with >=, the limit
+        // level would be cut off wholesale.
         if (depth + 1 > FOLDER_LIMITS.depth) {
           into.truncated = true;
           continue;
@@ -357,7 +376,7 @@ function pickViaInput(): Promise<Picked | null> {
       const file = input.files?.[0];
       resolve(file ? droppedFile(file) : null);
     };
-    // 취소를 처리하지 않으면 프라미스가 영영 안 풀려 여는 흐름이 끝나지 못한다.
+    // Without handling cancel, the promise never settles and the opening flow cannot end.
     input.oncancel = () => resolve(null);
     input.click();
   });
@@ -374,13 +393,13 @@ export async function saveFile(file: OpenedFile, text: string): Promise<SaveResu
   return 'downloaded';
 }
 
-/** 브라우저 다운로드로 내려보낸다. 다운로드 폴더에만 쓸 수 있어 원본은 건드리지 않는다. */
+/** Sends the text out as a browser download. It can only write to the downloads folder, leaving the original untouched. */
 export function downloadFile(name: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/html' }));
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
-  // 문서에 붙이지 않거나 곧바로 revoke 하면 브라우저에 따라 내려받기가 취소된다.
+  // Not attaching to the document, or revoking immediately, cancels the download in some browsers.
   document.body.appendChild(a);
   a.click();
   a.remove();

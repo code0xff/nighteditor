@@ -1,21 +1,23 @@
 /**
- * 붙인 자원 묶음의 **모양만** 있는 곳.
+ * The **shape only** of an attached-asset bundle.
  *
- * 스토어는 파일을 열기 전에도 빈 묶음이 필요하다. 그렇다고 `lib/assets` 에서 가져오면
- * 그 파일이 `core/assets` 를 거쳐 parse5 를 끌고 와, 파서가 초기 번들에 실린다 (ADR-008).
- * 파일을 열기 전에는 파서가 한 줄도 쓰이지 않아야 한다.
+ * The store needs an empty bundle before any file is opened. But importing it from
+ * `lib/assets` would pull parse5 in through `core/assets`, putting the parser in the
+ * initial bundle (ADR-008). Before a file is opened, not a single line of the parser
+ * should be loaded.
  */
 
 export interface AssetBundle {
-  /** 자원 경로 → blob URL */
+  /** asset path → blob URL */
   urls: ReadonlyMap<string, string>;
   /**
-   * 붙인 스타일시트가 부르는데 묶음에 없던 것.
+   * Referenced by an attached stylesheet but absent from the bundle.
    *
-   * 문서의 속성만 봐서는 알 수 없다 — CSS 안의 글꼴과 배경은 그 파일을 열어봐야 나온다.
+   * The document's attributes alone cannot tell — fonts and backgrounds inside CSS
+   * only show up once that file is opened.
    */
   missing: readonly string[];
-  /** 다 쓰면 반드시 부른다. 안 부르면 blob 이 탭을 닫을 때까지 메모리에 남는다 */
+  /** Must be called when done. Otherwise the blobs stay in memory until the tab closes */
   dispose: () => void;
 }
 

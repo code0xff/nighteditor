@@ -33,151 +33,166 @@ import { documentCandidates } from '@/core/bundle';
 
 export interface EditorState {
   file: OpenedFile | null;
-  /** 로드한 원본. 세션 내내 바뀌지 않는다 (INV-1) */
+  /** The loaded original. Never changes for the whole session (INV-1) */
   source: string;
   blocks: Block[];
   previewDoc: string;
   /**
-   * 지금 프리뷰 문서의 표 (spec §5). iframe 은 재사용되고 `srcDoc` 을 갈아 끼워도
-   * `contentWindow` 신원은 그대로라, 옛 문서의 에이전트가 띄워 둔 메시지가 새 문서가
-   * 선 뒤에 도착하면 출처 검사를 통과한다 — 블록 id 는 문서마다 0부터 다시 시작해
-   * 옛 내용·잠금이 새 문서를 건드린다. 에이전트는 모든 메시지에 이 표를 붙이고,
-   * PreviewFrame 은 표가 다른 메시지를 버린다. 문서가 없으면 빈 문자열이다.
+   * The current preview document's token (spec §5). The iframe is reused and
+   * swapping `srcDoc` keeps the `contentWindow` identity, so a message the old
+   * document's agent left in flight passes the origin check if it arrives after
+   * the new document stands — and block ids restart at 0 per document, so old
+   * content and locks would touch the new document. The agent attaches this token
+   * to every message, and PreviewFrame drops messages with a different token.
+   * The empty string when there is no document.
    */
   previewToken: string;
-  /** 블록 id → 편집된 innerHTML */
+  /** block id → edited innerHTML */
   patches: Map<number, string>;
   selectedId: number | null;
-  /** 잠긴 블록을 눌렀을 때 이유를 보여주기 위한 표시 */
+  /** Marks the block whose lock reason is being shown after a click */
   blockedId: number | null;
-  /** 프리뷰에 되돌리라고 보낼 목록. PreviewFrame 이 보내고 비운다 */
+  /** The list of reverts to send to the preview. PreviewFrame sends and drains it */
   revertQueue: { id: number; html: string }[];
-  /** 프리뷰에 보여 달라고 부탁할 블록. 보내고 나면 비운다 */
+  /** The block the preview is asked to reveal. Cleared once sent */
   revealId: number | null;
   /**
-   * 확정한 순서대로의 블록 id (마지막이 가장 최근). `patches` 는 Map 이라
-   * 같은 블록을 다시 고치면 처음 넣은 자리에 머물러 "마지막 변경"을 알 수 없다.
+   * Block ids in commit order (the last is the most recent). `patches` is a Map,
+   * so a block edited again stays where it was first inserted and "the last
+   * change" cannot be read off it.
    */
   editOrder: number[];
   scanned: boolean;
   /**
-   * 저장이 파일을 쓰는 중이다 — 저장 버튼·대화상자의 저장이 겹쳐 돌지 않게 하는
-   * **저장만의** 표시다. 갈아 끼우기의 화면 잠금은 예약(replacement.ts)이 따로
-   * 들고 있어, 앞선 저장이 끝나도 그 잠금은 풀리지 않는다 (spec §5 · ADR-010).
+   * A save is writing the file — an indicator **owned by saving alone**, keeping
+   * the save button and the dialog's save from running on top of each other. The
+   * replacement's screen lock is held separately by the reservation
+   * (replacement.ts), so an earlier save finishing never lowers that lock
+   * (spec §5 · ADR-010).
    */
   saving: boolean;
   /**
-   * 아직 파일에 없는 편집이 있다 — 지금 만들 결과물이 `savedText` 와 다르다 (spec §5).
+   * There are edits not yet in the file — the output built right now differs from
+   * `savedText` (spec §5).
    *
-   * `patches` 로는 어느 방향으로도 알 수 없다 — 저장해도 `source` 는 원본 그대로라(INV-1)
-   * 패치 목록이 그대로 남고(그걸 "저장 안 함" 으로 읽으면 저장한 뒤에도 계속 되묻는다),
-   * 반대로 저장한 적 없는 편집을 되돌리면 패치가 없어져도 잃을 것 자체가 없다.
+   * `patches` cannot tell in either direction — after a save, `source` stays the
+   * original (INV-1) so the patch list survives (read as "not saved" it would
+   * keep asking after every save), and conversely reverting a never-saved edit
+   * removes the patch while there was nothing to lose in the first place.
    */
   unsaved: boolean;
   /**
-   * 파일이 들고 있는 내용 — 열 때 읽은 그대로였다가, 저장할 때마다 쓴 결과물로 갱신된다.
-   * `unsaved` 는 언제나 이것과의 비교다. 저장 경로의 입력은 아니다 (그건 `source`, INV-1).
+   * What the file holds — as read when opened, then updated to each save's
+   * output. `unsaved` is always a comparison against this. It is not an input to
+   * the save path (that is `source`, INV-1).
    */
   savedText: string;
   /**
-   * 저장이 지금 쓰고 있는 결과물. 쓰기가 끝나면 파일이 들 내용이 이것이라, 쓰는 동안의
-   * "파일과 다른가" 는 옛 `savedText` 가 아니라 이것과 견준다 (spec §5) — 옛것과
-   * 견주면 쓰는 사이에 편집을 되돌렸을 때 잃을 것이 없다고 읽혀, 그 창에서 탭을
-   * 닫으면 경고 없이 닫히고 화면과 디스크가 어긋난다. 저장 중이 아니면 null 이다.
+   * The output a save is writing right now. Once the write finishes this is what
+   * the file holds, so "does it differ from the file" during the write compares
+   * against this, not the old `savedText` (spec §5) — compared to the old one, an
+   * edit reverted mid-write would read as nothing-to-lose, the tab would close
+   * without warning in that window, and screen and disk would disagree. null when
+   * no save is running.
    */
   pendingText: string | null;
   /**
-   * 마지막 저장 때 파일에 들어간 패치들 — `savedText` 의 블록별 대응물.
-   * 물음의 "{count}곳" 이 지금 `patches` 와 이것의 차이를 센다 (spec §4 · `unsavedCount`).
-   * 저장 경로의 입력이 아니다 — 그건 `patches` 와 `source` 다 (INV-1).
+   * The patches that went into the file at the last save — `savedText`'s per-block
+   * counterpart. The question's "{count} spots" counts the difference between the
+   * current `patches` and this (spec §4 · `unsavedCount`). Not an input to the
+   * save path — that is `patches` and `source` (INV-1).
    */
   savedPatches: ReadonlyMap<number, string>;
-  /** 완성된 문장이 아니라 메시지 키다 — 언어를 바꾸면 알림도 함께 바뀐다 (spec §1) */
+  /** A message key, not a finished sentence — switching the language changes the notice too (spec §1) */
   notice: Notice | null;
 
-  /** 문서가 참조하는 외부 자원 (spec §5.1) */
+  /** External assets the document references (spec §5.1) */
   assetRefs: AssetRef[];
   /**
-   * 세는 대상이 되는 자원 경로 전부.
+   * Every asset path that gets counted.
    *
-   * 문서의 속성만으로는 모자란다 — `<style>` 과 붙인 스타일시트 안의 `url()` 도
-   * 못 붙으면 화면이 깨진다. 참조가 아니라 **파일** 단위로 센다.
+   * The document's attributes are not enough — a `url()` inside `<style>` or an
+   * attached stylesheet also breaks the page when it cannot attach. Counted per
+   * **file**, not per reference.
    */
   assetPaths: string[];
-  /** 붙인 자원. 파일을 바꿔 열면 이전 것을 반드시 놓아준다 */
+  /** Attached assets. Opening another file must release the previous ones */
   assets: AssetBundle;
   /**
-   * 프리뷰와 저장 사이의 양방향 경계 (ADR-011). 자원 치환은 블록 안에서도 일어나므로,
-   * 프리뷰에서 돌아온 편집은 여기서 원문 표기로 되돌린 뒤에야 패치가 되고(INV-9),
-   * 되돌리기로 프리뷰에 밀어 넣는 원본 조각은 여기서 치환한 뒤에 나간다.
-   * null 이면 치환된 자원이 없다 — 양방향 모두 원문 그대로다.
+   * The two-way boundary between preview and save (ADR-011). Asset swaps happen
+   * inside blocks too, so an edit returning from the preview becomes a patch only
+   * after this restores the original notation (INV-9), and an original fragment
+   * pushed to the preview by a revert leaves only after this swaps it. null means
+   * no assets were swapped — both directions pass the original text untouched.
    */
   boundary: AssetBoundary | null;
-  /** 묶음 안에서 문서가 놓인 디렉터리. 폴더·zip 으로 열었을 때만 루트가 아니다 */
+  /** The directory the document sits in inside the bundle. Non-root only when opened from a folder or zip */
   docDir: string;
-  /** 지금 연 문서의 묶음 안 경로. 묶음이 아니면 빈 문자열 */
+  /** The open document's path inside the bundle. Empty string outside a bundle */
   docPath: string;
   /**
-   * 묶음으로 받은 파일 전체. 다른 문서로 갈아탈 때 다시 풀지 않으려고 들고 있는다.
-   * blob URL 이 어차피 이 파일들을 붙잡고 있으므로 추가로 드는 것은 없다.
+   * Every file the bundle brought. Held so switching to another document needs no
+   * re-unpacking. The blob URLs pin these files anyway, so it costs nothing extra.
    */
   bundle: ReadonlyMap<string, Blob> | null;
-  /** 묶음 안의 HTML 후보들. 하나뿐이면 고를 것이 없다 */
+  /** The HTML candidates inside the bundle. With just one there is nothing to pick */
   candidates: string[];
-  /** 묶음 안에서 되쓸 수 있는 파일의 핸들. 폴더를 열어 받았을 때만 채워진다 */
+  /** Handles of bundle files that can be written back. Filled only when a folder was opened */
   bundleHandles: ReadonlyMap<string, OpenedFile['handle']>;
 
   openFile: () => Promise<void>;
   /**
-   * 드롭 한 번 — 파일이든 폴더든 (spec §5 · 갈아 끼우기 예약).
+   * One drop — file or folder (spec §5 · replacement reservation).
    *
-   * 폴더 항목은 이벤트가 끝나면 사라지므로 훑기는 화면 쪽에서 이미 시작된 채로
-   * 온다. 예약은 여기서, 훑기를 **기다리기 전에** 받는다 — 늦게 받으면 먼저 놓았지만
-   * 늦게 훑힌 폴더가 더 새 예약을 받아 나중에 놓은 폴더를 덮는다.
+   * Folder items disappear when the event ends, so the scan arrives already
+   * started by the screen side. The reservation is taken here, **before waiting**
+   * on the scan — taken late, a folder dropped earlier but scanned later would
+   * take a newer reservation and overwrite the folder dropped last.
    */
   openDropped: (file: File | undefined, folder: Promise<FolderRead | null>) => Promise<void>;
-  /** @param within 이어받을 예약. 없으면 이 호출이 곧 사용자 행동이라 새로 예약한다 */
+  /** @param within the reservation to inherit. Absent, this call itself is the user action and reserves anew */
   loadDropped: (file: File, within?: Replacement) => Promise<void>;
-  /** 읽어 둔 폴더가 있으면 그 안의 문서를 연다. 폴더가 아니었으면 false */
+  /** Opens the document inside an already-read folder. false if it was not a folder */
   loadFolder: (read: FolderRead | null, within?: Replacement) => Promise<boolean>;
-  /** 열어 둔 문서를 닫고 처음 화면으로 돌아간다 */
+  /** Closes the open document and returns to the initial screen */
   closeFile: () => Promise<void>;
-  /** 폴더를 골라 그 안의 문서를 연다 (spec §5.1) */
+  /** Picks a folder and opens the document inside (spec §5.1) */
   openFolder: () => Promise<void>;
-  /** 여는 도중의 실패를 알림으로 돌린다 — 화면 쪽에서 잡은 오류가 들어온다 */
+  /** Turns a mid-open failure into a notice — errors caught by the screen side come in here */
   failedToOpen: (e: unknown) => void;
   /**
-   * OS 가 열어준 파일(PWA file_handlers)을 받는다. 읽기가 끝나기를 기다리지 않고
-   * 프라미스째 받는다 — 예약을 읽기 **전에** 잡아야, 읽는 사이 사용자가 연 더 새
-   * 흐름을 이 흐름이 밀어내지 않는다 (spec §5 · 갈아 끼우기 예약).
+   * Receives a file the OS opened (PWA file_handlers). Taken as a promise without
+   * waiting for the read — the reservation must be taken **before** the read, so
+   * this flow does not displace a newer flow the user opened during it
+   * (spec §5 · replacement reservation).
    */
   adopt: (file: OpenedFile | Promise<OpenedFile>) => Promise<void>;
   onReady: (live: { id: number; text: string }[]) => void;
   onEdit: (id: number, html: string, pristine?: boolean) => void;
   onBlocked: (id: number) => void;
-  /** 대조가 끝나기 전에 블록을 눌렀다 — 편집은 열리지 않았고, 사정을 말한다 (spec §4) */
+  /** A block was clicked before the cross-check finished — editing did not open, and the situation is explained (spec §4) */
   onNotReady: () => void;
   select: (id: number | null) => void;
   revert: (id: number) => void;
   revertAll: () => void;
-  /** 마지막으로 확정한 변경을 되돌린다 (Ctrl+Z) */
+  /** Reverts the most recently committed change (Ctrl+Z) */
   undoLast: () => void;
   drainReverts: () => void;
-  /** 변경 목록에서 고른 블록을 프리뷰에서 보여준다 */
+  /** Reveals a block chosen in the change list in the preview */
   reveal: (id: number) => void;
   drainReveal: () => void;
-  /** 저장했으면 true. 실패했거나 저장할 것이 없으면 false */
+  /** true if saved. false on failure or with nothing to save */
   save: () => Promise<boolean>;
   downloadCopy: () => void;
-  /** 폴더를 열어 외부 자원을 붙인다 (spec §5.1) */
+  /** Opens a folder to attach external assets (spec §5.1) */
   linkFolder: () => Promise<void>;
-  /** 같은 묶음 안의 다른 문서로 갈아탄다 */
+  /** Switches to another document in the same bundle */
   openFromBundle: (path: string) => Promise<void>;
 }
 
 /**
- * 붙인 자원과 못 붙인 자원의 수. 같은 파일을 여러 번 참조해도 하나로 센다 —
- * 사용자가 세는 단위는 참조가 아니라 파일이다.
+ * The counts of attached and missing assets. A file referenced several times
+ * counts once — the unit the user counts in is files, not references.
  */
 export function countAssets(state: Pick<EditorState, 'assetPaths' | 'assets'>): {
   linked: number;
@@ -192,18 +207,19 @@ export function countAssets(state: Pick<EditorState, 'assetPaths' | 'assets'>): 
 }
 
 /**
- * 파일과 다른가 — 지금 만들 결과물을 파일이 들고 있는 내용과 견준다 (spec §5).
+ * Does it differ from the file — compares the output built right now against what
+ * the file holds (spec §5).
  *
- * 저장 버튼·`Ctrl+S` 의 조기 반환·`beforeunload`·저장 대화상자가 전부 이 한 기준을
- * 본다. 결과물을 만들 수 없으면 같은지도 알 수 없다 — 잃을 수 있다고 보고 묻는 쪽이
- * 안전하다 (대원칙 3).
+ * The save button, `Ctrl+S`'s early return, `beforeunload` and the save dialog
+ * all read this one criterion. If the output cannot be built, sameness cannot be
+ * known either — treating it as at-risk and asking is the safe side (Principle 3).
  */
 function differsFromDisk(
   s: Pick<EditorState, 'source' | 'blocks' | 'patches' | 'savedText' | 'pendingText'>
 ): boolean {
   try {
     const list = [...s.patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
-    // 저장이 쓰는 중이면 파일은 곧 그 결과물을 든다 — 견줄 기준도 그쪽이다 (spec §5).
+    // While a save is writing, the file is about to hold that output — so that is the baseline (spec §5).
     return applyPatches(s.source, s.blocks, list) !== (s.pendingText ?? s.savedText);
   } catch {
     return true;
@@ -211,20 +227,24 @@ function differsFromDisk(
 }
 
 /**
- * 파일과 다른 블록 수 — 물음의 "{count}곳" (spec §4).
+ * The number of blocks that differ from the file — the question's "{count} spots"
+ * (spec §4).
  *
- * 패치 총수로는 못 센다: 저장해도 패치는 남아(INV-1) 이미 저장한 곳까지 세고,
- * 저장한 편집을 되돌리면 패치가 없는데도 파일과 다르다(그 자리가 1곳이다).
- * 그래서 지금 패치를 마지막 저장 때의 패치와 블록별로 견준다 — 같은 블록의 패치가
- * 그대로면 파일의 그 자리도 그대로라, 이 차이가 곧 결과물과 파일이 다른 자리다.
+ * The patch total cannot count this: patches survive a save (INV-1) so
+ * already-saved spots would be counted, and reverting a saved edit leaves no
+ * patch while the file still differs (that spot is one). So the current patches
+ * are compared block by block against the patches of the last save — if a
+ * block's patch is unchanged, that spot in the file is unchanged too, so this
+ * difference is exactly where output and file diverge.
  *
- * 한쪽에만 있는 항목은 그 블록의 **원본 내용**을 빈자리에 놓고 견준다 (spec §4).
- * 항목의 있고 없음만으로 세면, 원본 그대로를 저장해 둔 자리(고쳤다가 원본으로
- * 되돌려 저장)를 되돌렸을 때 — 결과물도 파일도 그 자리가 원본이라 같은데 —
- * savedPatches 에 남은 항목 때문에 한 곳으로 더 세인다.
+ * An entry present on only one side is compared with that block's **original
+ * content** standing in for the gap (spec §4). Counting mere presence, a spot
+ * saved as the original (edited, then edited back to the original and saved)
+ * would count one extra when reverted — output and file both hold the original
+ * there and agree — because of the entry left in savedPatches.
  */
 export function unsavedCount(s: Pick<EditorState, 'patches' | 'savedPatches' | 'blocks'>): number {
-  // 항목이 없는 자리의 내용은 원본이다 — 제목(rcdata)의 패치는 평문이라 sourceText 와 짝이다.
+  // A spot without an entry holds the original — a title (rcdata) patch is plain text, so sourceText is its pair.
   const originalOf = (id: number): string | undefined => {
     const block = s.blocks.find((b) => b.id === id);
     return block ? (block.rcdata ? block.sourceText : block.sourceInner) : undefined;
@@ -238,10 +258,12 @@ export function unsavedCount(s: Pick<EditorState, 'patches' | 'savedPatches' | '
 }
 
 /**
- * 편집 결과가 원본과 같으면 패치로 치지 않는다 — 저장했을 때 diff 가 생기면 안 된다.
+ * An edit that equals the original does not count as a patch — saving it must not
+ * produce a diff.
  *
- * 아무것도 바뀌지 않았으면 `prev` 를 **그대로** 돌려준다 — 부르는 쪽이 참조 비교로
- * "정말 아무 일도 없었다" 를 알 수 있어야 편집 순서(editOrder)를 헛되이 섞지 않는다.
+ * When nothing changed, `prev` is returned **as-is** — the caller must be able to
+ * tell "truly nothing happened" by reference comparison, or the edit order
+ * (editOrder) gets shuffled for nothing.
  */
 function nextPatches(
   prev: Map<number, string>,
@@ -249,33 +271,36 @@ function nextPatches(
   html: string,
   pristine: boolean
 ): Map<number, string> {
-  // 제목처럼 호스트에서 직접 고치는 평문은 sourceText 와 비교한다.
+  // Plain text edited directly in the host, like the title, is compared against sourceText.
   if (block.rcdata) {
     const next = new Map(prev);
     if (html === block.sourceText) next.delete(block.id);
     else next.set(block.id, html);
     return next;
   }
-  // 프리뷰의 pristine 은 "편집을 열 때의 화면과 같다"는 뜻이다. 화면은 원본에
-  // 패치를 얹은 모습이므로, 그대로 나온 것은 패치 상태도 그대로여야 한다 —
-  // 여기서 패치를 지우면 이미 확정(또는 저장)한 편집이 저장 경로에서만 사라져,
-  // 화면에는 남은 내용이 다음 저장에서 원본으로 되돌아간다 (화면과 저장본의 분열).
-  // 브라우저가 직렬화한 값과 소스 문자열은 <br/> → <br> 같은 정규화 차이가 있어
-  // 여기서 sourceInner 와 비교해 지울 수도 없다 — pristine 판정을 그대로 믿는다.
+  // The preview's pristine means "same as the screen when editing opened". The
+  // screen shows the original with patches applied, so leaving unchanged must
+  // leave the patch state unchanged too — deleting the patch here would remove an
+  // already-committed (or saved) edit from the save path alone, and the content
+  // still on screen would fall back to the original at the next save (a split
+  // between screen and saved file). The browser-serialized value and the source
+  // string differ by normalization like <br/> → <br>, so comparing against
+  // sourceInner to delete is not an option either — trust the pristine verdict.
   if (pristine) return prev;
   return new Map(prev).set(block.id, html);
 }
 
-/** <title> 은 프리뷰에 렌더되지 않아 클릭이 닿지 않는다. 별도 필드로 편집한다 (spec §2.1) */
+/** <title> is not rendered in the preview, so clicks cannot reach it. Edited in a separate field (spec §2.1) */
 export function titleBlock(blocks: readonly Block[]): Block | undefined {
   return blocks.find((b) => b.rcdata);
 }
 
 /**
- * 되돌리기로 프리뷰에 보낼 블록 내용 (ADR-011).
+ * The block content a revert sends to the preview (ADR-011).
  *
- * 원본 조각(`sourceInner`)을 그대로 보내면 프리뷰의 자원 치환이 풀려, 되돌린 블록의
- * 참조가 앱 주소 기준으로 풀리며 그림만 깨진다 — 경계로 치환한 뒤에 내보낸다.
+ * Sending the original fragment (`sourceInner`) as-is undoes the preview's asset
+ * swap: the reverted block's references resolve against the app origin and its
+ * images break — swap through the boundary before sending.
  */
 function previewInner(s: Pick<EditorState, 'boundary'>, block: Block | undefined): string {
   if (!block) return '';
@@ -283,10 +308,13 @@ function previewInner(s: Pick<EditorState, 'boundary'>, block: Block | undefined
 }
 
 /**
- * 문서를 바꾸는 일을 새로 시작하면 안 되는 동안 — 저장 중이거나 갈아 끼우는 중 (ADR-010).
+ * While no new document-changing work may start — a save or a replacement is
+ * running (ADR-010).
  *
- * 열기·문서 고르기·폴더 연결·저장 버튼이 전부 이 하나를 본다. 화면마다 두 표시를
- * 제각기 조합하면 하나만 구독한 화면이 생겨, 흩어진 표시의 틈이 되살아난다.
+ * Open, the document picker, folder linking and the save button all read this
+ * one value. If each screen combined the two indicators itself, some screen
+ * would subscribe to only one, and the gaps between scattered indicators would
+ * come back.
  */
 export function useEditorBusy(): boolean {
   const saving = useEditor((s) => s.saving);
@@ -295,18 +323,23 @@ export function useEditorBusy(): boolean {
 }
 
 /**
- * 확정된 갈아 끼우기 — 화면을 잠그고, 새 상태를 만들고, 아직 최신이면 설치한다.
- * 누가 이기고 무엇이 잠기는지는 예약(replacement.ts)이 정한다 (ADR-010).
+ * A confirmed replacement — locks the screen, builds the new state, and installs
+ * it if still the newest. Who wins and what is locked is decided by the
+ * reservation (replacement.ts) (ADR-010).
  *
- * 이전 blob URL 은 설치 직전에 놓아준다 — 안 놓으면 파일을 여러 번 열수록 탭이
- * 무거워지고, 먼저 놓으면 만들다 실패했을 때 살아 있어야 할 화면이 그 blob 을 쓴다.
+ * The previous blob URLs are released just before install — never released, the
+ * tab grows heavier with every file opened; released earlier, a failed build
+ * leaves the screen that must stay alive using those blobs.
  *
- * 만드는 사이 더 새 예약이 들어왔으면 설치하지 않고 `null` 로 물러난다. 그때
- * 지금 상태의 자원은 보던 문서(또는 그 새 흐름이 세울 문서)의 것이라 놓아줄
- * 권리가 없다 — **제가 만든 것만** 놓아준다 (spec §5 · 갈아 끼우기 예약).
+ * If a newer reservation arrived during the build, it does not install and
+ * retreats with `null`. The assets in the current state then belong to the
+ * document being viewed (or the one the newer flow will put up), and there is no
+ * right to release them — release **only what this flow made** (spec §5 ·
+ * replacement reservation).
  *
- * 설치는 저장 중 표시도 함께 내린다 — 아직 쓰는 중인 저장은 이 순간부터 이전
- * 문서의 것이라(claim) 제 표시를 내릴 자격을 잃는다. 새 문서는 저장 중이 아니다.
+ * Install also lowers the saving indicator — from this moment a still-writing
+ * save belongs to the previous document (claim) and loses the right to lower its
+ * own indicator. The new document is not saving.
  */
 async function replace(
   get: () => EditorState,
@@ -321,8 +354,9 @@ async function replace(
     return null;
   }
   get().assets.dispose();
-  // 설치 세대를 올린다 — 이 순간부터 이전 문서 몫의 비동기 결과(뒤늦게 끝난
-  // 저장 등)는 claim 의 판정에 걸려 버려진다 (spec §5).
+  // Bump the install generation — from this moment, async results owed to the
+  // previous document (a save that finishes late, etc.) fail the claim check and
+  // are discarded (spec §5).
   mine.install();
   set({ ...next, saving: false, pendingText: null });
   return next;
@@ -333,28 +367,32 @@ function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
 }
 
 /**
- * 프리뷰를 다시 그리기 전에 파일을 **디스크에서 다시 읽는다**.
+ * **Re-reads the file from disk** before redrawing the preview.
  *
- * 저장해도 `source` 는 열었을 때의 문자열 그대로다 (INV-1). 그 상태로 다시 그리면
- * 이미 저장한 편집이 화면에서 사라지고, 그 뒤에 저장하면 디스크의 내용을 옛 내용으로
- * 덮어써 **저장했던 것이 없어진다.** 핸들이 있으면 지금 파일에서 다시 읽어 맞춘다.
+ * Even after saving, `source` is still the string from open time (INV-1).
+ * Redrawing from it makes already-saved edits vanish from the screen, and a later
+ * save overwrites the disk with the old content — **what was saved is gone.**
+ * With a handle, re-read from the current file to stay aligned.
  */
 async function reread(file: OpenedFile): Promise<OpenedFile> {
   if (!file.handle) return file;
-  // 실패를 삼키지 않는다 (대원칙 3). 들고 있던 바이트로 계속 가면 묶음에서는 빈
-  // 자리 표시가 그대로 열려 문서가 빈 화면이 되고, 폴더 연결에서는 옛 원본으로 다시
-  // 그려 놓고 나중에 저장할 때 디스크의 새 내용을 옛 것으로 덮어쓴다.
-  // 던지면 부르는 쪽의 catch 가 이유를 알림으로 돌리고, 보던 화면은 그대로 남는다.
+  // Failures are not swallowed (Principle 3). Continuing with the held bytes, a
+  // bundle would open its empty placeholder and the document would be a blank
+  // screen, and folder linking would redraw from the old original only to
+  // overwrite the disk's new content with it at the next save.
+  // Thrown, the caller's catch turns the reason into a notice and the screen
+  // being viewed stays as it was.
   return { ...file, text: await readText(await file.handle.getFile()) };
 }
 
 /**
- * 묶음에서 온 문서 경로를 새로 고른 폴더 기준으로 옮긴다.
+ * Rebases a bundle document path onto the newly picked folder.
  *
- * 옛 경로는 옛 묶음의 뿌리 기준이라 새 폴더에는 그대로 없을 수 있다. 그렇다고 이름만
- * 남기면 `deck/slides/index.html` 을 `deck` 폴더에 연결했을 때 `slides/` 가 통째로
- * 사라져, 문서 옆(`slides/`)의 자원을 전부 못 찾는다. 앞에서부터 한 단계씩 걷어내며
- * 새 폴더에 실제로 있는 가장 긴 꼬리를 찾는다.
+ * The old path is relative to the old bundle's root and may not exist in the new
+ * folder as-is. But keeping only the name would drop `slides/` wholesale when
+ * `deck/slides/index.html` is linked to the `deck` folder, losing every asset
+ * next to the document (`slides/`). Strip one segment at a time from the front
+ * and find the longest tail that actually exists in the new folder.
  */
 function rebasePath(
   path: string | undefined,
@@ -366,17 +404,18 @@ function rebasePath(
     const tail = parts.slice(from).join('/');
     if (files.has(tail)) return tail;
   }
-  // 어디에도 없으면 이름만 남겨 뿌리 기준으로 푼다 — 못 찾은 자원은 못 찾았다고 세면 된다.
+  // Found nowhere, keep just the name and resolve from the root — assets not found are simply counted as missing.
   return parts[parts.length - 1];
 }
 
-/** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
+/** Shows the raw error text when there is one; otherwise just the short sentence */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
-  // UTF-8 이 아닌 문서는 열면 저장 때 원본이 깨진다 — 왜 못 여는지 말한다 (spec §1 · 대원칙 3).
+  // Opening a non-UTF-8 document would corrupt the original at save time — say why it will not open (spec §1 · Principle 3).
   if (e instanceof NotUtf8Error) return { key: 'notice.notUtf8' };
-  // zip 오류는 우리 것이라 코드로 온다 — 문장은 언어팩이 만든다 (spec §1 · INV-6).
-  // 원문을 그대로 붙이는 것은 번역할 수 없는 브라우저 오류의 몫이다.
+  // zip errors are ours and arrive as codes — the sentence comes from the language
+  // pack (spec §1 · INV-6). Attaching raw text is reserved for untranslatable
+  // browser errors.
   if (e instanceof ZipError) {
     return { key: 'notice.openFailedDetail', params: { detail: zipNotice(e.code, e.params) } };
   }
@@ -385,23 +424,26 @@ function openFailedNotice(e: unknown): Notice {
     : { key: 'notice.openFailed' };
 }
 
-/** 프리뷰 문서의 표 — 세션 안에서 문서마다 다르기만 하면 된다. 순번으로 충분하다 */
+/** The preview document token — it only has to differ per document within a session. A serial is enough */
 let previewSerial = 0;
 
 /**
- * parse5 와 프리뷰 조립기는 **파일을 열 때 처음** 필요하다. 초기 화면은 드롭 영역뿐이라
- * 파서를 같이 실어 보낼 이유가 없다 — 그래서 여기서 동적으로 불러온다 (코드 분할).
+ * parse5 and the preview assembler are first needed **when a file is opened**.
+ * The initial screen is just a drop zone, so there is no reason to ship the
+ * parser with it — hence the dynamic imports here (code splitting).
  */
 async function load(
   file: OpenedFile,
   files?: ReadonlyMap<string, Blob>,
   handles?: ReadonlyMap<string, OpenedFile['handle']>,
   /**
-   * 이 파일이 묶음의 그 경로 **그 자체**인가. 폴더 연결의 자리 되찾기(rebasePath)는
-   * 증명 없는 추측이라, 같은 파일임을 증명하지 못하면 false 로 온다 — 그때 경로는
-   * 자원을 찾는 기준(docDir)으로만 쓰고 묶음 경로(docPath)로는 삼지 않는다. 삼으면
-   * 저장이 그 경로의 묶음 내용을 이 문서의 결과물로 갈아 끼워 폴더의 **다른** 문서를
-   * 바꿔치기하고, 목록에서 그 문서를 여는 길도 "이미 열려 있다" 며 막힌다 (spec §5.1).
+   * Is this file **the very file** at that bundle path. Folder linking's path
+   * recovery (rebasePath) is an unproven guess, so without proof of being the
+   * same file this comes in false — the path is then used only as the base for
+   * finding assets (docDir), never adopted as the bundle path (docPath). Adopted,
+   * a save would swap that path's bundle content for this document's output,
+   * switching out a **different** document in the folder, and the way to open
+   * that document from the list would be blocked as "already open" (spec §5.1).
    */
   member = true
 ): Promise<Partial<EditorState>> {
@@ -427,12 +469,13 @@ async function load(
   const docPath = member ? (file.path ?? '') : '';
   const docDir = dirOf(file.path ?? file.name);
   const blocks = parseBlocks(file.text);
-  // 문서가 <base href> 로 기준을 옮겨 두면 상대 참조는 문서 자리가 아니라 거기서
-  // 풀린다 (spec §5.1). 바깥을 가리키면(null) 상대 참조는 로컬 파일이 아니라
-  // 붙일 것도, 없다고 셀 것도 없다 — 프리뷰는 문서를 그대로 보여준다.
+  // If the document moved its base with <base href>, relative references resolve
+  // from there, not from the document's place (spec §5.1). Pointing outside
+  // (null), relative references are not local files — nothing to attach, nothing
+  // to count missing — and the preview shows the document as-is.
   const baseDir = documentBaseDir(file.text, docDir);
   const refs = baseDir === null ? [] : parseAssetRefs(file.text, baseDir);
-  // 속성 · 문서에 박힌 <style> · 붙인 스타일시트가 부르는 것까지 한자리에 모은다.
+  // Gathered in one place: attributes, inline <style>, and what attached stylesheets reference.
   const inStyle =
     baseDir === null ? [] : styleTexts(file.text).flatMap((css) => cssAssetPaths(css, baseDir));
   const assets =
@@ -440,13 +483,14 @@ async function load(
       ? await buildAssets(files, [...refs.map((r) => r.path), ...inStyle])
       : EMPTY_BUNDLE;
   const assetPaths = [...new Set([...refs.map((r) => r.path), ...inStyle, ...assets.missing])];
-  // 프리뷰 문서와 양방향 경계가 **같은 치환 목록**을 쓴다 (ADR-011) — 따로 계산하면
-  // 나갈 때의 표기와 되돌릴 표기가 어긋나는 짝이 생긴다. base 가 바깥을 가리키면
-  // 치환할 것이 없다 — <style> 의 url() 까지 문서 기준이라, 문서 자리 기준으로
-  // 바꾸면 틀린 자원을 붙인다.
+  // The preview document and the two-way boundary use **the same swap list**
+  // (ADR-011) — computed separately, the outgoing notation and the restored
+  // notation would form mismatched pairs. With base pointing outside there is
+  // nothing to swap — even url() inside <style> is base-relative, and swapping
+  // relative to the document's place would attach the wrong assets.
   const swaps =
     baseDir === null ? [] : assetSwaps(file.text, refs, baseDir, (p) => assets.urls.get(p));
-  // 갈아탄 뒤 도착할 옛 프리뷰의 메시지를 가릴 표 — 문서마다 다르다 (spec §5).
+  // The token that screens out old-preview messages arriving after a switch — differs per document (spec §5).
   const previewToken = `doc-${++previewSerial}`;
 
   return {
@@ -479,10 +523,10 @@ async function load(
 }
 
 /**
- * 고른 파일이 zip 이면 풀어서 그 안의 문서를 연다 (spec §5.1).
+ * If the picked file is a zip, unpacks it and opens the document inside (spec §5.1).
  *
- * zip 안의 HTML 에는 핸들이 없다 — 압축을 풀어 봐야 메모리 안의 바이트라
- * 되쓸 자리가 없다. 그래서 저장은 사본 내려받기로 간다.
+ * HTML inside a zip has no handle — unpacked, it is still just bytes in memory
+ * with nowhere to write back. So saving goes to download-a-copy.
  */
 async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
   if (/\.zip$/i.test(picked.name)) {
@@ -492,7 +536,7 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
 
   const file: OpenedFile = {
     name: picked.name,
-    // 바이트에서 읽는다 — Blob.text() 는 앞머리의 BOM 을 지운다 (spec §1 · 대원칙 1).
+    // Read from bytes — Blob.text() strips a leading BOM (spec §1 · Principle 1).
     text: await readText(picked.blob),
     handle: picked.handle,
   };
@@ -500,9 +544,10 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
 }
 
 /**
- * 여러 파일을 한꺼번에 받았을 때(폴더·zip) 그중 문서 하나를 연다 (spec §5.1).
+ * Opens one document out of many files received at once (folder or zip) (spec §5.1).
  *
- * 묶음으로 온 문서에는 핸들이 없다 — 되쓸 자리가 없어 저장은 사본 내려받기로 간다.
+ * A document arriving in a bundle has no handle — nowhere to write back, so
+ * saving goes to download-a-copy.
  */
 async function openBundle(
   files: ReadonlyMap<string, Blob>,
@@ -514,16 +559,17 @@ async function openBundle(
   const entry = path ? files.get(path) : undefined;
   if (!path || !entry) throw new BundleEmptyError();
 
-  // 열기 대화상자로 고른 폴더에서만 핸들이 온다. 없으면 사본 내려받기로 간다.
+  // Handles come only from folders picked through the open dialog. Without one, saving goes to download-a-copy.
   const handle = handles?.get(path) ?? null;
-  // 묶음에 담긴 것은 **열었을 때의** 바이트다. 저장한 뒤 다른 문서로 갔다 돌아오면
-  // 그 옛 바이트를 다시 읽어, 저장한 내용을 화면에서 지우고 나중에 덮어쓴다.
+  // What the bundle holds are the bytes **from open time**. Coming back after a
+  // save and a switch away would re-read those old bytes, erasing the saved
+  // content from the screen and later overwriting it.
   const fresh = await reread({ name: '', text: '', handle });
 
   const next = await load(
     {
       name: path.split('/').pop() ?? path,
-      // 바이트에서 읽는다 — Blob.text() 는 앞머리의 BOM 을 지운다 (spec §1 · 대원칙 1).
+      // Read from bytes — Blob.text() strips a leading BOM (spec §1 · Principle 1).
       text: handle ? fresh.text : await readText(entry),
       handle,
       path,
@@ -531,7 +577,7 @@ async function openBundle(
     files,
     handles
   );
-  // 후보가 여럿이면 어느 것을 열었는지 말한다. 조용히 하나 고르면 나머지는 없는 셈이 된다.
+  // With several candidates, say which one was opened. Picking silently makes the rest not exist.
   return candidates.length > 1 && !want
     ? {
         ...next,
@@ -540,18 +586,19 @@ async function openBundle(
     : next;
 }
 
-/** 묶음은 열렸는데 안에 문서가 없다 — 파일을 못 연 것과는 다른 사정이라 문구도 다르다 */
+/** The bundle opened but holds no document — a different situation from a failed open, so different wording */
 class BundleEmptyError extends Error {}
 
-/** 폴더 훑기가 실패했다는 표식 — null(폴더가 아니었다)과 구별해야 파일 열기로 새지 않는다 */
+/** The marker for a failed folder scan — distinct from null (not a folder) so it never leaks into opening as a file */
 const scanFailed = Symbol('scan-failed');
 
-/** OS 가 건넨 파일의 읽기가 실패했다는 표식 — 실패는 만들어진 자리에서 이미 알렸다 */
+/** The marker for a failed read of an OS-handed file — the failure was already reported where it was created */
 const readFailed = Symbol('read-failed');
 
 /**
- * 폴더에서 문서를 못 찾았을 때 — 스캔이 잘렸으면 그 사정을 함께 말한다 (spec §5.1).
- * "문서가 없다" 라고만 하면 거짓말일 수 있다 — 문서는 한도 밖에 있었을 수 있다.
+ * When no document was found in a folder — if the scan was truncated, that
+ * circumstance is told too (spec §5.1). Saying only "no document" could be a lie —
+ * the document may have been beyond the limit.
  */
 function folderFailedNotice(e: unknown, read: FolderRead | null): Notice {
   if (e instanceof BundleEmptyError && read?.truncated) {
@@ -561,10 +608,11 @@ function folderFailedNotice(e: unknown, read: FolderRead | null): Notice {
 }
 
 /**
- * 문서가 없는 상태.
+ * The no-document state.
  *
- * 처음 화면과 **닫은 뒤**가 같아야 하므로 한 곳에서 만든다. 두 벌로 두면 새 상태가
- * 늘 때마다 한쪽만 고쳐져, 닫았는데 이전 문서의 무언가가 남는다.
+ * The initial screen and the screen **after closing** must be identical, so it is
+ * built in one place. Kept as two copies, each new state field would get added to
+ * only one, and something of the previous document would survive a close.
  */
 function emptyDocument(): Partial<EditorState> {
   return {
@@ -603,39 +651,43 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   openFile: async () => {
     set({ notice: null });
-    // 예약은 사용자 행동의 순간에 — 대화상자·물음·저장을 기다리기 전에 (spec §5).
+    // Reserve at the moment of the user action — before waiting on the dialog, the question, the save (spec §5).
     const mine = reserveReplacement();
     try {
-      // 대화상자를 **먼저** 연다. 저장을 기다린 뒤에 열면 그 사이 사용자 제스처가
-      // 만료돼 브라우저가 대화상자를 거절한다 (File System Access API 는 제스처를 요구한다).
-      // 열려 있는 사이에도 더 새 흐름(드롭·OS 열기)은 시작된다 — guarded 가 돌아온
-      // 순간 밀려났으면 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      // Open the dialog **first**. Opened after waiting on a save, the user gesture
+      // has expired and the browser refuses the dialog (the File System Access API
+      // demands a gesture). Newer flows (drop, OS launch) can start while it is
+      // open — if displaced by the time guarded returns, it retreats with
+      // Superseded and never asks while displaced (spec §5).
       const picked = await mine.guarded(pickFile());
       if (!picked) return;
-      // 묻는 동안에는 잠그지 않는다. 잠그면 대화상자의 "저장하고 계속하기" 가
-      // 눌리지 않아 남는 선택지가 버리기와 취소뿐이 된다.
+      // No lock while asking. Locked, the dialog's "save and continue" could not
+      // be pressed, leaving discard and cancel as the only choices.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       await replace(get, set, mine, openPicked(picked));
     } catch (e) {
-      // 브라우저가 던진 원문은 번역하지 않고 그대로 붙인다 (spec §1 · UI 언어).
-      // 밀려난 흐름의 실패는 남(최신 흐름)의 화면에 대한 말이 된다 — 알리지 않는다.
+      // Raw text a browser threw is attached untranslated (spec §1 · UI language).
+      // A displaced flow's failure would be words about someone else's (the newest
+      // flow's) screen — do not notify.
       if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
       mine.release();
     }
   },
 
-  // OS 가 열어준 파일(PWA file_handlers)을 받는다.
-  // load 가 파서 청크를 받아오므로 여기도 실패할 수 있다 — 조용히 굳지 않게 감싼다 (ADR-008).
+  // Receives a file the OS opened (PWA file_handlers).
+  // load fetches the parser chunk, so this can fail too — wrapped so it never freezes silently (ADR-008).
   adopt: async (file) => {
-    // 예약은 OS 가 파일을 건넨 순간에 — 읽기·물음·저장을 기다리기 전에 (spec §5).
-    // 읽기가 끝난 뒤에 예약하면, 읽는 사이 사용자가 연 더 새 흐름을 이 흐름이
-    // 밀어내 사용자의 마지막 선택이 조용히 버려진다.
+    // Reserve the moment the OS hands the file over — before waiting on the read,
+    // the question, the save (spec §5). Reserved after the read, this flow would
+    // displace a newer flow the user opened during it, silently discarding the
+    // user's last choice.
     const mine = reserveReplacement();
-    // 읽기 실패는 만들어진 자리에서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를
-    // 기다리지 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다 (unhandled
-    // rejection). 밀려난 흐름의 실패는 알리지 않는다 — 남(최신 흐름)의 화면에 대한
-    // 말이 된다 (spec §5 · 갈아 끼우기 예약).
+    // Read failures are caught right where the promise is made — after a cancelled
+    // question nobody awaits this promise, so catching after the answer would let
+    // the failure vanish without a notice (unhandled rejection). A displaced
+    // flow's failure is not notified — it would be words about someone else's
+    // (the newest flow's) screen (spec §5 · replacement reservation).
     const reading: Promise<OpenedFile | typeof readFailed> = Promise.resolve(file).catch(
       (e: unknown) => {
         if (mine.current()) get().failedToOpen(e);
@@ -643,16 +695,18 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
     );
     try {
-      // OS 가 파일을 들려 보냈어도 다른 파일 열기다. 들어오는 길이 다르다고
-      // 지금 고치던 것을 조용히 버릴 이유는 못 된다 (spec §4 · 저장하지 않은 편집).
+      // Even handed over by the OS, this is opening another file. A different way
+      // in is no reason to silently discard what was being edited (spec §4 ·
+      // unsaved edits).
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 답한 순간부터 잠근다 — 읽기가 끝나기를 기다리는 사이의 편집도 새 상태가
-      // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
+      // Lock from the moment of the answer — edits made while waiting for the read
+      // to finish also have nowhere to go once the new state installs (spec §4 ·
+      // no edits accepted during a replacement).
       mine.engage();
-      // 읽기를 기다리는 사이 밀려났으면 guarded 가 Superseded 로 물러난다 —
-      // 설치도 알림도 남(최신 흐름)의 몫이다 (spec §5).
+      // Displaced while waiting on the read, guarded retreats with Superseded —
+      // install and notices alike belong to the other (newest) flow (spec §5).
       const opened = await mine.guarded(reading);
-      // 읽다 실패한 것은 위에서 이미 알렸다. 여기서 또 알리면 두 번 뜬다.
+      // A failed read was already reported above. Reporting here would show it twice.
       if (opened === readFailed) return;
       set({ notice: null });
       await replace(get, set, mine, load(opened));
@@ -664,53 +718,60 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   openDropped: async (file, folder) => {
-    // 예약은 놓은 순간에 — 훑기·물음·저장을 기다리기 전에 (spec §5 · 갈아 끼우기 예약).
+    // Reserve at the moment of the drop — before waiting on the scan, the question, the save (spec §5 · replacement reservation).
     const mine = reserveReplacement();
     set({ notice: null });
-    // 훑기 실패는 만들어진 자리에서 바로 받는다 — 물음을 취소하면 아무도 이 프라미스를
-    // 기다리지 않아, 답을 기다린 뒤에 잡으면 실패가 알림 없이 사라진다 (unhandled
-    // rejection). 취소했더라도 훑기가 실패한 사실은 알린다 (대원칙 3 · spec §5.1).
-    // 단, 밀려난 드롭의 실패는 알리지 않는다 — 남(최신 흐름)이 멀쩡히 세운 문서
-    // 위에 "못 열었다" 가 뜬다 (spec §5 · 갈아 끼우기 예약). 취소는 예약을 새로
-    // 만들지 않으므로, 취소한 경우의 알림은 그대로 살아 있다.
+    // Scan failures are caught right where the promise is made — after a cancelled
+    // question nobody awaits this promise, so catching after the answer would let
+    // the failure vanish without a notice (unhandled rejection). Even after a
+    // cancel, the scan failure is reported (Principle 3 · spec §5.1). But a
+    // displaced drop's failure is not — "could not open" would appear over a
+    // document the other (newest) flow put up perfectly well (spec §5 ·
+    // replacement reservation). Cancelling creates no new reservation, so the
+    // notice for the cancelled case stays alive.
     const scanned: Promise<FolderRead | null | typeof scanFailed> = folder.catch((e: unknown) => {
       if (mine.current()) get().failedToOpen(e);
       return scanFailed;
     });
     try {
-      // 새 파일을 열면 지금 편집은 사라진다. 조용히 버리지 않는다.
+      // Opening a new file loses the current edits. They are not discarded silently.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // 답한 순간부터 잠근다 — 훑기가 끝나기를 기다리는 사이의 편집도 새 상태가
-      // 설치되는 순간 갈 곳이 없다 (spec §4 · 갈아 끼우는 동안은 편집을 받지 않는다).
+      // Lock from the moment of the answer — edits made while waiting for the scan
+      // to finish also have nowhere to go once the new state installs (spec §4 ·
+      // no edits accepted during a replacement).
       mine.engage();
-      // 훑기를 기다리는 사이 밀려났으면 guarded 가 Superseded 로 물러난다 —
-      // 설치도 알림도 남(최신 흐름)의 몫이다 (spec §5).
+      // Displaced while waiting on the scan, guarded retreats with Superseded —
+      // install and notices alike belong to the other (newest) flow (spec §5).
       const read = await mine.guarded(scanned);
-      // 훑다 실패한 것은 위에서 이미 알렸다. 파일 열기로 넘어가지 않는다 —
-      // 놓은 것이 폴더였을 수 있고, 폴더를 문서로 여는 것은 오류를 덧씌우는 일이다.
+      // A failed scan was already reported above. It does not fall through to
+      // opening as a file — what was dropped may have been a folder, and opening a
+      // folder as a document piles error upon error.
       if (read === scanFailed) return;
-      // 폴더를 놓았는지는 스토어가 가린다. 폴더가 아니었으면 파일로 연다.
-      // 같은 예약을 들려 보낸다 — 새로 예약하면 이 흐름이 저 자신을 밀어내는
-      // 모양이 되고, 그 사이의 틈은 주석이 아니라 예약이 막아야 한다 (ADR-010).
+      // The store decides whether a folder was dropped. If not, it opens as a
+      // file. The same reservation is passed along — reserving anew would have
+      // this flow displace itself, and the gap in between must be closed by the
+      // reservation, not by a comment (ADR-010).
       if (!(await get().loadFolder(read, mine)) && file) await get().loadDropped(file, mine);
     } catch (e) {
-      // 밀려난 흐름의 표식은 조용한 물러남이다 (spec §5) — 여기서 받지 않으면 진입점
-      // 밖(unhandled rejection)으로 샌다. 다른 실패는 지금까지처럼 부른 쪽으로 흐른다.
+      // A displaced flow's marker means a quiet retreat (spec §5) — uncaught here
+      // it leaks past the entry point (unhandled rejection). Other failures flow to
+      // the caller as before.
       if (!(e instanceof Superseded)) throw e;
     } finally {
       mine.release();
     }
   },
 
-  // 폴더를 놓으면 그 안의 문서를 연다. 옛 드롭 API 는 쓰기 권한을 주지 않으므로
-  // 저장은 사본 내려받기로 간다 — 자원을 붙여 보는 데는 그것으로 충분하다.
+  // A dropped folder opens the document inside it. The legacy drop API grants no
+  // write permission, so saving goes to download-a-copy — plenty for attaching
+  // assets to look at.
   loadFolder: async (read, within) => {
     if (!read) return false;
     const mine = within ?? reserveReplacement();
     set({ notice: null });
     try {
       const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
-      // 물러난 흐름의 뒷말(잘림 알림)은 남이 세운 화면에 대한 말이 된다 — 설치한 쪽만 말한다.
+      // A retreated flow's afterword (the truncation notice) would be about a screen someone else put up — only the installer speaks.
       if (next && read.truncated) {
         set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
       }
@@ -729,27 +790,29 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       await replace(get, set, mine, openPicked(droppedFile(file)));
     } catch (e) {
-      // 파싱 실패를 삼키면 파일을 놓아도 아무 일도 안 일어나는 것처럼 보인다.
+      // Swallowing a parse failure makes dropping a file look like nothing happened.
       if (mine.current()) set({ notice: openFailedNotice(e) });
     } finally {
       mine.release();
     }
   },
 
-  // 렌더 결과와 소스를 대조해 스크립트가 만든 블록을 잠근다 (ADR-005).
+  // Cross-checks render result against source and locks script-generated blocks (ADR-005).
   onReady: (live) => {
-    // Map 으로 추리지 않고 겹침째로 넘긴다 — 같은 id 의 표식이 둘이면 문서가
-    // 마커를 흉내 낸 것이고, 그 판정(MARKER_CLASH)은 core 의 몫이다 (spec §3).
+    // Passed on with duplicates intact, not distilled into a Map — two markers
+    // with the same id mean the document mimicked our markers, and that verdict
+    // (MARKER_CLASH) belongs to core (spec §3).
     const blocks = applyLiveLocks(get().blocks, live);
-    // 뒤늦게 잠긴 블록의 패치를 그대로 두면 저장 때 applyPatches 가 목록 전체를
-    // 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
+    // Leaving patches on late-locked blocks would have applyPatches reject the
+    // whole list at save time, killing healthy edits along with them (INV-5).
     const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));
     const dropped = [...get().patches.keys()].filter((id) => lockedIds.has(id));
     const patches = new Map([...get().patches].filter(([id]) => !lockedIds.has(id)));
     const editOrder = get().editOrder.filter((id) => patches.has(id));
-    // 정상 경로에서는 지울 패치가 없다 — 대조 전에는 편집이 열리지 않는다 (spec §4).
-    // 그래도 지워야 한다면 조용히 지우지 않는다: 프리뷰도 소스 내용으로 되돌려
-    // 화면과 저장본을 다시 맞추고, 되돌렸다는 사실을 알린다 (대원칙 3).
+    // On the normal path there are no patches to delete — editing does not open
+    // before the cross-check (spec §4). If deletion is needed anyway, it is not
+    // silent: the preview is also reverted to the source content to realign screen
+    // and saved file, and the revert is announced (Principle 3).
     const revertQueue = [
       ...get().revertQueue,
       ...dropped.map((id) => ({
@@ -765,7 +828,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         .getState()
         .show({ key: 'app.editsReverted', params: { count: dropped.length } }, 'locked');
     }
-    // 패치가 빠졌으면 결과물도 달라졌을 수 있다 — 기준은 언제나 하나다 (spec §5).
+    // With patches dropped, the output may have changed too — there is always exactly one criterion (spec §5).
     set({
       blocks,
       patches,
@@ -777,39 +840,44 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   onEdit: (id, html, pristine = false) => {
-    // 갈아 끼우는 동안의 편집은 새 상태가 설치되는 순간 갈 곳이 없다 (spec §4).
-    // 제목 칸과 프리뷰는 이 동안 잠겨 있어, 여기 오는 것은 이미 열려 있던 블록의
-    // 확정(blur·IME 마무리)뿐이다. 저장 중(saving)과 다르다 — 그 편집은 살아남는다.
+    // Edits during a replacement have nowhere to go the moment the new state
+    // installs (spec §4). Title field and preview are locked meanwhile, so what
+    // arrives here is only the commit (blur, IME finishing) of a block that was
+    // already open. Different from saving — those edits survive.
     if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const block = get().blocks.find((b) => b.id === id);
     if (!block || block.locked !== null) return;
-    // 프리뷰에서 돌아온 내용은 경계를 지나 원문 표기로 돌아온다 (ADR-011 · INV-9) —
-    // 블록 안에 치환된 자원이 있으면 innerHTML 에 blob URL 이 실려 있고, 그대로
-    // 패치가 되면 탭을 닫는 순간 죽는 주소가 파일에 박힌다. 제목(rcdata)은 호스트
-    // 입력 칸에서 오지만, 경계는 제 blob 표기만 만지므로 함께 지나도 그대로다.
-    // 블록 범위를 함께 준다 — 같은 파일을 다르게 적은 참조가 하나의 표기로 뭉치지
-    // 않고 자리마다 제 표기로 돌아간다 (spec §5.1 · 대원칙 2).
+    // Content returning from the preview passes the boundary back to the original
+    // notation (ADR-011 · INV-9) — with swapped assets inside the block, the
+    // innerHTML carries blob URLs, and patched as-is the file would hold addresses
+    // that die the moment the tab closes. The title (rcdata) comes from the host
+    // input field, but the boundary touches only its own blob notation, so passing
+    // it through leaves it untouched. The block range goes along too — references
+    // spelling the same file differently return to their own notation per spot
+    // instead of collapsing into one (spec §5.1 · Principle 2).
     const restored = get().boundary?.fromPreview(html, block.innerStart, block.innerEnd) ?? html;
     const before = get().patches;
     const patches = nextPatches(before, block, restored, pristine);
-    // 눌렀다 그냥 빠져나온 것은 아무 일도 아니다 — 패치도, 편집 순서도, unsaved 도
-    // 그대로 둔다. 여기서 뭐라도 만지면 "들어갔다 나오기" 가 상태를 바꾸는 일이 된다.
+    // Clicking in and leaving is a non-event — patches, edit order and unsaved
+    // all stay put. Touching anything here would make "in and out" a state change.
     if (patches === before) return;
-    // 다시 고친 블록은 맨 뒤로 옮긴다 — 그것이 가장 최근 변경이다.
+    // A re-edited block moves to the back — it is the most recent change.
     const editOrder = get().editOrder.filter((x) => x !== id);
     if (patches.has(id)) editOrder.push(id);
-    // 고쳤다가 파일과 같은 내용으로 되돌아온 것은 저장할 것이 아니다.
-    // 결과물과 파일을 견줘야 맞게 읽힌다 (spec §5).
+    // Edited and then back to the file's content, there is nothing to save.
+    // Only comparing output against file reads this correctly (spec §5).
     set({ patches, editOrder, unsaved: differsFromDisk({ ...get(), patches }) });
   },
 
-  // 갈아 끼우기 잠금은 예약의 release 가 내린다 — 여기서 내리면 겹쳐 도는 다른
-  // 갈아 끼우기의 잠금을 남이 푸는 셈이다 (spec §5). 여기로 오는 실패(드롭한 폴더
-  // 훑기 등)는 잠금을 세우기 전의 것이라 끌 것도 없다.
+  // The replacement lock is lowered by the reservation's release — lowered here,
+  // someone else would be unlocking an overlapping replacement (spec §5).
+  // Failures arriving here (a dropped folder's scan, etc.) predate the lock, so
+  // there is nothing to switch off.
   failedToOpen: (e) => set({ notice: openFailedNotice(e) }),
 
-  // 잠긴 블록을 누르면 이유를 말한다 (대원칙 3). 누를 때마다 뜨는 것이라 여기서 띄운다 —
-  // 화면 쪽에서 blockedId 변화를 보면 같은 블록을 다시 눌렀을 때 아무 일도 일어나지 않는다.
+  // Clicking a locked block tells the reason (Principle 3). It appears on every
+  // click, so it is shown here — if the screen watched blockedId changes, a
+  // second click on the same block would do nothing.
   onBlocked: (id) => {
     const block = get().blocks.find((b) => b.id === id);
     if (block?.locked) {
@@ -821,17 +889,19 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
   select: (id) => set({ selectedId: id, blockedId: null }),
 
-  // 대조가 끝나기 전의 클릭 — 프리뷰는 편집을 열지 않았다. 왜 안 열리는지 말한다 (대원칙 3).
+  // A click before the cross-check finished — the preview did not open editing. Say why it will not open (Principle 3).
   onNotReady: () => {
     useToasts.getState().show({ key: 'app.editBeforeScan' }, 'locked');
   },
 
-  // 패치만 지우면 프리뷰에는 고친 내용이 그대로 남는다. 그 블록을 다시 눌렀다
-  // 빠져나오면 패치가 되살아나 프리뷰와 저장본이 영영 어긋난다.
+  // Deleting only the patch leaves the edited content in the preview. Clicking
+  // into that block and out revives the patch, and preview and saved file diverge
+  // for good.
   revert: (id) => {
-    // 갈아 끼우는 동안의 되돌리기는 이전 문서를 고치는 일이다 — 바뀐 패치도, 프리뷰로
-    // 보낼 되돌림도 설치 순간 갈 곳이 없다. 버튼은 잠겨 있지만 단축키(Ctrl+Z)는
-    // 언제든 눌린다 (spec §4).
+    // A revert during a replacement edits the previous document — the changed
+    // patches and the revert bound for the preview alike have nowhere to go at
+    // install. The button is locked, but the shortcut (Ctrl+Z) can fire any time
+    // (spec §4).
     if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const { patches, blocks, revertQueue } = get();
     const next = new Map(patches);
@@ -840,22 +910,23 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({
       patches: next,
       editOrder: get().editOrder.filter((x) => x !== id),
-      // 소스 내용은 경계로 치환해 내보낸다 (ADR-011) — 원문 그대로 보내면 프리뷰의
-      // blob 치환이 풀려 되돌린 블록의 그림만 깨진다.
+      // Source content leaves swapped through the boundary (ADR-011) — sent raw,
+      // the preview's blob swap comes undone and the reverted block's images break.
       revertQueue: [...revertQueue, { id, html: previewInner(get(), block) }],
-      // 되돌리기도 파일과 달라질 수 있는 일이다 — 이미 저장한 내용을 되돌린 것일 수
-      // 있다. 반대로 저장한 적 없는 편집을 되돌렸으면 파일과 같아져 잃을 것이 없다.
+      // A revert can also diverge from the file — it may undo already-saved
+      // content. Conversely, reverting a never-saved edit matches the file again
+      // and there is nothing to lose.
       unsaved: differsFromDisk({ ...get(), patches: next }),
     });
   },
 
   revertAll: () => {
-    // revert 와 같은 이유 — 갈아 끼우는 동안 이전 문서를 고치지 않는다 (spec §4).
+    // Same reason as revert — never edit the previous document during a replacement (spec §4).
     if (refuseWhileReplacing('app.editWhileReplacing')) return;
     const { patches, blocks, revertQueue } = get();
     const restored = [...patches.keys()].map((id) => ({
       id,
-      // revert 와 같은 이유 — 프리뷰로 나가는 소스 내용은 경계로 치환한다 (ADR-011).
+      // Same reason as revert — source content bound for the preview is swapped through the boundary (ADR-011).
       html: previewInner(
         get(),
         blocks.find((b) => b.id === id)
@@ -865,12 +936,12 @@ export const useEditor = create<EditorState>((set, get) => ({
       patches: new Map(),
       editOrder: [],
       revertQueue: [...revertQueue, ...restored],
-      // 전부 되돌린 결과물은 원본 그대로다 — 파일도 원본 그대로면 잃을 것이 없다.
+      // The output with everything reverted is the pristine original — if the file is too, there is nothing to lose.
       unsaved: differsFromDisk({ ...get(), patches: new Map() }),
     });
   },
 
-  // 편집 중이 아닐 때의 Ctrl+Z. 편집 중에는 브라우저의 네이티브 undo 가 담당한다 (spec §4).
+  // Ctrl+Z outside an active edit. During one, the browser's native undo is in charge (spec §4).
   undoLast: () => {
     const { editOrder, revert } = get();
     const last = editOrder[editOrder.length - 1];
@@ -879,12 +950,13 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   drainReverts: () => set({ revertQueue: [] }),
 
-  // 고른 블록을 화면에서도 짚어준다. 목록만 보고는 문서 어디였는지 알기 어렵다.
+  // Points out the chosen block on screen too. The list alone hardly says where in the document it was.
   reveal: (id) => set({ revealId: id, selectedId: id, blockedId: null }),
   drainReveal: () => set({ revealId: null }),
 
-  // 원본은 건드리지 않고 결과물만 파일로 받는다 (spec §4 · 사본 내려받기).
-  // 패치가 없어도 동작한다 — 고치기 전 백업을 받는 용도로도 쓴다.
+  // The original is untouched; only the output goes out as a file (spec §4 ·
+  // download a copy). Works with zero patches too — also used to take a backup
+  // before editing.
   downloadCopy: () => {
     const { file, source, blocks, patches } = get();
     if (!file) return;
@@ -905,11 +977,12 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   /**
-   * 폴더를 골라 그 안의 문서를 연다 (spec §5.1).
+   * Picks a folder and opens the document inside (spec §5.1).
    *
-   * 편집 권한까지 함께 받는다. 열기로 연 것은 덮어쓴다는 규칙을 폴더에서도 지키려면
-   * 되쓸 핸들이 있어야 하고, 그 핸들은 대화상자에서만 나온다.
-   * 사용자가 편집 허용을 거절하면 브라우저가 취소로 돌려주므로 아무 일도 일어나지 않는다.
+   * Edit permission is requested along with it. Keeping the rule that what was
+   * opened via the dialog gets overwritten requires writable handles, and those
+   * come only from the dialog. If the user refuses to allow editing, the browser
+   * returns a cancel and nothing happens.
    */
   openFolder: async () => {
     if (!canPickFolder()) {
@@ -917,13 +990,16 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
     set({ notice: null });
-    // 예약은 사용자 행동의 순간에 — 대화상자·훑기·물음을 기다리기 전에 (spec §5).
+    // Reserve at the moment of the user action — before waiting on the dialog,
+    // the scan, the question (spec §5).
     const mine = reserveReplacement();
-    // catch 에서도 스캔이 잘렸는지 봐야 한다 — 문서가 한도 밖에 있었을 수 있다.
+    // The catch must also see whether the scan was truncated — the document may
+    // have been beyond the limit.
     let read: FolderRead | null = null;
     try {
-      // 파일 열기와 같은 이유로 대화상자가 먼저다. 열려 있는 사이 밀려났으면
-      // guarded 가 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      // The dialog comes first, for the same reason as opening a file. Displaced
+      // while it was open, guarded retreats with Superseded and never asks while
+      // displaced (spec §5).
       read = await mine.guarded(pickFolder(null, 'readwrite'));
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
@@ -939,10 +1015,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   /**
-   * 폴더를 열어 외부 자원을 붙인다 (spec §5.1).
+   * Opens a folder to attach external assets (spec §5.1).
    *
-   * 파일 핸들은 그대로 두므로 **덮어쓰기 저장은 계속 된다.** 폴더는 읽기 전용으로만 받는다.
-   * 프리뷰를 다시 그리므로 편집 상태는 사라진다 — 버려도 되는지는 부르는 쪽이 먼저 묻는다.
+   * The file handle is left alone, so **overwrite-save keeps working.** The
+   * folder is taken read-only. The preview is redrawn, so the edit state is lost —
+   * whether that is acceptable is asked by the caller first.
    */
   linkFolder: async () => {
     const { file } = get();
@@ -953,33 +1030,41 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
 
     set({ notice: null });
-    // 예약은 사용자 행동의 순간에 — 대화상자·훑기·물음을 기다리기 전에 (spec §5).
+    // Reserve at the moment of the user action — before waiting on the dialog,
+    // the scan, the question (spec §5).
     const mine = reserveReplacement();
     try {
-      // 대화상자를 파일이 있던 자리에서 연다 — 대개 그 폴더가 정답이다. 열려 있는
-      // 사이 밀려났으면 guarded 가 Superseded 로 물러나, 밀려난 채 묻지 않는다 (spec §5).
+      // The dialog opens where the file lived — usually that folder is the answer.
+      // Displaced while it was open, guarded retreats with Superseded and never
+      // asks while displaced (spec §5).
       const read = await mine.guarded(pickFolder(file.handle));
       if (!read) return;
       if (!(await keepEdits({ key: 'confirm.whyAssets' }, mine))) return;
 
       const loading = async (): Promise<Partial<EditorState>> => {
-        // 지금 문서가 묶음에서 왔다면 그 경로는 옛 묶음 기준이다. 새로 고른 폴더 기준으로
-        // 옮겨 줘야 한다 — 안 그러면 제 폴더를 골라 주고도 자원을 못 찾는다.
-        // 파일 하나로 연 문서에는 묶음 경로가 아예 없다 — 그때는 이름이 곧 경로다
-        // (OpenedFile.path 의 규칙 그대로). 경로 없이 두면 아래 keep 이 비어, 다른
-        // 문서로 갔다 돌아올 때 핸들을 잃는다.
+        // If the current document came from a bundle, its path is relative to the
+        // old bundle. It must be rebased onto the newly picked folder — otherwise
+        // assets go unfound even though the user picked the right folder. A
+        // document opened as a single file has no bundle path at all — then the
+        // name is the path (exactly OpenedFile.path's rule). Left pathless, keep
+        // below would be empty and the handle would be lost on a round trip to
+        // another document.
         const fresh = await reread(get().file ?? file);
         const rebased = { ...fresh, path: rebasePath(fresh.path ?? fresh.name, read.files) };
-        // 연결로 받은 핸들은 묶음에 남기지 않는다. 이 길은 읽기 전용이라(read) 그 핸들로는
-        // 저장이 거부되는데, 묶음의 핸들로 남으면 다른 문서로 갈아탈 때 file.handle 자리에
-        // 들어가 "덮어쓰기" 라던 저장이 그제서야 실패한다.
-        // 지금 문서의 핸들만은 남긴다 — 열 때 받은 쓰기 가능한 핸들이라, 버리면 다른
-        // 문서로 갔다 돌아왔을 때 덮어쓰기가 조용히 사본 내려받기로 격하되고, 연결할 때
-        // 읽어 둔 옛 바이트가 그 사이 저장한 내용을 덮는다 (spec §5.1 · 핸들 유지).
-        // 단, **같은 파일임을 증명한 때에만** 남긴다. 경로가 겹친다고 같은 파일은 아니다 —
-        // 기본명 폴백(rebasePath)이 고른 자리는 이름만 같은 남의 파일일 수 있고, 그 경로에
-        // 이 쓰기 핸들을 걸면 갔다 돌아올 때 그 자리에서 이 파일이 대신 열리고 저장이
-        // 남의 자리 내용을 덮는다. 증명할 수 없으면 남기지 않는 쪽이 낫다 (대원칙 3).
+        // Handles received through linking are not kept in the bundle. This road is
+        // read-only (read), so saving through such a handle is refused — kept as a
+        // bundle handle, it would land in file.handle on a document switch and a
+        // save that claimed to be "overwrite" would fail only then.
+        // Only the current document's handle is kept — it is the writable handle
+        // from open time; dropped, a round trip to another document silently
+        // demotes overwrite to download-a-copy, and the old bytes read at link
+        // time overwrite whatever was saved in between (spec §5.1 · keeping the
+        // handle). But keep it **only when the same file is proven.** Overlapping
+        // paths do not make the same file — the spot picked by the basename
+        // fallback (rebasePath) may be someone else's file that merely shares the
+        // name, and hanging this write handle on that path makes this file open
+        // there on the round trip, with saves overwriting someone else's spot.
+        // Without proof, not keeping it is the better side (Principle 3).
         const twin = rebased.path ? read.handles.get(rebased.path) : undefined;
         const proven =
           rebased.handle && twin ? ((await rebased.handle.isSameEntry?.(twin)) ?? false) : false;
@@ -987,9 +1072,10 @@ export const useEditor = create<EditorState>((set, get) => ({
           proven && rebased.path && rebased.handle
             ? new Map([[rebased.path, rebased.handle]])
             : undefined;
-        // 증명 못 한 문서는 묶음의 일원도 아니다 — 되찾은 자리는 자원을 찾는 기준으로만
-        // 쓴다. 묶음 경로로 삼으면 저장이 그 경로의 묶음 내용을 이 문서의 결과물로
-        // 갈아 끼워, 폴더의 **다른** 문서를 바꿔치기한다 (spec §5.1).
+        // An unproven document is not a member of the bundle either — the recovered
+        // spot is used only as the base for finding assets. Adopted as the bundle
+        // path, a save would swap that path's bundle content for this document's
+        // output, switching out a **different** document in the folder (spec §5.1).
         return load(rebased, read.files, keep, proven);
       };
       const next = await replace(get, set, mine, loading());
@@ -1011,17 +1097,19 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   /**
-   * 같은 묶음 안의 다른 문서로 갈아탄다 (spec §5.1).
+   * Switches to another document in the same bundle (spec §5.1).
    *
-   * 이미 풀어 둔 파일을 그대로 쓴다 — zip 을 다시 푸는 것은 헛일이다.
-   * 프리뷰를 다시 그리므로 편집은 사라진다. 버려도 되는지는 부르는 쪽이 먼저 묻는다.
+   * Uses the already-unpacked files — re-unpacking the zip is wasted work.
+   * The preview is redrawn, so edits are lost. Whether that is acceptable is
+   * asked by the caller first.
    */
   /**
-   * 열어 둔 문서를 닫고 처음 화면으로 돌아간다.
+   * Closes the open document and returns to the initial screen.
    *
-   * 문서를 **바꾸는** 일이므로 여는 것과 같은 길을 지난다 — 사용자 행동의 순간에
-   * 예약하고, 저장하지 않은 편집이 있으면 묻고, 자원을 놓아준다 (spec §5).
-   * 닫기만 예외로 두면 그 자리에서 편집이 조용히 사라지고 blob 이 남는다.
+   * It **changes** the document, so it walks the same road as opening — reserve
+   * at the moment of the user action, ask about unsaved edits, release the assets
+   * (spec §5). Made an exception, closing would silently lose edits on the spot
+   * and leave blobs behind.
    */
   closeFile: async () => {
     if (!get().file) return;
@@ -1043,13 +1131,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!bundle || path === docPath) return;
 
     set({ notice: null });
-    // 예약은 사용자 행동의 순간에 — 물음·저장을 기다리기 전에 (spec §5).
+    // Reserve at the moment of the user action — before waiting on the question, the save (spec §5).
     const mine = reserveReplacement();
     try {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }, mine))) return;
-      // 물음에 저장으로 답했으면 묶음이 방금 그 결과물로 갈렸다 (내려받기 저장은
-      // 묶음이 유일한 원천이다, spec §5). 멈추기 전에 받아 둔 묶음을 그대로 쓰면
-      // 설치가 저장 전 바이트를 되살려, 돌아왔을 때 저장한 내용이 조용히 사라진다.
+      // Answered with save, the bundle was just swapped for that output (for a
+      // download save the bundle is the only source of truth, spec §5). Using the
+      // bundle captured before the stop would have the install revive the
+      // pre-save bytes, and the saved content would silently vanish on return.
       const fresh = get().bundle;
       if (!fresh) return;
       await replace(get, set, mine, openBundle(fresh, path, get().bundleHandles));
@@ -1062,54 +1151,65 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   save: async () => {
     const { file, source, blocks, patches, unsaved, saving } = get();
-    // 파일과 다른 것이 없으면 아무 일도 하지 않는다. 버튼은 이미 비활성이지만
-    // 단축키는 언제든 눌리므로, 같은 내용을 다시 쓰는 헛일을 여기서 막는다.
+    // With nothing differing from the file, do nothing. The button is already
+    // disabled, but the shortcut can fire any time, so the wasted rewrite of
+    // identical content is blocked here.
     //
-    // 패치 개수로 거르면 안 된다 (spec §5). 이미 저장한 편집을 되돌리면 패치는 0개인데
-    // 파일에는 옛 편집이 남아 있다 — 그때 여기서 false 로 나가면 "저장하고 계속하기" 가
-    // 쓸 것이 없다며 멈춰, 대화상자에서 빠져나갈 길이 취소와 버리기뿐이 된다.
-    // 패치 0개의 저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다.
+    // Filtering by patch count is wrong (spec §5). Reverting an already-saved edit
+    // leaves zero patches while the file still holds the old edit — returning
+    // false here would stall "save and continue" with nothing to write, leaving
+    // cancel and discard as the only ways out of the dialog. A zero-patch save
+    // rewrites the pristine original, making the file match the screen.
     //
-    // 저장이 파일을 쓰는 동안의 저장은 시작하지 않는다 (spec §5). 쓰는 사이 편집하면
-    // unsaved 가 다시 서서 Ctrl+S 가 여기까지 오는데, 겹쳐 돌면 두 저장이 서로 다른
-    // 스냅샷을 나란히 쓰다 끝나는 순서에 따라 옛 결과물이 디스크에서 이긴다.
-    // 잃는 것은 없다 — 도는 저장이 끝나면 그 편집은 저장 안 된 것으로 남는다.
+    // No save starts while a save is writing the file (spec §5). An edit made
+    // during the write raises unsaved again and Ctrl+S gets this far, but run on
+    // top of each other, two saves write different snapshots side by side and the
+    // old output wins on disk depending on finish order. Nothing is lost — when
+    // the running save ends, that edit remains unsaved.
     if (!file || !unsaved || saving) return false;
-    // 쓰는 동안 다른 문서로 갈아탈 수 있다. 뒤늦게 도착한 결과가 새 문서의 상태에
-    // 옛 결과물을 적지 않도록, 시작하기 전에 지금 문서의 세대를 받아 둔다 (spec §5).
+    // The document can be switched while writing. So a late-arriving result never
+    // writes the old output into the new document's state, take the current
+    // document's generation before starting (spec §5).
     const mine = claimDocument();
     set({ saving: true, notice: null });
     try {
       const list = [...patches].map(([id, newInnerHtml]) => ({ id, newInnerHtml }));
       const output = applyPatches(source, blocks, list);
-      // 이제부터 파일은 이 결과물을 향해 간다 — 쓰는 사이의 편집·되돌리기가
-      // "파일과 다른가" 를 잴 때의 기준이다 (spec §5). 옛 savedText 로 재면 쓰는
-      // 사이에 되돌린 편집이 잃을 것 없음으로 읽혀 경고 없이 탭이 닫힌다.
+      // From here the file heads toward this output — it is the baseline for
+      // "does it differ from the file" while edits and reverts happen mid-write
+      // (spec §5). Measured against the old savedText, an edit reverted during
+      // the write reads as nothing-to-lose and the tab closes without warning.
       set({ pendingText: output });
       const how = await saveFile(file, output);
-      // 갈아탄 뒤 도착한 결과는 이전 문서의 것이다. 파일에는 이미 썼고 그것은 그
-      // 파일의 몫이라 잃는 것이 없다 — 새 문서에 적을 것은 아무것도 없다.
+      // A result arriving after a switch belongs to the previous document. The
+      // file was written and that belongs to the file, so nothing is lost — and
+      // there is nothing to write into the new document.
       if (!mine()) return false;
       set((s) => ({
-        // 파일은 이제 방금 쓴 결과물을 들고 있다. 쓰는 동안에도 프리뷰는 편집할 수
-        // 있으므로, 지금 상태를 그 결과물과 다시 견준다 — 그 사이 확정된 편집은
-        // 파일에 없으니 더러운 채로 남고, 아무 일도 없었으면 깨끗해진다.
+        // The file now holds the output just written. The preview stays editable
+        // during the write, so the current state is compared against that output
+        // again — edits committed in between are not in the file and stay dirty,
+        // and with nothing in between it comes out clean.
         savedText: output,
-        // 방금 쓴 결과물에 들어간 패치들 — 물음의 "{count}곳" 이 지금 패치와 이것의
-        // 차이를 센다 (spec §4). 쓰는 동안 확정된 편집은 여기 없으니 다른 곳으로 남는다.
+        // The patches that went into the output just written — the question's
+        // "{count} spots" counts the difference between these and the current
+        // patches (spec §4). Edits committed during the write are not here, so
+        // they remain as differing spots.
         savedPatches: new Map(patches),
-        // 핸들 없는 문서는 내려받은 사본이 곧 파일의 내용이다 (spec §5). 메모리의
-        // text 를 옛것으로 두면, 폴더 연결이 reread 로 그 옛 내용을 그대로 받아
-        // 저장 전 화면으로 되돌아간다 — 핸들이 있으면 디스크에서 다시 읽어 맞춘다.
+        // For a handleless document the downloaded copy is what the file holds
+        // (spec §5). With the in-memory text left old, folder linking would take
+        // that old content straight from reread and fall back to the pre-save
+        // screen — with a handle it re-reads from disk to stay aligned.
         file: s.file && !s.file.handle ? { ...s.file, text: output } : s.file,
-        // 묶음에서 온 문서면 묶음의 바이트도 결과물로 갈아 끼운다. 열 때의 바이트를
-        // 그대로 두면 다른 문서로 갔다 돌아올 때 그 옛 바이트가 다시 열려, 내려받기로
-        // 저장한 편집이 화면에서 조용히 사라진다 — 핸들이 있으면 디스크에서 다시
-        // 읽어(reread) 맞추지만, 내려받기 저장은 이 묶음이 유일한 원천이다.
+        // For a bundle document, the bundle's bytes are swapped for the output
+        // too. Left as the open-time bytes, a round trip to another document
+        // reopens those old bytes and the edits saved via download silently vanish
+        // from the screen — with a handle, reread realigns from disk, but for a
+        // download save this bundle is the only source of truth.
         bundle: s.bundle?.has(s.docPath)
           ? new Map(s.bundle).set(s.docPath, new Blob([output], { type: 'text/html' }))
           : s.bundle,
-        // 쓰기가 끝났다 — 기준은 이제 savedText(방금 쓴 결과물) 그 자체다.
+        // The write finished — the baseline is now savedText (the output just written) itself.
         pendingText: null,
         unsaved: differsFromDisk({ ...s, savedText: output, pendingText: null }),
         notice: {
@@ -1119,13 +1219,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       }));
       return true;
     } catch (e) {
-      // 실패도 이전 문서의 것이면 알리지 않는다 — 파일 이름도 없는 실패 알림은
-      // 지금 문서의 일로 읽혀, 멀쩡한 새 문서를 두고 사용자를 헤매게 한다.
+      // A failure belonging to the previous document is not notified either — a
+      // failure notice without even a file name reads as the current document's,
+      // sending the user hunting around a perfectly fine new document.
       if (mine()) {
         set((s) => ({
-          // 쓰기가 실패했다 — 파일은 옛 내용 그대로다 (쓰기는 닫을 때 확정된다).
-          // 쓰는 사이 결과물 기준으로 잰 unsaved 를 옛 기준으로 다시 잰다. 안 그러면
-          // 쓰는 사이의 편집이 실패한 결과물과 같다는 이유로 저장된 척 남는다.
+          // The write failed — the file still holds the old content (writes
+          // finalize on close). unsaved, measured against the output during the
+          // write, is re-measured against the old baseline. Otherwise an edit made
+          // during the write would pose as saved just for matching the failed output.
           pendingText: null,
           unsaved: differsFromDisk({ ...s, pendingText: null }),
           notice:
@@ -1136,16 +1238,17 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
       return false;
     } finally {
-      // 저장이 내리는 것은 **제 표시(saving)뿐**이다. 갈아 끼우기 잠금(replacing)은
-      // 예약이 들고 있어, 새 갈아 끼우기가 도는 사이에 앞선 저장이 끝나도 화면이
-      // 풀리지 않는다 (spec §5 · 갈아 끼우기 예약). 갈아탄 뒤에 도착했으면(mine 이
-      // 아니면) 이 saving 도 이전 문서의 것이다 — 설치가 이미 내렸으니 두고 간다.
+      // Saving lowers **only its own indicator (saving)**. The replacement lock
+      // (replacing) is held by the reservation, so an earlier save finishing while
+      // a new replacement runs does not unlock the screen (spec §5 · replacement
+      // reservation). Arriving after a switch (not mine), this saving belongs to
+      // the previous document too — the install already lowered it, so leave it be.
       if (mine()) set({ saving: false });
     }
   },
 }));
 
-/** 잠금 사유별 개수 — UI 가 "왜 못 고치는지"를 보여주기 위한 집계 */
+/** Counts per lock reason — the tally the UI shows for "why these cannot be edited" */
 export function lockSummary(blocks: readonly Block[]): { reason: LockReason; count: number }[] {
   const counts = new Map<LockReason, number>();
   for (const b of blocks) {

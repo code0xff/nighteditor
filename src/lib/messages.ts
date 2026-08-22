@@ -1,11 +1,12 @@
 /**
- * 언어팩 — 화면에 뜨는 모든 문구의 유일한 출처 (docs/spec.md §1 · UI 언어).
+ * The language pack — the single source of every phrase on screen (docs/spec.md §1 · UI language).
  *
- * `ko` 가 원본이고 `en` 은 `Record<MessageKey, string>` 이라, 키를 하나 빠뜨리면
- * 런타임에 한국어가 새는 대신 타입 검사에서 걸린다.
+ * `ko` is the original and `en` is a `Record<MessageKey, string>`, so a missing
+ * key is caught by the type checker instead of leaking Korean at runtime.
  *
- * 알림은 완성된 문장이 아니라 `Notice` (키 + 파라미터)로 옮긴다. 스토어가 문장을
- * 만들어 두면 언어를 바꿔도 이미 떠 있는 알림은 옛 언어로 남는다.
+ * Notifications travel as a `Notice` (key + params), not as finished sentences.
+ * If a store built the sentence, notifications already on screen would stay in
+ * the old language after a switch.
  */
 import type { LockReason } from '@/core/types';
 import type { PatchErrorCode } from '@/core/patch';
@@ -16,8 +17,9 @@ export type Locale = 'ko' | 'en';
 export const LOCALES: readonly Locale[] = ['ko', 'en'];
 
 /**
- * 언어 이름은 **그 언어로** 적는다. 못 읽는 언어로 적어두면 고를 수가 없다.
- * 그래서 사전(ko/en)이 아니라 언어와 무관한 상수다.
+ * Language names are written **in their own language**. Written in a language the
+ * user cannot read, they cannot be chosen. That is why this is a locale-independent
+ * constant, not a dictionary (ko/en) entry.
  */
 export const LOCALE_LABEL: Record<Locale, string> = { ko: '한국어', en: 'English' };
 
@@ -134,7 +136,7 @@ const ko = {
 
 export type MessageKey = keyof typeof ko;
 
-/** 사전 점검용 키 목록 — 테스트가 두 언어의 완전성과 자리표시자 짝을 대조한다 */
+/** Key list for dictionary audits — tests check both languages' completeness and placeholder pairing */
 export const MESSAGE_KEYS = Object.keys(ko) as MessageKey[];
 
 const en: Record<MessageKey, string> = {
@@ -248,16 +250,16 @@ const en: Record<MessageKey, string> = {
 
 const DICT: Record<Locale, Record<MessageKey, string>> = { ko, en };
 
-/** 파라미터 값은 중첩된 `Notice` 일 수 있다 — "저장 거부: {detail}" 처럼 사유가 또 문구일 때 */
+/** A param value may be a nested `Notice` — when the reason is itself a phrase, as in "save rejected: {detail}" */
 export type Params = Record<string, string | number | Notice>;
 
-/** 아직 번역되지 않은 알림. 스토어는 이걸 들고 있고, 문장은 그릴 때 만든다 */
+/** A not-yet-translated notification. Stores hold this; the sentence is built at render time */
 export interface Notice {
   key: MessageKey;
   params?: Params;
 }
 
-/** 잠금 사유 → 메시지 키. 사유가 늘면 여기서 타입 오류가 난다 */
+/** Lock reason → message key. A new reason becomes a type error here */
 const LOCK_KEY: Record<LockReason, MessageKey> = {
   RAW_TEXT: 'lock.RAW_TEXT',
   SCRIPT_GENERATED: 'lock.SCRIPT_GENERATED',
@@ -267,7 +269,7 @@ const LOCK_KEY: Record<LockReason, MessageKey> = {
   MARKER_CLASH: 'lock.MARKER_CLASH',
 };
 
-/** 패치 거부 코드 → 메시지 키. `core/` 는 언어를 모르므로 코드만 넘겨받는다 (INV-6) */
+/** Patch rejection code → message key. `core/` knows no language, so only codes cross over (INV-6) */
 const PATCH_KEY: Record<PatchErrorCode, MessageKey> = {
   unknownId: 'patch.unknownId',
   locked: 'patch.locked',
@@ -275,7 +277,7 @@ const PATCH_KEY: Record<PatchErrorCode, MessageKey> = {
   duplicate: 'patch.duplicate',
 };
 
-/** zip 거부 코드 → 메시지 키. `patchNotice` 와 같은 길이다 — `core/` 는 언어를 모른다 (INV-6) */
+/** zip rejection code → message key. Same road as `patchNotice` — `core/` knows no language (INV-6) */
 const ZIP_KEY: Record<ZipErrorCode, MessageKey> = {
   notZip: 'zip.notZip',
   zip64: 'zip.zip64',
@@ -302,7 +304,7 @@ function isLockReason(value: unknown): value is LockReason {
   return typeof value === 'string' && value in LOCK_KEY;
 }
 
-/** 잠금 사유가 섞여 있으면 코드(`CODE_BLOCK`)가 아니라 사람 말로 바꿔 끼운다 */
+/** If a lock reason is among the params, swap in human words rather than the code (`CODE_BLOCK`) */
 export function patchNotice(code: PatchErrorCode, params?: Params): Notice {
   const reason = params?.reason;
   if (isLockReason(reason))
@@ -318,7 +320,7 @@ function fill(template: string, locale: Locale, params: Params): string {
   });
 }
 
-/** 프리뷰 안 서식 막대에 붙는 문구 — 호스트가 모아서 건넨다 (ADR-007) */
+/** Labels for the formatting bar inside the preview — the host collects and hands them over (ADR-007) */
 export const FORMAT_LABELS = [
   'format.bold',
   'format.italic',
@@ -330,15 +332,16 @@ export const FORMAT_LABELS = [
 ] as const satisfies readonly MessageKey[];
 
 /**
- * 스스로 사라지면 안 되는 알림.
+ * Notifications that must not disappear on their own.
  *
- * 저장 실패가 3초 만에 사라지면 못 본 사람은 저장된 줄 안다. 잘된 일은 흘려보내도 되지만
- * 안 된 일은 사람이 직접 닫아야 한다 (대원칙 3).
+ * If a save failure vanishes after 3 seconds, whoever missed it believes the save
+ * succeeded. Good news may drift by, but bad news must be dismissed by a person
+ * (Principle 3).
  */
 export const ERROR_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   'notice.openFailed',
   'notice.openFailedDetail',
-  // 파일을 못 연 이유다 — 4초 만에 사라지면 왜 안 열리는지 알 길이 없다 (대원칙 3).
+  // The reason a file failed to open — gone in 4 seconds, there is no way to learn why (Principle 3).
   'notice.notUtf8',
   'notice.saveFailed',
   'notice.saveRejected',
@@ -348,7 +351,7 @@ export const ERROR_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   'notice.assetsNotFound',
 ]);
 
-/** 사전에 없는 키는 감추지 않고 키 그대로 보여준다 — 조용히 비는 것보다 낫다 (대원칙 3) */
+/** A key missing from the dictionary is shown as the raw key, not hidden — better than a silent blank (Principle 3) */
 export function translate(locale: Locale, key: MessageKey, params?: Params): string {
   const template = DICT[locale][key] ?? DICT.ko[key] ?? key;
   return params ? fill(template, locale, params) : template;
