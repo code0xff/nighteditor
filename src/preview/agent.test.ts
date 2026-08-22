@@ -1436,4 +1436,42 @@ describe('previewAgent · flush — 열려 있는 편집을 지금 확정한다 
 
     expect(sent).toEqual([{ type: 'flushed', seq: 3 }]);
   });
+
+  it('조합 중이면 답을 미뤘다가, 미룬 확정이 나간 뒤에 답한다', () => {
+    // 답의 뜻은 "내보낼 확정을 전부 내보냈다" 다 (spec §4). 확정이 미뤄졌는데 답부터
+    // 보내면 호스트가 최신인 줄 알고 갈아 끼워, 조합 중이던 글자가 사라진다.
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    el(0)!.innerHTML = '조합하던 본문';
+    sent = [];
+
+    fromHost({ type: 'flush', seq: 11 });
+    // 확정도 답도 아직이다 — 조합 중의 innerHTML 은 읽지 않는다.
+    expect(sent).toEqual([]);
+
+    document.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+
+    const editAt = sent.findIndex((m) => m.type === 'edit');
+    const flushedAt = sent.findIndex((m) => m.type === 'flushed');
+    expect(sent[editAt]).toMatchObject({ type: 'edit', id: 0, html: '조합하던 본문' });
+    expect(sent[flushedAt]).toMatchObject({ type: 'flushed', seq: 11 });
+    expect(editAt).toBeLessThan(flushedAt);
+  });
+
+  it('미룬 답은 편집을 버릴 때(Escape)도 나간다 — 내보낼 확정이 없어졌다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(el(0)!);
+    document.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    el(0)!.innerHTML = '조합하던 본문';
+    sent = [];
+
+    fromHost({ type: 'flush', seq: 12 });
+    keydown('Escape');
+
+    // 버린 편집에는 확정이 없다 — edit 없이 답만 나가고, 내용은 열기 전으로 돌아간다.
+    expect(sent.find((m) => m.type === 'edit')).toBeUndefined();
+    expect(sent).toContainEqual({ type: 'flushed', seq: 12 });
+    expect(el(0)!.innerHTML).toBe('본문');
+  });
 });

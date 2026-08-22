@@ -58,6 +58,16 @@ export function previewAgent(token = ''): () => void {
   let barHeld = false;
   /** 조합 중이라 미뤄둔 확정이 있는지 */
   let pendingCommit = false;
+  /**
+   * 확정이 미뤄진 사이 도착해 함께 미뤄 둔 flush 청의 번호들 (spec §4).
+   * 답(flushed)의 뜻은 "내보낼 확정을 전부 내보냈다" 라, 미룬 확정보다 먼저 답하면
+   * 호스트가 최신인 줄 알고 갈아 끼워 조합 중이던 글자가 사라진다.
+   */
+  const pendingFlush: number[] = [];
+  /** 미뤄 둔 flush 답을 지금 보낸다 — 미룬 확정이 나갔거나(commit) 버려졌을 때(cancel) */
+  const answerFlushes = (): void => {
+    for (const seq of pendingFlush.splice(0)) post({ type: 'flushed', seq });
+  };
   const locked = new Set<number>();
   /**
    * 호스트가 알려준 실제 블록 id 전부. 문서가 `data-ne-id` 를 흉내 낼 수 있어(spec §3),
@@ -175,6 +185,9 @@ export function previewAgent(token = ''): () => void {
     pendingCommit = false;
     hideBar();
     post({ type: 'select', id: null });
+    // 미뤄 둔 flush 답이 있으면 지금 보낸다 — 확정(edit)이 위에서 먼저 나갔으므로
+    // 이 답이 닿을 즈음이면 호스트의 스토어도 그 편집을 안다.
+    answerFlushes();
   };
 
   /** 편집을 버리고 열기 전 내용으로 되돌린다 */
@@ -197,6 +210,8 @@ export function previewAgent(token = ''): () => void {
     pendingCommit = false;
     hideBar();
     post({ type: 'select', id: null });
+    // 버린 편집에는 내보낼 확정이 없다 — 미뤄 둔 flush 답을 더 붙들 이유도 없다.
+    answerFlushes();
   };
 
   const startEdit = (el: HTMLElement): void => {
@@ -761,11 +776,14 @@ export function previewAgent(token = ''): () => void {
       // 열려 있는 편집을 지금 확정한다 — 호스트가 편집을 잃을 일(닫기·열기·갈아타기)의
       // 물음 전에 청한다 (spec §4). 확정(edit)이 같은 통로로 **먼저** 나가므로, 이 답이
       // 호스트에 닿을 즈음이면 그 확정도 이미 스토어에 닿아 있다.
-      // 조합 중이면 commit 이 확정을 미룬다 — 그래도 답은 보낸다. 프리뷰 밖을 누른
-      // 시점이면 브라우저가 조합을 이미 끝내 줘 여기 오는 flush 는 거의 조합 밖이고,
-      // 미뤄진 확정이 갈아 끼우는 사이에 오면 스토어가 거절하고 알린다 (조용히 사라지지 않는다).
       commit();
-      post({ type: 'flushed', seq: msg.seq });
+      // 조합 중이면 commit 이 확정을 미룬다(pendingCommit). 답의 뜻은 "내보낼 확정을
+      // 전부 내보냈다" 라(spec §4), 여기서 곧바로 답하면 호스트가 최신인 줄 알고 갈아
+      // 끼워 조합 중이던 글자가 사라진다 — 답도 함께 미뤄, 미룬 확정이 나간 뒤
+      // (compositionend→commit)나 편집을 버린 뒤(cancel)에 보낸다. 조합이 영영 안
+      // 끝나는 프리뷰는 호스트의 한도(FLUSH_TIMEOUT)가 맡는다.
+      if (pendingCommit) pendingFlush.push(msg.seq);
+      else post({ type: 'flushed', seq: msg.seq });
     }
   }) as EventListener);
 
