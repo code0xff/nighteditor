@@ -42,6 +42,19 @@ export function mimeOf(path: string): string {
   return MIME[ext] ?? 'application/octet-stream';
 }
 
+/**
+ * 이 파일의 blob 에 붙일 형식 — **아는 확장자면 확장자가 이긴다** (spec §5.1).
+ *
+ * 폴더·드롭이 준 `File` 의 보고된 형식은 못 믿는다 — `.js` 를 `text/plain` 으로
+ * 주는 환경이 있고, 그대로 blob 에 실으면 브라우저가 링크된 스크립트를 형식이
+ * 다르다며 거절해 파일이 옆에 있는데도 프리뷰에서 돌지 않는다. 문서가 확장자로
+ * 참조한 파일에 기대하는 형식은 확장자의 것이다. 모르는 확장자만 보고된 형식을 믿는다.
+ */
+function typeFor(path: string, blob: Blob): string {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  return MIME[ext] ?? (blob.type || 'application/octet-stream');
+}
+
 function isCss(path: string): boolean {
   return path.toLowerCase().endsWith('.css');
 }
@@ -66,7 +79,9 @@ export async function buildAssets(
   };
 
   for (const [path, blob] of files) {
-    if (!isCss(path)) add(path, blob.type ? blob : new Blob([blob], { type: mimeOf(path) }));
+    if (isCss(path)) continue;
+    const type = typeFor(path, blob);
+    add(path, blob.type === type ? blob : new Blob([blob], { type }));
   }
 
   // 스타일시트끼리도 서로를 부른다 (`@import url(…)`). 부르는 쪽의 blob 을 먼저

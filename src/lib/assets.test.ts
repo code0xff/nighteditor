@@ -155,3 +155,52 @@ describe('buildAssets · 스타일시트가 스타일시트를 부른다', () =>
     expect(await entry?.text()).toBe(`@import url('${bundle.urls.get('mid.css')}');`);
   });
 });
+
+describe('buildAssets · blob 의 형식 (spec §5.1)', () => {
+  it('아는 확장자는 보고된 형식을 덮는다 — text/plain 스크립트는 브라우저가 거절한다', async () => {
+    // 폴더·드롭이 .js 를 text/plain 으로 보고하는 환경이 있다. 그대로 blob 에
+    // 실으면 파일이 옆에 있는데도 링크된 스크립트가 돌지 않는다.
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['app.js', new Blob(['console.log(1)'], { type: 'text/plain' })],
+    ]);
+
+    const bundle = await buildAssets(files);
+
+    expect(blobs.get(bundle.urls.get('app.js') ?? '')?.type).toBe('text/javascript');
+  });
+
+  it('형식이 이미 맞으면 그대로 쓴다', async () => {
+    const blobs = stubObjectUrls();
+    const png = new Blob(['x'], { type: 'image/png' });
+    const files = new Map<string, Blob>([['logo.png', png]]);
+
+    const bundle = await buildAssets(files);
+
+    expect(blobs.get(bundle.urls.get('logo.png') ?? '')).toBe(png);
+  });
+
+  it('모르는 확장자는 보고된 형식을 믿고, 그것도 없으면 octet-stream 이다', async () => {
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['data.custom', new Blob(['x'], { type: 'application/x-thing' })],
+      ['bare.custom', new Blob(['x'])],
+    ]);
+
+    const bundle = await buildAssets(files);
+
+    expect(blobs.get(bundle.urls.get('data.custom') ?? '')?.type).toBe('application/x-thing');
+    expect(blobs.get(bundle.urls.get('bare.custom') ?? '')?.type).toBe('application/octet-stream');
+  });
+
+  it('스타일시트는 보고된 형식과 무관하게 text/css 다', async () => {
+    const blobs = stubObjectUrls();
+    const files = new Map<string, Blob>([
+      ['main.css', new Blob(['p{color:red}'], { type: 'text/plain' })],
+    ]);
+
+    const bundle = await buildAssets(files);
+
+    expect(blobs.get(bundle.urls.get('main.css') ?? '')?.type).toBe('text/css');
+  });
+});
