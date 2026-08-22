@@ -369,6 +369,10 @@ export function previewAgent(): () => void {
    * 쓸 수 있는 색은 이미 그 문서 안에 있다.
    *
    * 글자가 있는 요소만 센다 — 빈 칸의 색은 화면에 나타난 적이 없다.
+   *
+   * 눈에 같아 보이는 색은 하나로 묶는다. `rgb(233,233,236)` 과 `rgb(230,230,233)` 은
+   * 계산된 값이 달라 둘로 세지만 12px 짜리 동그라미에서는 구분되지 않는다 —
+   * 고를 수 없는 선택지는 선택지가 아니다.
    */
   const paletteOf = (): string[] => {
     const used = new Map<string, number>();
@@ -385,10 +389,32 @@ export function previewAgent(): () => void {
       if (/^rgba?\(/.test(color)) used.set(color, (used.get(color) ?? 0) + 1);
     }
 
-    return [...used.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, MAX_COLORS)
-      .map(([color]) => color);
+    // 많이 쓰인 것부터 담되, 이미 담은 것과 눈에 같으면 건너뛴다.
+    const palette: string[] = [];
+    for (const [color] of [...used.entries()].sort((a, b) => b[1] - a[1])) {
+      if (palette.length >= MAX_COLORS) break;
+      if (!palette.some((kept) => alike(kept, color))) palette.push(color);
+    }
+    return palette;
+  };
+
+  /**
+   * 두 색이 눈에 같은가.
+   *
+   * 사람 눈은 초록에 가장 민감하고 파랑에 가장 둔하다 — 채널을 그대로 견주면 파랑만
+   * 다른 두 색을 다르다고 판정해 버린다. 흔히 쓰는 가중 거리로 잰다.
+   * 투명도는 보지 않는다. 반투명 글자는 뒤에 깔린 것과 섞여 보이므로 여기서 알 수 없고,
+   * 어차피 서식으로 넣을 때는 불투명하게 들어간다.
+   */
+  const alike = (a: string, b: string): boolean => {
+    const one = colorOf(a);
+    const two = colorOf(b);
+    if (!one || !two) return a === b;
+    const [r1, g1, b1] = one;
+    const [r2, g2, b2] = two;
+    const distance = Math.sqrt(2 * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + 3 * (b1 - b2) ** 2);
+    // 12px 동그라미에서 갈라 보이기 시작하는 지점. 넘치게 잡으면 문서의 강조색이 묶인다.
+    return distance < 24;
   };
 
   /**

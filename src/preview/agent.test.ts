@@ -825,6 +825,23 @@ describe('previewAgent · 인라인 서식 (spec §4.1)', () => {
     ]);
   });
 
+  it('눈에 같은 색은 하나로 묶는다', () => {
+    // 계산된 값이 달라도 12px 동그라미에서 구분되지 않으면 고를 수 없는 선택지다.
+    mount(
+      `<p ${MARKER_ATTR}="0" style="color: rgb(233, 233, 236)">가나다라마바사</p>` +
+        `<p ${MARKER_ATTR}="1" style="color: rgb(231, 231, 234)">거의 같은 색</p>` +
+        `<p ${MARKER_ATTR}="2" style="color: rgb(94, 201, 138)">다른 색</p>`
+    );
+    click(el(0)!);
+    select(0, 1, 4);
+
+    const dots = [...document.querySelectorAll<HTMLElement>('[data-ne-bar] button')].filter(
+      (b) => b.style.borderRadius === '50%'
+    );
+
+    expect(dots).toHaveLength(2);
+  });
+
   it('색 칸은 찌그러지지 않는다', () => {
     // 버튼 기본 스타일이 all:unset 이라 display 가 inline 이고 좌우 패딩이 남는다.
     // 그대로 두면 width·height 가 먹지 않아 옆으로 퍼진 타원이 된다.
