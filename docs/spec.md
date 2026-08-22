@@ -1,446 +1,519 @@
 # Spec
 
-## 1. 범위
+## 1. Scope
 
-### 하는 것
-- HTML 파일을 열어 블록 단위로 텍스트를 클릭 편집
-- 편집 결과를 원본 최소 diff로 저장 (원본 덮어쓰기 또는 사본 내려받기)
-- 편집 불가 영역을 시각적으로 구분해 표시하고, 누르면 이유를 말한다
-- 고른 글자에 인라인 서식 넣기 — 굵게·기울임·밑줄·색·크기 (§4.1)
-- 블록 단위 되돌리기, 전체 초기화, 마지막 변경 되돌리기
-- 폴더·zip 으로 열어 옆에 있는 자원을 함께 붙이기 (§5.1)
-- 묶음 안에 문서가 여럿이면 골라서 열기 (§5.1)
-- 편집을 잃을 일을 하기 전에 저장할지 묻기 (§4)
-- UI 언어 한국어·영어 전환
+### What it does
+- Opens an HTML file and click-edits text block by block
+- Saves the result as a minimal diff against the original (overwrite the original, or download a copy)
+- Marks uneditable regions visually and, on click, says why
+- Applies inline formatting to selected text — bold·italic·underline·color·size (§4.1)
+- Per-block revert, revert all, undo of the last change
+- Opens folders and zips to attach the resources sitting alongside (§5.1)
+- Lets you pick which document to open when a bundle holds several (§5.1)
+- Asks whether to save before anything that would lose edits (§4)
+- Switches the UI language between Korean and English
 
-### 대상 문서
+### Target documents
 
-**한 파일로 완결된 HTML** 이면 된다. Claude 아티팩트를 상정하고 설계했고 잠금 규칙도
-그 구조를 분석해 나왔지만, 기능적 전제는 그것뿐이다 — 파서도 패치도 문서의 출처를 묻지 않는다.
-그래서 화면 문구는 "아티팩트" 가 아니라 "한 파일로 된 HTML" 이라고 적는다.
-쓸 수 있는 문서를 좁게 말하면 쓸 수 있는 문서를 못 쓰게 만든다.
+**Any self-contained single-file HTML** qualifies. It was designed with Claude
+artifacts in mind, and the lock rules came from analyzing that structure, but that
+is the only functional assumption — neither the parser nor the patcher asks where a
+document came from. That is why the screen copy says "a single HTML file", not
+"artifact". Describing usable documents narrowly makes usable documents unusable.
 
-외부 CSS·JS·이미지를 따로 두고 참조하는 문서도 연다. 자원을 함께 주면 원래 모습대로
-보이고, 주지 않아도 편집과 저장은 정확하다. 자세한 규칙은 §5 에 있다.
+Documents that reference external CSS, JS, or images kept alongside also open. Hand
+over the resources and it renders as intended; withhold them and editing and saving
+are still exact. The detailed rules are in §5.
 
-### 문서 인코딩 — UTF-8, 바이트 그대로
+### Document encoding — UTF-8, bytes as they are
 
-문서는 **바이트에서 읽되 앞머리의 BOM 을 지킨다.** `Blob.text()` 류의 UTF-8 해독은
-맨 앞의 BOM(EF BB BF)을 조용히 지운다 — 고치지도 않은 문서의 첫 바이트가 저장본에서
-사라져 대원칙 1·2 를 어긴다. 파일 하나로 열든, zip·폴더의 항목이든, 디스크에서 다시
-읽든 같은 길로 읽는다. 줄바꿈 표기(CRLF)는 해독이 건드리지 않는 값이라 편집하지 않은
-자리에 그대로 남는다 — 편집한 블록 안에서는 브라우저 DOM 이 `\r\n` 을 `\n` 으로
-정리하지만, 그것은 편집 단위(블록) 안의 일이다 (대원칙 2·4).
+Documents are **read from bytes, preserving a leading BOM.** UTF-8 decoding of the
+`Blob.text()` kind silently strips a leading BOM (EF BB BF) — the first bytes of a
+document nobody edited vanish from the saved output, violating core principles 1
+and 2. Whether opened as a single file, as a zip or folder entry, or re-read from
+disk, every path reads the same way. Line ending notation (CRLF) is a value decoding
+never touches, so it survives wherever you did not edit — inside an edited block the
+browser DOM normalizes `\r\n` to `\n`, but that happens within the unit of editing,
+the block (core principles 2·4).
 
-UTF-8 이 아닌 문서(EUC-KR·UTF-16 …)는 **열지 않고 이유를 말한다** (대원칙 3).
-U+FFFD 로 바꿔 가며 열면 깨진 글자가 문서 행세를 하고, 저장이 그 깨진 결과를 UTF-8 로
-되써서 원본을 조용히 망가뜨린다. 못 여는 쪽이 조용히 망가뜨리는 쪽보다 낫다.
+Documents that are not UTF-8 (EUC-KR, UTF-16 …) are **refused with a reason**
+(core principle 3). Open them with U+FFFD substitutions and mojibake masquerades as
+the document; saving then rewrites that garbage as UTF-8 and quietly destroys the
+original. Failing to open beats quietly destroying.
 
-### UI 언어
+### UI language
 
-한국어·영어 두 언어를 지원하고, 화면 문구는 **전부 언어팩에서만 온다.**
-버튼·잠금 사유·저장 결과 알림까지 포함해 하드코딩된 문구를 두지 않는다.
+Korean and English are supported, and every piece of screen copy comes **from the
+language pack only.** Buttons, lock reasons, save notices — no hard-coded strings
+anywhere.
 
-- 첫 방문의 기본값은 브라우저 언어 (`ko*` → 한국어, 그 외 → 영어), 선택은 localStorage 에 남는다
-- 전환은 즉시 반영된다. 이미 떠 있는 알림도 다시 그린 언어로 바뀐다 —
-  그래서 스토어는 **완성된 문장이 아니라 메시지 키를 보관한다**
-- `<html lang>` 을 같이 갱신한다 (스크린리더·맞춤법 검사가 이 값을 본다)
-- 브라우저가 던진 오류 원문(File System Access API 등)은 번역하지 않고 그대로 덧붙인다.
-  추측해 옮기면 원인을 찾을 단서가 사라진다 (대원칙 3)
+- The first visit defaults to the browser language (`ko*` → Korean, otherwise
+  English); the choice persists in localStorage
+- Switching applies immediately. Notices already on screen are redrawn in the new
+  language — which is why the store keeps **message keys, not finished sentences**
+- `<html lang>` is updated along with it (screen readers and spellcheckers read it)
+- Error text thrown by the browser (File System Access API and the like) is appended
+  verbatim, untranslated. A guessed translation destroys the clue that would find
+  the cause (core principle 3)
 
-편집 대상 아티팩트의 내용은 번역 대상이 아니다. 사용자 문서는 손대지 않는다.
+The artifact being edited is not translation material. User documents are never touched.
 
-### 하지 않는 것 (범위 밖)
-- **레이아웃** 편집 (간격, 정렬, 폭) 과 CSS 파일 자체의 편집
-- 요소 추가·삭제·이동
-- 이미지 교체
-- 다중 파일 **편집** — 함께 여는 것은 프리뷰를 되살리기 위해서고, 고쳐서 저장하는 대상은 언제나 HTML 한 개다
-- 협업, 계정, 클라우드 저장
-- 한국어·영어 외 언어, 아티팩트 내용 번역
-- HTML을 처음부터 만드는 기능
+### What it does not do (out of scope)
+- **Layout** editing (spacing, alignment, width) and editing CSS files themselves
+- Adding, deleting, or moving elements
+- Image replacement
+- Multi-file **editing** — files open together only to restore the preview; the one thing edited and saved is always a single HTML document
+- Collaboration, accounts, cloud storage
+- Languages beyond Korean and English; translating artifact content
+- Authoring HTML from scratch
 
 ---
 
-## 2. 편집 블록 판정
+## 2. Editable-block detection
 
-### 인라인 태그 집합
+### The inline tag set
 ```
 b, strong, span, br, small, i, em, a, code, u, sup, sub
 ```
 
-### 판정 알고리즘
-루트부터 순회하며, 각 요소에 대해:
+### The detection algorithm
+Walk from the root; for each element:
 
-1. 자식 중 **인라인이 아닌 요소**가 하나라도 있으면 → 블록이 아님, 자식으로 재귀
-2. 그렇지 않고 공백이 아닌 텍스트를 (직접 또는 인라인 자손 안에) 가지면 → **편집 블록**
-3. 둘 다 아니면 → 무시
+1. If any child is a **non-inline element** → not a block; recurse into the children
+2. Otherwise, if it holds non-whitespace text (directly or inside inline descendants) → **editable block**
+3. Neither → ignore
 
-즉 "텍스트를 담은 가장 바깥 요소이면서, 그 안이 인라인 마크업뿐인 것"이 블록이다.
+That is: a block is "the outermost element that holds text, containing nothing but
+inline markup."
 
-### 인라인 자식으로 내려갈지 판단
+### Whether to descend into inline children
 
-블록이 되지 못한 요소의 인라인 자식은 **부모가 직접 텍스트를 갖는지**로 갈린다.
+For an element that failed to become a block, its inline children split on
+**whether the parent holds direct text.**
 
-| 부모의 직접 텍스트 | 처리 | 근거 |
+| Parent's direct text | Handling | Rationale |
 |---|---|---|
-| 있음 | 인라인으로 **내려가지 않음** | `<div>글 <a>링크</a><p>단락</p></div>` — 인라인이 문장의 일부다. 승격하면 한 문장이 쪼개진다 |
-| 없음 | 인라인으로 **내려감** | `<div><span class="codelabel">제목</span><ul>…</ul></div>` — 인라인이 독립 라벨이다. 내려가지 않으면 보이는 텍스트가 편집 불가가 된다 |
+| Present | Do **not** descend into inlines | `<div>text <a>link</a><p>para</p></div>` — the inline is part of a sentence. Promoting it splits one sentence apart |
+| Absent | **Descend** into inlines | `<div><span class="codelabel">title</span><ul>…</ul></div>` — the inline is a free-standing label. Not descending leaves visible text uneditable |
 
-실측 아티팩트에서 `.codelabel` 28개를 포함한 `span` 70개가 두 번째 경우였다.
-(CSS 에서 `display:block` 으로 선언된 것들이다.)
+In the measured artifact, 70 `span`s — including 28 `.codelabel`s — were the second
+case. (They are declared `display:block` in the CSS.)
 
-**알려진 한계** — 직접 텍스트와 블록 자식이 함께 있는 요소에서 그 직접 텍스트는
-편집 대상이 되지 않는다. 부모는 블록 자식 때문에 블록이 될 수 없고, 텍스트만
-따로 떼어낼 경계도 없다.
+**Known limitation** — in an element that has both direct text and block children,
+that direct text is not editable. The parent cannot become a block because of its
+block children, and there is no boundary that could carve the text out on its own.
 
-실측 아티팩트 결과: **867개** (`div` 256, `td` 241, `p` 103, `li` 72, `span` 70, `h2` 43, `th` 42, `h3` 36, `button` 2, `title` 1, `h1` 1)
+Measured artifact result: **867 blocks** (`div` 256, `td` 241, `p` 103, `li` 72, `span` 70, `h2` 43, `th` 42, `h3` 36, `button` 2, `title` 1, `h1` 1)
 
-### 2.1 `<title>` 특례
+### 2.1 The `<title>` exception
 
-`<title>`은 위 규칙으로 블록이 되지만 **프리뷰에 렌더되지 않으므로 클릭이 닿지 않는다.**
-에디터 상단의 **별도 입력 필드**로 편집한다. 패치 경로는 다른 블록과 완전히 동일하다.
+`<title>` becomes a block under the rules above but **is not rendered in the
+preview, so no click can reach it.** It is edited through a **dedicated input
+field** at the top of the editor. Its patch path is identical to every other block.
 
-비어 있는 `<title></title>` 은 **빈 잎 요소 잠금(EMPTY_IN_SOURCE)의 예외다.**
-그 잠금은 "스크립트가 채운 글자를 소스로 되짚을 수 없다" 는 프리뷰 클릭 편집의
-사정인데, 제목 칸은 라이브 DOM 이 아니라 소스에서 값을 얻으므로 그 사정이 없다.
-여기서 잠그면 제목이 빈 문서는 제목을 새로 지을 길이 없다.
-스크립트가 채운 제목은 렌더 후 대조(ADR-005)가 따로 잠근다.
+An empty `<title></title>` is **an exception to the empty-leaf lock
+(EMPTY_IN_SOURCE).** That lock exists because click-editing in the preview cannot
+trace script-filled text back to the source — but the title field takes its value
+from the source, not the live DOM, so that concern does not apply. Lock it here and
+a document with an empty title has no way to ever get one.
+A script-filled title is locked separately by the post-render comparison (ADR-005).
 
-제약 — `<title>`은 RCDATA라 내부에 태그를 넣을 수 없다.
-**평문 전용**으로 다루며, 저장 시 `&`·`<`·`>`를 엔티티로 인코딩해 기록한다.
-태그를 입력해도 거부하지 않고 이스케이프한다 — `<b>` 는 화면에 `<b>` 라는 글자로 보인다.
+Constraint — `<title>` is RCDATA; no tags can live inside it.
+It is treated as **plain text only**, and `&`·`<`·`>` are encoded as entities on
+save. Typed tags are not rejected but escaped — `<b>` shows on screen as the
+literal characters `<b>`.
 
-### 2.2 합성 노드 주의
+### 2.2 Beware synthetic nodes
 
-parse5는 스펙에 따라 **소스에 없는 노드를 트리에 삽입한다.**
-실측 아티팩트에서는 테이블 13개에 `<tbody>`가 자동 삽입됐고, 이 노드들의
-`sourceCodeLocation`은 `null`이다. 순회 시 반드시 null을 가드한다 (`rules.md` INV-7).
+parse5, per spec, **inserts nodes that do not exist in the source.**
+In the measured artifact, 13 tables got an auto-inserted `<tbody>`, and those nodes'
+`sourceCodeLocation` is `null`. Always guard for null during traversal
+(`rules.md` INV-7).
 
-### 블록이 보관하는 정보
+### What a block records
 ```ts
 type Block = {
   id: number
   tag: string
-  innerStart: number   // 원본 문자열 offset (여는 태그 '>' 다음)
-  innerEnd: number     // 닫는 태그 '<' 앞
-  sourceInner: string  // 원본 innerHTML 원형
-  sourceText: string   // 태그 제거한 순수 텍스트 (대조 검사용)
+  innerStart: number   // offset into the original string (after the opening tag's '>')
+  innerEnd: number     // before the closing tag's '<'
+  sourceInner: string  // original innerHTML, verbatim
+  sourceText: string   // pure text with tags stripped (for the comparison check)
   locked: LockReason | null
 }
 ```
 
 ---
 
-## 3. 잠금 규칙
+## 3. Lock rules
 
-아래에 해당하면 편집 불가로 잠그고, 이유를 UI에 노출한다 (대원칙 3).
+Anything matching the following is locked against editing, with the reason exposed
+in the UI (core principle 3).
 
-| 잠금 사유 | 판정 시점 | 설명 |
+| Lock reason | Decided at | Description |
 |---|---|---|
-| `RAW_TEXT` | 파싱 | `script`, `style`, `textarea` 내부 — 순회에서 통째로 제외되어 블록이 되지 않는다 |
-| `SCRIPT_GENERATED` | 렌더 후 | 라이브 `textContent` ≠ `sourceText` (ADR-005) |
-| `EMPTY_IN_SOURCE` | 파싱 | 소스에서 비어 있는 잎 요소 — 스크립트가 채우는 자리 |
-| `CODE_BLOCK` | 파싱 | 수동 하이라이팅된 코드/JSON 영역 (기본 잠금, 설정으로 해제 가능) |
-| `AMBIGUOUS` | 파싱 | 닫는 태그가 생략되어 inner 범위를 확정할 수 없음 (`<li>a<li>b`) |
-| `MARKER_CLASH` | 렌더 후 | 같은 id 의 편집 표식(`data-ne-id`)이 둘 이상 — 문서가 우리 표식을 흉내 내 어느 쪽이 원본 블록인지 되짚을 수 없음 |
+| `RAW_TEXT` | parse | Inside `script`, `style`, `textarea` — excluded from traversal wholesale, never becomes a block |
+| `SCRIPT_GENERATED` | post-render | Live `textContent` ≠ `sourceText` (ADR-005) |
+| `EMPTY_IN_SOURCE` | parse | A leaf element empty in the source — a slot a script fills |
+| `CODE_BLOCK` | parse | Hand-highlighted code/JSON region (locked by default, can be unlocked in settings) |
+| `AMBIGUOUS` | parse | A closing tag is omitted, so the inner range cannot be pinned down (`<li>a<li>b`) |
+| `MARKER_CLASH` | post-render | Two or more edit markers (`data-ne-id`) with the same id — the document mimics our marker, and which one is the real block cannot be traced |
 
-`EMPTY_IN_SOURCE` 는 **소스에서 비어 있는 잎 요소**다 (`<span class="pg"></span>`).
-스크립트가 채우면 화면에는 글자가 보이지만 그 글자는 소스 어디에도 없어 되짚을 수 없다.
-텍스트가 없다고 블록에서 빼 버리면 눌러도 **아무 일이 없다** — 왜 안 되는지 알 길이 없어진다.
-그래서 블록으로 잡아 잠근다 (대원칙 3). 실측 아티팩트의 `<span class="pg">` 40개가 여기 해당했다.
+`EMPTY_IN_SOURCE` means **a leaf element that is empty in the source**
+(`<span class="pg"></span>`). When a script fills it, the screen shows text, but
+that text exists nowhere in the source and cannot be traced back. Drop it from the
+block list because "it has no text" and clicking it does **nothing at all** — with
+no way to learn why. So it is captured as a block and locked (core principle 3).
+The measured artifact's 40 `<span class="pg">` elements fell here.
 
-조건은 셋이다.
+Three conditions:
 
-- 여는 태그와 **닫는 태그가 모두 있다** — 없으면 `<br>`·`<img>` 같은 void 요소라 안에 내용이 올 수 없다
-- 자식 **요소**가 없다 — 있으면 컨테이너이므로 그 안으로 내려간다
-- inner 소스가 공백뿐이다 — 주석만 든 요소(`<div><!-- 여기 --></div>`)는 비어 있지 않다
+- The opening tag **and closing tag both exist** — otherwise it is a void element
+  like `<br>`·`<img>` and content can never appear inside
+- No child **elements** — with any, it is a container and traversal descends
+- The inner source is whitespace only — an element holding just a comment
+  (`<div><!-- here --></div>`) is not empty
 
-잠금 **표시**는 화면에 글자가 보이는 자리에만 칠한다. 소스에도 화면에도 아무것도 없는
-요소(CSS 로 그린 막대 등)까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
-표시를 칠하지 않아도 잠금은 그대로라, 눌러 보면 이유는 뜬다.
+The lock **indicator** is painted only where text is visible on screen. Covering
+elements that show nothing in the source and nothing on screen (bars drawn by CSS
+and the like) with a not-allowed cursor makes the whole document look uneditable.
+Unpainted or not, the lock still holds — click and the reason still shows.
 
-### 문서가 우리 표식을 흉내 낼 수 있다
+### The document can mimic our markers
 
-편집 표식(`data-ne-id`)은 우리가 프리뷰 문서에 넣는 것이지만, 사용자 HTML 이 같은
-속성을 이미 들고 있거나 아티팩트 스크립트가 런타임에 붙일 수 있다. 그때의 규칙:
+The edit marker (`data-ne-id`) is something we inject into the preview document, but
+user HTML may already carry the same attribute, and artifact scripts can add it at
+runtime. The rules for that case:
 
-- **같은 id 의 표식이 둘 이상 보이면 그 블록을 `MARKER_CLASH` 로 잠근다** —
-  렌더만으로는 어느 쪽이 원본 블록인지 가릴 수 없고, 추측으로 고치면 가짜 요소의
-  내용이 그 블록의 편집으로 저장에 실린다 (대원칙 3). 잠금 길에는 겹친 요소
-  **전부**가 오른다 — 대조 때 훑힌 같은 id 의 요소는 어느 쪽을 눌러도 잠금 사유가
-  안내되고 클릭이 아티팩트 핸들러로 새지 않는다. 첫 요소만 기억하면 진짜 요소의
-  클릭이 안내 없이 문서로 흘러가 슬라이드가 넘어간다
-- **실제 블록 id 목록에 없는 표식은 블록으로 치지 않는다.** 프리뷰는 잠금 목록과
-  함께 실제 블록 id 전부를 받아 두고, 명단에 없는 표식은 지나쳐 바깥의 진짜
-  블록이나 문서로 클릭을 흘려보낸다 — 여기에 편집이 열리면 그 확정은 어느 블록의
-  것도 아니어서 조용히 사라진다
-- **대조 뒤에 끼워 넣은 표식도 흉내다.** 명단은 번호만 가리므로, 스크립트가 대조
-  뒤에 같은 번호의 요소를 하나 더 만들면 번호 검사는 통과한다 — 그 가짜를 눌러
-  확정하면 가짜의 내용이 진짜 블록의 자리에 저장된다. 프리뷰는 대조 때 훑은
-  **id → 요소** 짝을 기억해 두고, 그 요소가 아니면 번호가 맞아도 블록으로 치지
-  않는다. 복원(되돌리기)·짚기도 이 짝으로 요소를 찾는다
-- **다른 표식 안에 든 표식은 내용이다.** 진짜 블록은 겹치지 않으므로(§2) 그건
-  흉내다 — 잠금·명암 표식을 칠하지 않는다. 칠했다 떼는 변화가 바깥 블록의
-  innerHTML 에 실려 저장본으로 새기 때문이다 (INV-9)
-- **확정·복원은 id 로 요소를 되찾지 않고 편집을 연 그 요소를 그대로 쓴다** —
-  id 로 되찾으면 흉내가 문서 앞쪽에 있을 때 가짜가 먼저 잡힌다
-- 서식 막대(`data-ne-bar`)·잠금(`data-ne-locked`)·명암(`data-ne-dark`)·짚기
-  (`data-ne-revealed`) 표식의 흉내는 화면 표시만 어지럽힐 수 있다 — 동작 판정은
-  속성 문자열이 아니라 우리가 만든 객체와 상태를 기준으로 한다
+- **If two or more markers share one id, lock that block as `MARKER_CLASH`** —
+  rendering alone cannot tell which one is the original block, and a guessed fix
+  saves a fake element's content as that block's edit (core principle 3). The lock
+  path carries **all** clashing elements — every same-id element seen during the
+  scan announces the lock reason on click, and the click does not leak to artifact
+  handlers. Remember only the first, and clicks on the real element slip through to
+  the document unannounced, flipping slides
+- **Markers not on the real block id roster do not count as blocks.** The preview
+  receives the full roster of real block ids along with the lock list; markers not
+  on the roster are passed over, letting the click flow to the real block or the
+  document beyond — an edit opened here would commit into no block at all and
+  silently vanish
+- **A marker inserted after the scan is also a mimic.** The roster names numbers
+  only, so a script that mints another element with the same number after the scan
+  passes the number check — commit on that fake and its content saves into the real
+  block's place. The preview remembers the **id → element** pairing from scan time
+  and rejects any other element even when the number matches. Restore (revert) and
+  reveal also find elements through this pairing
+- **A marker inside another marker is content.** Real blocks never nest (§2), so it
+  is a mimic — no lock or dark-mode indicator is painted on it. Painting and then
+  removing would ride the outer block's innerHTML into the saved output (INV-9)
+- **Commit and restore use the element the edit opened on — they never re-find it
+  by id.** Re-finding by id grabs the fake first whenever the mimic sits earlier in
+  the document
+- Mimics of the format bar (`data-ne-bar`), lock (`data-ne-locked`), dark
+  (`data-ne-dark`), and reveal (`data-ne-revealed`) markers can only disturb the
+  visuals — behavior decisions run on the objects and state we built, never on
+  attribute strings
 
-### 엔티티 — 대조 검사의 함정
+### Entities — the comparison trap
 
-`SCRIPT_GENERATED` 판정은 **디코딩된 텍스트끼리** 비교해야 한다. 원시 소스 슬라이스로 비교하면
-엔티티를 포함한 멀쩡한 블록이 전부 오탐으로 잠긴다.
+The `SCRIPT_GENERATED` decision must compare **decoded text on both sides.** Compare
+raw source slices and every healthy block containing an entity is a false-positive
+lock.
 
 ```
-소스 슬라이스 : "Appendix B · Protocols &amp; Standards"
-라이브 텍스트 : "Appendix B · Protocols & Standards"      ← 다르게 보이지만 같은 내용
+source slice : "Appendix B · Protocols &amp; Standards"
+live text    : "Appendix B · Protocols & Standards"      ← looks different, same content
 ```
 
-실측 아티팩트에는 엔티티가 1개뿐이라 눈에 띄지 않았지만, 코드 예시가 많은 아티팩트에서는
-`&lt;` / `&gt;` / `&amp;` 가 대량으로 등장한다. `rules.md` INV-8 참조.
+The measured artifact had exactly one entity, so this stayed invisible — but
+artifacts heavy with code samples carry `&lt;` / `&gt;` / `&amp;` in bulk.
+See `rules.md` INV-8.
 
-### 형제가 스크립트에 채워지면 부모 블록도 잠긴다
+### A script-filled sibling locks the parent block too
 
-대조는 **블록 단위 텍스트**로 한다. 그래서 블록 안에 스크립트가 채우는 빈 요소가
-하나라도 있으면 블록 전체가 `SCRIPT_GENERATED` 로 잠긴다.
+The comparison works on **block-level text.** So if a block contains even one empty
+element that a script fills, the whole block locks as `SCRIPT_GENERATED`.
 
-실측 아티팩트의 `.foot` 40개가 여기 해당했다.
+The measured artifact's 40 `.foot` elements fell here.
 
 ```html
 <div class="foot"><span>에이전트 결제</span><span class="pg"></span></div>
 ```
 
-`.pg` 는 소스에서 비어 있지만 **블록이 되지 않는다.** 부모가 직접 텍스트를 가지면
-인라인 자식으로 내려가지 않기 때문이다(§2). 스크립트가 `1 / 45` 를 채우면 `.foot` 의
-라이브 텍스트가 소스와 달라지고, 결과적으로 왼쪽의 `에이전트 결제` 라벨까지 편집 불가가 된다.
+`.pg` is empty in the source but **does not become a block** — when the parent holds
+direct text, we do not descend into inline children (§2). Once a script fills in
+`1 / 45`, `.foot`'s live text no longer matches the source, and as a result even the
+`에이전트 결제` label on the left becomes uneditable.
 
-의도한 동작이다 — 틀리게 고치는 것보다 못 고친다고 말하는 쪽이 낫다 (대원칙 3).
-정밀도를 높이려면 `.pg` 의 라이브 텍스트를 대조에서 빼야 하고, 그러려면 `.pg` 에도
-마커를 달아야 한다. **하지 않는다** — `.pg` 는 편집 가능한 블록 *안* 에 있고,
-블록 안에 마커가 들어가면 그 블록을 고칠 때 `innerHTML` 에 `data-ne-id` 가 섞여
-저장본까지 따라간다 (INV-3).
+This is intended — saying "can't edit this" beats editing it wrong (core
+principle 3). Higher precision would require excluding `.pg`'s live text from the
+comparison, which would require putting a marker on `.pg`. **We do not** — `.pg`
+lives *inside* an editable block, and a marker inside a block rides the block's
+`innerHTML` into the saved output the moment that block is edited (INV-3).
 
-같은 이유로 블록은 서로 겹치지 않는다. 요소가 블록이 되면 그 자리에서 순회를 멈춘다.
-§3 의 빈 요소 잠금이 잡는 것도 **블록 밖의** 빈 잎 요소(`<div id="cnt"></div>`)뿐이다.
-아무도 설명해 주지 않는 것은 이쪽이고, `.pg` 는 부모가 대신 이유를 말해 준다.
+For the same reason, blocks never overlap. When an element becomes a block,
+traversal stops there. The empty-element lock in §3 likewise catches only empty leaf
+elements **outside** any block (`<div id="cnt"></div>`) — those are the ones nobody
+would otherwise explain, while `.pg` has a parent to speak for it.
 
-### 코드 블록 기본 잠금 근거
-실측 아티팩트의 JSON 예시는 `<pre>`가 아니라 `<span class="h">` / `<span class="v">`로
-수동 하이라이팅되어 있다. 중복 문자열 상위를 이 조각들이 차지한다 (`":"` 67회, `","` 61회).
-자유 편집을 허용하면 하이라이팅 구조가 깨지므로 기본은 잠금이다.
+### Why code blocks lock by default
+The measured artifact's JSON samples are hand-highlighted with
+`<span class="h">` / `<span class="v">`, not `<pre>`. These fragments dominate the
+duplicate-string ranking (`":"` 67 times, `","` 61 times).
+Free editing would shatter the highlighting structure, so the default is locked.
 
 ---
 
-## 4. 사용자 플로우
+## 4. User flow
 
 ```
-1. 열기             파일 · 폴더 · zip · 드롭 (File System Access API 핸들 확보, §5.1)
-2. 자원             묶음으로 열었으면 옆 파일을 blob URL 로 붙인다. 못 붙였으면 알린다
-3. 렌더             마커 주입본을 iframe에 렌더, 아티팩트 스크립트 정상 실행
-4. 대조             소스-라이브 검사 → 잠금 확정 → 블록에 시각 표시(아래)
-5. 편집             클릭 → contenteditable 활성 → 수정 → blur/Enter/Esc 로 확정
-6. 확인             변경 목록에서 고치기 전/후 한 줄씩 대조
-7. 저장             저장 버튼 또는 `Ctrl+S` → 원본 파일 덮어쓰기 (폴백: 다운로드)
+1. Open              file · folder · zip · drop (acquire a File System Access API handle, §5.1)
+2. Resources         if opened as a bundle, attach neighbors as blob URLs; if not attached, say so
+3. Render            render the marker-injected copy in the iframe; artifact scripts run normally
+4. Compare           source-vs-live check → locks finalized → visual state on blocks (below)
+5. Edit              click → contenteditable on → modify → commit via blur/Enter/Esc
+6. Review            the change list shows before/after, line by line
+7. Save              save button or `Ctrl+S` → overwrite the original (fallback: download)
 ```
 
-편집을 잃을 일(다른 파일 열기 · 묶음 안 문서 갈아타기 · 폴더 연결 · **문서 닫기**)을
-하기 전에는 저장할지 먼저 묻는다 (아래 · 저장하지 않은 편집을 지킨다).
+Before anything that would lose edits (opening another file · switching documents
+within a bundle · linking a folder · **closing the document**), it asks whether to
+save first (below · protecting unsaved edits).
 
-### 대조가 끝나기 전에는 편집을 열지 않는다
+### No edits open before the comparison finishes
 
-렌더(3)와 대조(4) 사이 — 자원을 불러오는 동안 — 프리뷰는 이미 화면에 떠 있다.
-이때 편집을 받으면 대조가 그 블록의 라이브 텍스트를 소스와 견줘
-"스크립트가 만든 글자" 로 잠그고, 그 잠금이 방금 만든 패치를 지운다 —
-화면에는 고친 것이 그대로 보이는데 저장본에는 없다 (대원칙 3 위반).
-어느 블록이 잠길지도 대조 전에는 모른다 — 잠긴 블록의 편집이 열리는 문제이기도 하다.
+Between render (3) and comparison (4) — while resources are loading — the preview is
+already on screen. Accept an edit here and the comparison will match that block's
+live text against the source, lock it as "written by a script", and the lock erases
+the patch just created — the screen shows the fix, the saved output lacks it
+(a violation of core principle 3). Nor is it knowable which blocks will lock before
+the comparison — this is also the problem of an edit opening on a to-be-locked block.
 
-그래서 대조가 끝나 잠금 목록이 오기 전에는 **클릭해도 편집을 열지 않고**,
-아직 살펴보는 중이라고 토스트로 말한다 (대원칙 3). 제목 입력 칸도 같은 동안 잠근다.
+So until the comparison finishes and the lock list arrives, **clicks do not open
+edits**, and a toast says the document is still being checked (core principle 3).
+The title field is locked for the same window.
 
-그래도 대조가 이미 있는 패치를 지워야 한다면(예상 밖의 경로) 조용히 지우지 않는다 —
-프리뷰도 소스 내용으로 함께 되돌려 화면과 저장본을 다시 맞추고, 몇 곳을 되돌렸는지
-토스트로 알린다. 화면과 저장본이 갈라진 채로 두는 일만은 어떤 경우에도 없다.
+If the comparison must nonetheless erase existing patches (an unexpected path), it
+does not erase quietly — the preview is also restored to the source content so
+screen and saved output line up again, and a toast says how many spots were
+reverted. Leaving the screen and the saved output split is the one thing that never
+happens.
 
-### 아티팩트 네비게이션은 살아 있어야 한다
+### Artifact navigation must stay alive
 
-블록 밖 클릭을 무조건 막으면 아티팩트의 자체 네비게이션이 죽는다.
-실측 아티팩트는 빈 곳 클릭으로 슬라이드를 넘기므로, 막으면 첫 장에서 벗어날 수 없어
-나머지를 편집할 방법이 사라진다.
+Block all outside-the-block clicks and the artifact's own navigation dies. The
+measured artifact advances slides on empty-area clicks; block that and you are
+stuck on slide one with no way to edit the rest.
 
-| 클릭 위치 | 편집 중 | 처리 |
+| Click target | Editing? | Handling |
 |---|---|---|
-| 블록 | 무관 | 편집 열기, 아티팩트로 전달 안 함, **기본 동작도 막음** |
-| 블록 밖 | 예 | 편집 종료로 소비, 아티팩트로 전달 안 함, **기본 동작도 막음** |
-| 블록 밖 | 아니오 | **아티팩트로 통과** |
+| A block | Either | Open the edit; do not forward to the artifact; **suppress the default action too** |
+| Outside a block | Yes | Consume as "close the edit"; do not forward to the artifact; **suppress the default action too** |
+| Outside a block | No | **Pass through to the artifact** |
 
-편집을 닫는 클릭은 전파만 막아서는 부족하다. `<a href>` 나 라벨을 눌렀다면
-전파를 끊어도 브라우저 기본 동작이 남아 문서가 이동해 버린다.
-**편집을 소비하는 클릭은 기본 동작까지 막는다** — 그 클릭의 역할은 "편집 닫기" 하나다.
+For the click that closes an edit, stopping propagation is not enough. If it landed
+on an `<a href>` or a label, the browser default remains and the document navigates
+away. **A click consumed by editing has its default action suppressed too** — that
+click's one job is "close the edit".
 
-### 시각 표시
+### Visual state
 
-무엇을 고칠 수 있는지 보이지 않으면 사용자는 클릭해 보며 알아내야 한다.
-프리뷰에 스타일을 주입해 상태를 보여준다 (`core/markers.ts` · `injectEditorStyle`).
+If what is editable is not visible, users must discover it by trial clicks. Styles
+injected into the preview show the state (`core/markers.ts` · `injectEditorStyle`).
 
-| 상태 | 표시 |
+| State | Indicator |
 |---|---|
-| 편집 가능 · 호버 | 반투명 실선 외곽선, 커서 `text` |
-| 편집 중 | 실선 외곽선 + 아주 옅은 배경 |
-| 잠김 · 호버 | **점선** 외곽선, 커서 `not-allowed` |
+| Editable · hover | Translucent solid outline, cursor `text` |
+| Editing | Solid outline + a very faint background |
+| Locked · hover | **Dashed** outline, cursor `not-allowed` |
 
-**색은 문서 배경을 따라간다** — 어두우면 흰색, 밝으면 검은색.
-아티팩트마다 배색이 제각각이라 고정된 색은 어떤 문서에서는 배경에 묻히고
-어떤 문서에서는 아티팩트의 색을 침범한다. 흑백이면 어디서든 보이고 아무 색과도 겹치지 않는다.
+**The color follows the document's background** — white on dark, black on light.
+Artifacts color themselves every which way; any fixed color sinks into some
+documents' backgrounds and intrudes on others' palettes. Black-and-white is visible
+everywhere and collides with nothing.
 
-밝기 판정은 **블록마다** 따로 한다. 문서 단위로 정하면 어두운 바탕 위에 흰 카드를 얹은
-흔한 구성에서 카드 안 블록이 전부 안 보인다. 에이전트가 스캔 시점에 블록에서 위로 올라가며
-배경색을 모아 밝기를 재고, 어두우면 `data-ne-dark` 를 붙인다.
-반투명 배경은 제 색만 읽지 않는다 — `rgba(0,0,0,.1)` 은 흰 바탕에서는 사실상 흰색이다.
-불투명한 배경을 만날 때까지 모아, 그 위에 합성한 색으로 잰다.
+Brightness is judged **per block**. Decide it per document and the common
+light-card-on-dark-page layout makes every block inside the card invisible. At scan
+time the agent walks upward from the block collecting background colors and
+measures brightness, tagging dark ones with `data-ne-dark`.
+A translucent background must not be read alone — `rgba(0,0,0,.1)` on white is
+effectively white. Colors are collected until an opaque background is found and
+measured as composited onto it.
 
-`outline` 만 쓴다 — `border` 는 박스 크기를 바꿔 아티팩트 레이아웃이 밀린다.
-아티팩트 CSS 에 지지 않도록 이 몇 줄만 `!important` 를 붙인다 — 표시가 읽는
-`--ne-*` 변수 정의까지다. 변수가 뚫리면 `!important` 로 지킨 외곽선이 그 변수의
-값을 따라 통째로 사라진다.
-잠금 표식(`data-ne-locked`)은 대조가 끝난 뒤 에이전트가 DOM 에 붙이고,
-목록이 갱신되면 매번 전체를 다시 칠한다 — 이전 표식이 남으면 풀린 블록이 잠긴 척한다.
+Only `outline` is used — `border` changes box size and shifts the artifact's
+layout. To hold against artifact CSS, just these few lines carry `!important` —
+including the `--ne-*` variable definitions the indicators read. Let the variables
+be overridden and the `!important`-protected outlines vanish wholesale, following
+the variable's value.
+The lock marker (`data-ne-locked`) is attached to the DOM by the agent after the
+comparison finishes, and each time the list updates it is repainted in full — stale
+markers would leave unlocked blocks looking locked.
 
-### 편집 상호작용
-- 클릭: 해당 블록만 `contenteditable=true`, 나머지는 false
-- `Enter`: **편집 확정 후 닫기.** 줄바꿈을 넣지 않고, 아티팩트 키 핸들러로도 넘기지 않는다
-- `Shift+Enter`: 블록 **안에서** 줄을 바꾼다 (`<br>`). 편집은 닫히지 않는다
-- `Ctrl+S` (`⌘S`): 편집 중이면 확정하고 저장. 브라우저의 "페이지 저장"은 막는다.
-  프리뷰 안에서 눌러도 동작한다 — iframe 의 키 이벤트는 호스트 창에 닿지 않으므로
-  에이전트가 메시지로 넘긴다. 고친 것이 없으면 아무 일도 하지 않는다
-- `Esc`: 편집 취소, 원래 내용 복원
-- `Ctrl+Z`: **편집 중이면** `contenteditable` 의 네이티브 undo 를 그대로 쓴다 —
-  블록 안 타이핑은 브라우저가 이미 정확히 되돌린다.
-  **편집 중이 아니면** 마지막으로 확정한 변경을 되돌린다(변경 목록의 `되돌리기` 와 같다).
-  입력 칸(제목 등)에 포커스가 있으면 건드리지 않는다 — 그 칸의 undo 가 우선이다.
-  다시 실행(redo)은 없다. 되돌린 블록은 다시 고치면 된다
-- `Ctrl+Shift+S`: **사본 내려받기.** 원본을 건드리지 않고 결과물만 파일로 받는다.
-  패치가 없어도 동작한다 — 고치기 전 백업을 받는 용도로도 쓴다
-- 변경 목록의 카드를 누르면 프리뷰의 **그 자리로 데려간다.** 문서가 길면 목록만 보고
-  어디를 고쳤는지 찾기 어렵다. 스크롤만 하면 어디가 그 블록인지 모르므로 잠깐 짚어준다.
-  카드 안의 되돌리기 버튼은 그 클릭을 위로 흘리지 않는다 — 되돌리고 나서 없는 블록으로
-  데려가려 들면 안 된다
-- 붙여넣기: 서식 제거, 평문만 삽입
-- 아티팩트 자체 키 핸들러(방향키 슬라이드 이동 등)는 편집 중 차단
+### Editing interactions
+- Click: only that block gets `contenteditable=true`; the rest are false
+- `Enter`: **commit and close.** Inserts no line break and is not forwarded to
+  artifact key handlers
+- `Shift+Enter`: line break **inside** the block (`<br>`). The edit stays open
+- `Ctrl+S` (`⌘S`): commits any open edit, then saves. The browser's "save page" is
+  suppressed. Works inside the preview too — iframe key events never reach the host
+  window, so the agent forwards them as a message. With nothing edited, does nothing
+- `Esc`: cancel the edit; restore the original content
+- `Ctrl+Z`: **while editing**, native `contenteditable` undo, untouched — the
+  browser already reverses in-block typing precisely.
+  **Outside editing**, reverts the most recently committed change (same as
+  **Revert** in the change list). When an input field (the title, etc.) has focus,
+  hands off — that field's undo takes priority.
+  There is no redo. A reverted block can simply be edited again
+- `Ctrl+Shift+S`: **download a copy.** Leaves the original alone; the result goes to
+  a file. Works with zero patches — also serves as a pre-edit backup
+- Clicking a card in the change list **takes you to that spot in the preview.** In a
+  long document, the list alone does not say where the edit lives. Scrolling alone
+  does not say which block it was, so the block is briefly highlighted. The revert
+  button inside a card does not bubble its click — reverting must not then try to
+  navigate to a block that no longer exists
+- Paste: formatting stripped, plain text inserted
+- The artifact's own key handlers (arrow-key slide navigation and the like) are
+  blocked during editing
 
-블록은 `p`·`li`·`td` 같은 **한 덩어리**다(대원칙 4). 그 안에서 줄을 늘리는 것보다
-`Enter` 로 확정하고 나가는 쪽이 훨씬 자주 필요하므로 `Enter` 를 "닫기"에 쓴다.
-줄바꿈은 `Shift+Enter` 로 남겨 둔다 — `<br>` 은 인라인이라 블록 안에 그대로 담긴다.
+A block is **one unit** — `p`·`li`·`td` (core principle 4). Committing and leaving
+is needed far more often than growing lines inside one, so `Enter` means "close".
+Line breaks keep `Shift+Enter` — `<br>` is inline and rides inside the block.
 
-**IME 조합 중의 `Enter` 는 예외다.** 한글 조합을 확정하는 키이므로 편집을 닫지 않는다.
-`keydown` 에서 기본 동작을 막을 수도 없다 — 막으면 조합이 확정되지 않아 글자를 완성할 수 없다.
-그런데 그대로 흘려보내면 브라우저가 **조합 확정과 줄바꿈을 함께** 처리해
-`<p>` 안에 `<div>` 가 생긴다. 그래서 키가 아니라 **입력**을 막는다:
-편집 중에는 `beforeinput` 의 `insertParagraph` 를 언제나 `preventDefault()` 한다.
-조합은 그대로 확정되고, 줄바꿈만 사라진다.
+**`Enter` during IME composition is the exception.** It is the key that commits a
+Hangul composition, so it does not close the edit. Nor can its default be blocked in
+`keydown` — block it and the composition never commits, and the character cannot be
+completed. But let it pass untouched and the browser processes **composition commit
+and line break together**, spawning a `<div>` inside a `<p>`. So the **input** is
+blocked, not the key: while editing, `insertParagraph` in `beforeinput` is always
+`preventDefault()`-ed. The composition commits intact; only the line break vanishes.
 
-### 문서 닫기
+### Closing the document
 
-툴바의 **닫기**로 열어 둔 문서를 놓고 처음 화면으로 돌아간다.
+**Close** in the toolbar lets go of the open document and returns to the first screen.
 
-닫기는 **문서를 바꾸는 일**이므로 여는 것과 같은 길을 지난다 — 사용자 행동의 순간에
-예약하고(§5), 저장하지 않은 편집이 있으면 묻고, 붙여 둔 자원을 놓아준다.
-닫기만 예외로 두면 그 자리에서 편집이 조용히 사라지고 blob 이 남는다.
+Closing **changes the document**, so it walks the same road as opening — reserve at
+the moment of user action (§5), ask if there are unsaved edits, release attached
+resources. Exempt closing alone and edits silently vanish right there while blobs
+leak.
 
-돌아간 화면은 **처음 화면과 같아야 한다.** 그래서 "문서가 없는 상태" 는 한 곳에서 만든다 —
-두 벌로 두면 상태가 늘 때마다 한쪽만 고쳐져, 닫았는데 이전 문서의 무언가가 남는다.
+The screen you return to must **equal the first screen.** So "the no-document state"
+is built in one place — keep two copies and every state added gets fixed in only
+one of them, and closing leaves behind fragments of the previous document.
 
-## 4.1 인라인 서식
+## 4.1 Inline formatting
 
-고른 글자에 **굵게 · 기울임 · 밑줄 · 색 · 크기**를 넣는다. 블록 안에 들어가는 인라인
-마크업이므로 편집의 단위는 여전히 블록이다 (대원칙 4).
+Puts **bold · italic · underline · color · size** on selected text. It is inline
+markup living inside a block, so the unit of editing remains the block
+(core principle 4).
 
-### 반드시 CSS 로 뽑는다
+### Must be produced as CSS
 
-`execCommand` 는 기본값으로 옛 표현 태그를 만든다. 실측한 결과는 이렇다.
+`execCommand` by default produces legacy presentational tags. Measured:
 
 ```
 styleWithCSS = false   foreColor → <font color="#ff0000">   fontSize → <font size="5">
 styleWithCSS = true    foreColor → <span style="color:…">   fontSize → <span style="font-size:…">
 ```
 
-`<font>` 는 인라인 태그 집합에 없다. 그대로 두면 **그 파일을 다시 열 때 그 문단이
-블록이 아니게 되어 편집 불가가 된다** — 색을 칠한 대가로 다음에 못 고치게 되는 셈이다.
+`<font>` is not in the inline tag set. Leave it and **the next time that file is
+opened, the paragraph is no longer a block and becomes uneditable** — the price of
+coloring text is losing the ability to edit it later.
 
-그렇다고 늘 켜 두면 굵게까지 `<span style="font-weight:bold">` 로 나온다. 동작은 같지만
-사람이 읽는 diff 가 지저분해지고, 문서가 이미 쓰던 `<b>` 와 표기가 갈린다.
+But leaving it always-on turns even bold into `<span style="font-weight:bold">`.
+Behavior is identical, but human-read diffs get ugly, and the notation splits from
+the `<b>` the document already uses.
 
-**명령마다 정한다.** 굵게·기울임·밑줄은 끄고(`<b>` `<i>` `<u>`), 색·크기는 켠다(`<span style>`).
-한 번만 정해 두면 어디선가 뒤집혔을 때 조용히 다른 마크업이 나오므로 명령마다 다시 정한다.
+**Set it per command.** Bold, italic, underline turn it off (`<b>` `<i>` `<u>`);
+color and size turn it on (`<span style>`). Set it once globally and a flip
+somewhere else quietly produces different markup — so it is set again at every
+command.
 
-같은 이유로 인라인 태그 집합에 `font`·`strike` 같은 옛 태그도 넣어 둔다. 우리가 만들지
-않아도 남이 만든 문서에는 있고, 있으면 그 문단이 통째로 잠긴다.
+For the same reason, legacy tags like `font`·`strike` are included in the inline tag
+set. We never produce them, but documents made elsewhere have them — and their
+presence would lock those paragraphs wholesale.
 
-### 크기는 배수로 적는다
+### Size is written as a multiple
 
-`fontSize` 가 만드는 값은 `x-large` 같은 절대 키워드다. 아티팩트마다 본문 크기가 달라
-절대값을 박으면 그 문서의 크기 체계와 어긋난다. 명령이 만든 값을 **그 자리에서 배수(`em`)로
-바꿔 적는다** — 원래 크기의 몇 배인지가 사용자가 원한 것이다.
+`fontSize` produces absolute keywords like `x-large`. Body size differs per
+artifact, so a hard absolute clashes with that document's size system. The value
+the command produced is rewritten **on the spot as a multiple (`em`)** — how many
+times the original size is what the user actually asked for.
 
-바꿔 적을 자리는 값이 아니라 **고른 범위**로 가려낸다. 값으로 가려내면("명령 전에 이미
-그 값이던 자리는 원본의 것") 고른 범위 자체가 이미 그 값일 때 — 원본이 그 키워드를 쓰던
-자리 — 명령이 아무것도 새로 만들지 않아 크기 조절이 통째로 무시된다. 범위 안에 온전히 든
-그 값 자리는 명령이 만들었든 원본에 있었든 사용자가 크기를 청한 글자이므로 배수로 바꿔
-적고, 범위 밖은 원본의 것이므로 건드리지 않는다. 고른 것이 그 값 자리의 **일부**면 그
-자리를 갈라 고른 부분만 바꾼다 — 어느 경우에도 고르지 않은 글자의 크기는 달라지지 않는다.
+Which spots to rewrite is determined by **the selected range**, not by value.
+Filter by value ("spots already holding this value predate the command, leave
+them") and when the selected range itself already carries that value — the original
+used that keyword — the command creates nothing new and the size change is silently
+swallowed. A value-spot fully inside the range is text the user asked to resize,
+whether the command made it or the original did, so it is rewritten as a multiple;
+outside the range it belongs to the original and stays. If the selection covers
+**part** of a value-spot, the spot is split and only the selected part changes — in
+no case does unselected text change size.
 
-### 색은 문서에서 가져온다
+### Colors come from the document
 
-고를 수 있는 색은 **그 문서가 이미 글자에 쓰고 있는 색**이다. 렌더된 화면에서 글자를 가진
-요소의 색을 모아 많이 쓰인 순서로 준다. `<body>` 자신도 센다 — 글자가 body 바로 아래에
-있고 색이 body 에 걸린 문서에서 자손만 훑으면 색이 하나도 안 나온다.
+The colors on offer are **the colors the document already uses on text.** From the
+rendered screen, colors of text-bearing elements are collected and offered by
+frequency. `<body>` itself counts — in a document whose text sits directly under
+body with the color set on body, scanning descendants alone yields no colors at all.
 
-우리가 정한 색을 주면 문서가 가진 배색을 이긴다. 아티팩트에는 제 색 체계가 있고, 거기
-없던 빨강을 새로 들이는 것은 고치는 일이 아니라 **디자인을 바꾸는 일**이다.
-쓸 수 있는 색은 이미 그 문서 안에 있다.
+Hand out colors we chose and they defeat the document's own palette. An artifact has
+its own color system; introducing a red it never had is not fixing — it is
+**changing the design.** The usable colors are already in the document.
 
-색 칸은 최대 10개까지만 둔다. 더 늘리면 고르는 일이 되어 버린다.
+At most 10 color slots. More, and choosing becomes a task of its own.
 
-**눈에 같아 보이는 색은 하나로 묶는다.** 실제 문서는 본문·흐린 본문·각주처럼 서로 몇
-단위밖에 안 다른 회색을 여럿 쓴다. 계산된 값이 다르다고 따로 두면 12px 동그라미가
-구분되지 않는 채로 늘어서는데, **고를 수 없는 선택지는 선택지가 아니다.**
+**Colors that look identical are merged.** Real documents use several grays only a
+few units apart — body, muted body, footnotes. Keep computed-value-distinct colors
+separate and the 12px swatches line up indistinguishable — **an option you cannot
+tell apart is not an option.**
 
-견주는 방법은 채널을 그대로 빼는 것이 아니라 사람 눈의 민감도를 실은 가중 거리다 —
-초록에 가장 민감하고 파랑에 가장 둔하므로, 그냥 빼면 파랑만 다른 두 색을 갈라 놓는다.
-투명도는 보지 않는다. 반투명 글자는 뒤에 깔린 것과 섞여 보이므로 그 자리에서는 알 수 없고,
-서식으로 넣을 때는 어차피 불투명하게 들어간다.
+The comparison is not per-channel subtraction but a distance weighted by human eye
+sensitivity — most sensitive to green, least to blue, so naive subtraction splits
+two colors differing only in blue. Opacity is ignored: translucent text blends with
+whatever sits behind it, so its on-screen color is unknowable there, and formatting
+inserts opaque values anyway.
 
-### 조작
+### Controls
 
-- `Ctrl+B` · `Ctrl+I` · `Ctrl+U` — 굵게 · 기울임 · 밑줄
-- 글자를 고르면 그 위에 작은 막대가 뜬다. 색과 크기는 값을 골라야 하므로 여기서 고른다
-- 막대의 **지우기**는 고른 범위의 서식을 지운다 (`removeFormat`)
+- `Ctrl+B` · `Ctrl+I` · `Ctrl+U` — bold · italic · underline
+- Select text and a small bar appears above it. Color and size need a value picked,
+  so they live there
+- The bar's **clear** removes formatting from the selection (`removeFormat`)
 
-막대에 붙는 문구는 **호스트가 건넨다.** 에이전트는 자기완결 함수라 언어팩을 불러올 수
-없는데(ADR-007), 그렇다고 한국어를 박아 두면 그 언어가 굳는다. 언어를 바꾸면 다시 보내
-이미 떠 있는 막대까지 함께 바뀐다 — 화면 문구의 출처는 언제나 언어팩 하나다 (§1).
+The bar's labels are **handed over by the host.** The agent is a self-contained
+function that cannot import the language pack (ADR-007) — but hard-coding Korean
+would freeze that language in. Switching languages re-sends the labels, so even a
+bar already on screen follows — screen copy has exactly one source, the language
+pack (§1).
 
-막대를 누르는 동안 선택이 풀리면 아무 데도 적용되지 않는다. 막대는 `mousedown` 의 기본
-동작을 막고, 고른 범위를 따로 들고 있다가 명령 직전에 되살린다.
+If the selection collapses while pressing the bar, the command applies nowhere. The
+bar suppresses `mousedown`'s default, holds the selected range aside, and restores
+it just before the command.
 
-막대는 프리뷰가 제 몫으로 그리는 물건이라 **블록 밖**(`<html>` 바로 아래)에 둔다.
-`<html><body>Hello</body></html>` 처럼 `<body>` 자체가 블록인 문서에서 `body` 에 붙이면
-막대가 편집 중인 블록의 자식이 되고, 확정이 읽는 `innerHTML` 에 편집기 버튼이 통째로 실려
-저장본에 들어간다 (INV-9). 어떤 경로로든 막대가 블록 안에 들어와 있으면 확정 전에 걷어낸다.
+The bar is the preview's own furniture, so it lives **outside any block** (directly
+under `<html>`). In a document like `<html><body>Hello</body></html>` where `<body>`
+itself is the block, attaching to `body` makes the bar a child of the block being
+edited — commit reads `innerHTML` and the editor's buttons ride into the saved
+output (INV-9). If the bar somehow ends up inside a block, it is pulled out before
+commit.
 
-들고 있는 범위는 **막대를 누르는 동안만** 산다. 캐럿을 옮기거나 타이핑해서 선택을 떠나면
-버린다 — 남겨 두면 다음 Ctrl+B 가 지금 고른 곳이 아니라 옛 글자에 걸린다.
-선택이 편집 중인 블록을 벗어나 이웃 블록까지 걸치면 서식을 걸지 않는다. `execCommand` 는
-이웃까지 바꾸는데, 확정은 편집 중인 블록만 나가서 이웃의 변경이 추적되지 않는다 (대원칙 2).
+The held range lives **only while the bar is being pressed.** Move the caret or type
+away from the selection and it is dropped — kept, the next Ctrl+B lands on the old
+text instead of what is now selected.
+If the selection reaches beyond the block being edited into a neighbor, formatting
+is not applied. `execCommand` would change the neighbor too, but commit exports only
+the block being edited, so the neighbor's change would go untracked
+(core principle 2).
 
-막대에 붙는 문구는 프리뷰를 새로 그렸을 때 에이전트의 준비 신호(`ready`)가 온 **뒤에**
-보낸다. 문서가 갈리는 순간 보내면 새 문서의 에이전트가 아직 리스너를 걸기 전이라 문구가
-사라지고, 막대가 빈 제목으로 뜬다.
+The bar's labels are sent only **after** the agent's `ready` signal from a freshly
+drawn preview. Send them the moment the document switches and the new document's
+agent has not yet attached its listener — the labels vanish and the bar comes up
+with empty titles.
 
-### 아티팩트 이벤트와의 충돌
+### Colliding with artifact events
 
-아티팩트는 자체 전역 핸들러를 갖는다. 실측 아티팩트는 `document` 클릭으로 슬라이드를 넘겼다.
+Artifacts carry their own global handlers. The measured artifact flips slides on
+`document` clicks.
 
 ```js
 document.addEventListener('click', function(e){
@@ -449,534 +522,620 @@ document.addEventListener('click', function(e){
 });
 ```
 
-즉 `<p>`나 `<h2>`를 편집하려고 클릭하면 **편집이 켜지는 동시에 슬라이드가 넘어간다.**
+That is, click a `<p>` or `<h2>` to edit it and **the edit opens and the slide flips
+at the same time.**
 
-프리뷰 에이전트는 `click` / `keydown` / `touchend` 를 **버블 단계**에서 가로채
-`stopImmediatePropagation()` 으로 아티팩트 핸들러에 도달하지 않게 하고,
-편집을 소비하는 클릭·`Enter` 는 `preventDefault()` 로 기본 동작까지 막는다.
-캡처 단계로 옮기면 캐럿 배치를 잃는다. 에이전트가 문서 맨 앞에 주입돼
-아티팩트보다 먼저 등록되는 것이 이 선택의 전제다 — 한계는 ADR-007 에 적어 뒀다.
+The preview agent intercepts `click` / `keydown` / `touchend` in the **bubble
+phase**, using `stopImmediatePropagation()` so they never reach artifact handlers,
+and for clicks and `Enter` consumed by editing, `preventDefault()` suppresses the
+default action as well. Moving to the capture phase loses caret placement. The
+premise is that the agent, injected at the top of the document, registers before the
+artifact — the limits are recorded in ADR-007.
 
-### 한글 IME
-`compositionstart` ~ `compositionend` 사이에는 값을 읽지 않는다.
-조합 중 상태를 패치로 반영하면 자모가 깨진다. 확정 이벤트 이후에만 패치를 갱신한다.
+### Korean IME
+Between `compositionstart` and `compositionend`, values are not read.
+Reflect mid-composition state into a patch and the jamo shatter. Patches update
+only after the commit event.
 
 ---
 
-### 사본 내려받기
+### Download a copy
 
-`열기` 로 연 Chromium 에서는 저장이 곧 덮어쓰기라 결과물을 **별도 파일로** 받을 길이 없다.
-사본 내려받기가 그 구멍을 메운다. 이름은 원본과 같게 둔다 —
-`diff original.html downloaded.html` 이 이 도구의 결과를 확인하는 방법이고,
-받은 파일이 원본을 대체할 수 있어야 한다. 같은 이름이 이미 있으면 브라우저가 번호를 붙인다.
+In Chromium, opened via **Open**, saving means overwriting — there is no route to
+the result **as a separate file**. Download a copy fills that hole. The name stays
+the same as the original — `diff original.html downloaded.html` is how this tool's
+work is verified, and the downloaded file must be able to replace the original. If
+the name already exists, the browser numbers it.
 
-### 알림은 오른쪽 위에 띄운다
+### Notices float at the top right
 
-배너로 두면 알림이 뜰 때마다 본문이 아래로 밀린다. 알림 하나 떴다고 읽던 자리가 움직이면
-안 된다. 문서 위에 겹쳐 띄워 흐름을 건드리지 않는다.
+As a banner, every notice shoves the body downward. A notice must not move the line
+you were reading. It floats over the document and never touches the flow.
 
-| 알림 | 어디에 | 언제 사라지나 |
+| Notice | Where | When it goes away |
 |---|---|---|
-| 저장했어요 · 내려받았어요 · 문서 N개 중 … | 토스트 | 스스로 |
-| 여기는 고칠 수 없어요 · {사유} | 토스트 | 스스로 |
-| 못 열었어요 · UTF-8 아님 · 저장하지 못했어요 · 폴더 열기 미지원 | 토스트 | **사람이 닫을 때까지** |
-| 옆에 있어야 할 파일 N개 `[폴더 연결하기]` | **배너** | 자원을 붙일 때까지 |
+| Saved · downloaded · opened N documents … | Toast | On its own |
+| Can't edit this · {reason} | Toast | On its own |
+| Couldn't open · not UTF-8 · couldn't save · folder open unsupported | Toast | **When a person closes it** |
+| Missing files this document expects: N `[Link a folder]` | **Banner** | Until resources attach |
 
-- **오류는 스스로 사라지지 않는다.** 저장 실패가 몇 초 만에 사라지면 못 본 사람은
-  저장된 줄 안다 (대원칙 3)
-- **오류는 밀려나지도 않는다.** 쌓인 알림이 넘치면 오류가 아닌 것부터 밀어낸다 —
-  저장 실패 위로 안내 몇 개가 지나갔다고 실패가 사라지면, 스스로 사라진 것과 다르지 않다
-- **할 일이 딸린 알림은 토스트로 보내지 않는다.** 알림이 사라지면 버튼도 함께 사라진다
-- 같은 알림이 연달아 오면 새로 쌓지 않고 갈아 끼운다. 잠긴 블록을 여러 번 누르면
-  같은 문장이 화면을 덮는다
-- 잠긴 블록 알림은 **스토어에서** 띄운다. 화면 쪽에서 `blockedId` 변화를 보면 같은 블록을
-  다시 눌렀을 때 값이 그대로라 아무 일도 일어나지 않는다
-- 토스트도 문장이 아니라 **메시지 키**를 담는다. 언어를 바꾸면 떠 있는 알림도 바뀐다
+- **Errors never fade on their own.** A save failure that vanishes in seconds reads
+  as success to whoever missed it (core principle 3)
+- **Errors are never pushed out either.** When stacked notices overflow, non-errors
+  are evicted first — if a save failure disappears because a few info toasts rolled
+  over it, that is no different from fading on its own
+- **A notice that carries an action never goes to a toast.** When the notice fades,
+  its button fades with it
+- Identical notices arriving back to back replace instead of stacking. Clicking a
+  locked block repeatedly would otherwise wallpaper the screen with one sentence
+- The locked-block notice is raised **from the store.** Watch `blockedId` change on
+  the screen side and clicking the same block again changes nothing — so nothing
+  happens
+- Toasts also carry **message keys**, not sentences. Switch languages and the
+  notices on screen switch too
 
-### 저장하지 않은 편집을 지킨다
+### Protecting unsaved edits
 
-편집 결과는 저장 전까지 메모리에만 있다. 사라질 수 있는 길은 다섯이고, 전부 막는다.
+Until saved, edits exist only in memory. There are five roads to losing them; all
+are blocked.
 
-- **탭 닫기·새로고침** — `beforeunload` 로 브라우저가 되묻게 한다.
-  되묻는 기준은 패치 개수가 아니라 **파일과 다른가**다 — 저장해도 패치는 남는다 (INV-1)
-- **다른 파일 열기** (열기 버튼·드롭)
-- **OS 가 이 앱으로 파일 열기** (PWA `file_handlers`) — 들어오는 길만 다를 뿐 다른 파일 열기와 같다
-- **묶음 안의 다른 문서로 갈아타기** (§5.1)
-- **폴더 연결** — 자원을 붙이려면 프리뷰를 다시 그려야 한다 (§5.1)
+- **Closing the tab / reloading** — `beforeunload` makes the browser ask.
+  The criterion is not the patch count but **"does it differ from the file"** —
+  patches survive a save (INV-1)
+- **Opening another file** (open button · drop)
+- **The OS opening a file with this app** (PWA `file_handlers`) — a different door,
+  same "opening another file"
+- **Switching to another document in the bundle** (§5.1)
+- **Linking a folder** — attaching resources requires redrawing the preview (§5.1)
 
-확인 없이 조용히 버리지 않는다. 되돌릴 방법이 없기 때문이다.
+Nothing is discarded silently without confirmation, because there is no way back.
 
-**묻기 전에, 프리뷰에 열려 있는 편집부터 확정시킨다.** 블록을 고치던 중 곧바로
-닫기·열기·갈아타기를 누르면 프리뷰의 확정(focusout)은 `postMessage` 로 **떠 있을
-뿐**이라, 물음의 `unsaved` 판정이 그 도착보다 먼저 돌 수 있다 — 그대로 두면 묻지
-않고 갈아 끼우고, 늦게 온 확정은 프리뷰가 내려가며 조용히 사라진다 (대원칙 3).
-그래서 판정 전에 프리뷰에 "지금 편집 중이면 확정하고 알려 달라" 청하고 그 답까지
-기다린다. 확정과 답은 같은 통로로 순서대로 오므로, 답이 왔다면 확정도 이미 스토어에
-닿아 있다.
+**Before asking, any edit open in the preview is committed first.** Press
+close/open/switch while mid-edit in a block, and the preview's commit (focusout) is
+merely **in flight** as a `postMessage` — the prompt's `unsaved` decision can run
+before it lands. Left alone, no question is asked, the document swaps, and the late
+commit dies quietly as the preview goes down (core principle 3). So before deciding,
+the host asks the preview to "commit any open edit and report back", and waits for
+the answer. Commits and the answer travel the same channel in order, so if the
+answer arrived, the commit already reached the store.
 
-답(flushed)의 뜻은 "지금 편집이 없다" 가 아니라 **"내보낼 확정을 전부 내보냈다"** 다.
-그래서 곧바로 답할 수 없는 상태에서는 답도 미룬다 — 한글 조합 중에는 확정 자체가
-미뤄지는데(한글 IME), 그때 답부터 보내면 호스트가 최신인 줄 알고 갈아 끼워 조합
-중이던 글자가 사라진다. 프리뷰는 미룬 확정이 실제로 나간 뒤(조합 종료), 또는 그
-편집을 버린 뒤(Escape — 내보낼 것이 없어졌다)에 답한다. 확정을 미루는 상태는
-조합 하나뿐이다.
+The answer (flushed) does not mean "no edit is open" — it means **"everything there
+was to send has been sent."** So in a state that cannot answer truthfully yet, the
+answer itself is deferred — during Hangul composition the commit itself is deferred
+(Korean IME), and answering first would let the host believe it is current and swap,
+losing the character mid-composition. The preview answers after the deferred commit
+actually goes out (composition end), or after that edit is abandoned (Escape —
+nothing left to send). Composition is the only state that defers commits.
 
-**영영 기다리지는 않는다** — 프리뷰가 죽었거나 아티팩트 스크립트가
-이벤트 루프를 붙들고 있을 수 있다. 1초 안에 답이 없으면 지금 아는 상태로 진행한다.
-답을 못 하는 프리뷰는 확정(focusout)도 보낼 수 없는 상태라, 더 기다려도 지킬 편집이
-새로 도착하지 않는다 — 기다림은 사용자의 클릭만 붙든다. 답을 기다리는 자리는
-답·한도·프리뷰 내려감 어느 쪽이 먼저 오든 **한 자리에서** 정리된다 — 한도로 끝난
-대기가 목록에 남으면 답 없는 프리뷰 앞에서 청할 때마다 대기가 쌓인다. 이 기다림도
-오래 걸리는 단계다 — 기다린 뒤에는 갈아 끼우기 예약이 아직 최신인지 다시 확인한다
-(§5 · 갈아 끼우기 예약).
+**But it never waits forever** — the preview may be dead, or an artifact script may
+be holding the event loop. With no answer inside one second, it proceeds on what it
+knows. A preview that cannot answer cannot send commits (focusout) either, so
+waiting longer delivers no new edits to protect — the wait would only hold the
+user's click hostage. The waiting spot is cleaned up **in one place** whichever
+comes first — answer, timeout, or preview teardown; a timeout-ended wait left on
+the list would pile up a new wait on every ask in front of an unresponsive preview.
+This wait is a slow step like any other — after it, the replacement reservation is
+checked for freshness again (§5 · replacement reservations).
 
-뒤의 넷은 **선택지를 셋 준다** — `저장하고 계속` · `버리고 계속` · `취소`.
-브라우저의 `confirm` 은 버튼이 둘뿐이라 "버릴래?" 밖에 못 묻는데, 사용자가 정작
-하려는 것은 대개 저장하고 계속이다. 그 선택지가 없으면 취소하고 저장하고 다시
-시도하는 세 걸음을 걷게 된다.
+The latter four offer **three choices** — `Save and continue` · `Discard and
+continue` · `Cancel`. The browser's `confirm` has only two buttons, so it can only
+ask "discard?" — while what the user usually wants is to save and continue. Without
+that choice they walk three steps: cancel, save, retry.
 
-- 저장 버튼의 문구는 그 문서를 덮어쓸 수 있는지에 따라 갈린다. 드롭·zip 으로 연 문서는
-  되쓸 자리가 없어 사본을 내려받는다 — "저장" 이라고만 적으면 거짓말이 된다
-- 물음에 적는 "{count}곳" 은 패치 총수가 아니라 **파일과 다른 블록 수**다.
-  저장해도 패치는 남고(INV-1), 저장한 편집을 되돌리면 패치 없이도 파일과 다르다 —
-  패치 총수로 적으면 이미 저장한 곳까지 세거나, 잃을 것이 있는데 0곳이라고 말한다.
-  지금 패치를 마지막 저장 때의 패치와 블록별로 견준 차이가 곧 그 수다 (§5 와 같은
-  기준). 견줄 때 한쪽에만 있는 항목은 그 블록의 **원본 내용**을 빈자리에 놓는다 —
-  항목의 있고 없음만으로 세면, 원본 그대로를 저장해 둔 자리(고쳤다가 원본으로 되돌려
-  저장)를 되돌린 상태가 파일과 같은데도 한 곳으로 더 세인다
-- 저장을 골랐는데 **저장이 실패하면 계속하지 않는다.** 그대로 넘어가면 저장한 줄
-  알았던 편집이 사라진다
-- 저장을 골랐는데 **이미 파일과 같아져 있으면 저장된 것으로 치고 계속한다.**
-  물음이 떠 있는 사이에도 상태는 움직인다 — 단축키로 부른 저장이 그 사이 끝났거나,
-  마지막 편집을 되돌려 파일과 같아졌을 수 있다. 그때 저장의 "쓸 것 없음" 물러남을
-  실패로 읽으면, 청한 저장이 이미 충족됐는데도 하려던 일이 취소된다
-- 물음이 뜬 채로 또 물으면 앞의 물음은 취소로 닫는다. 답을 기다리는 쪽을 영영 두지 않는다
-- **물음이 떠 있는 동안의 `Ctrl+S` 는 "저장하고 계속" 과 같다.** 단축키가 저장만 하고
-  물음을 남겨 두면 `unsaved` 가 풀린 채 물음이 남고, 그 뒤에 저장 버튼을 눌러도
-  저장할 것이 없다며 실패로 돌아 **하려던 일(열기·갈아타기)이 취소된다**
+- The save button's label depends on whether that document can be overwritten.
+  Dropped and zip documents have no place to write back — a copy is downloaded, and
+  labeling that just "save" would be a lie
+- The "{count}" in the prompt is not the patch total but **the number of blocks
+  differing from the file.** Patches survive a save (INV-1), and reverting a saved
+  edit differs from the file with zero patches — counting patches either counts
+  already-saved spots or says "0" when there is something to lose. The number is
+  the per-block difference between current patches and the patches at the last
+  save (the same criterion as §5). When one side lacks an entry, the comparison
+  uses that block's **original content** in the gap — counting mere
+  presence/absence would count a slot saved as its original content (edited, then
+  reverted to original, then saved) as one more spot even though the reverted
+  state equals the file
+- If save was chosen and **saving fails, it does not continue.** Continuing would
+  lose edits the user believed saved
+- If save was chosen and **the content already equals the file, it counts as saved
+  and continues.** State moves even while the prompt is up — a shortcut-invoked
+  save may have finished meanwhile, or the last edit may have been reverted to
+  match the file. Reading the save's "nothing to write" retreat as failure would
+  cancel the user's action even though the requested save is already satisfied
+- Asking while a prompt is already up closes the earlier prompt as cancel. Nothing
+  is left waiting for an answer forever
+- **`Ctrl+S` while the prompt is up equals "Save and continue."** If the shortcut
+  only saved and left the prompt standing, `unsaved` would clear under a standing
+  prompt — pressing its save button then finds nothing to save, reads as failure,
+  and **cancels the pending action (open · switch)**
 
-### 갈아 끼우는 동안은 편집을 받지 않는다
+### No edits are accepted while replacing
 
-물음에 답한 뒤에도 새 문서가 서기까지는 시간이 걸린다 — 파일 읽기, 압축 풀기,
-파서 청크 로드. 그 사이 화면에는 **아직 이전 문서가 떠 있다.** 여기서 받은 편집은
-새 문서의 상태가 설치되는 순간 갈 곳이 없다 — 조용히 사라질 자리다.
+Even after the prompt is answered, the new document takes time to stand up — file
+reads, unzipping, parser chunk load. Meanwhile the screen still shows **the old
+document.** An edit accepted here has nowhere to go the moment the new state
+installs — a place where it would silently vanish.
 
-그래서 갈아 끼우는 동안에는 편집을 **받지 않는다** (대원칙 3 · 조용히 하지 않는다).
+So while replacing, edits are **not accepted** (core principle 3 · nothing quiet).
 
-- 제목 칸과 프리뷰는 갈아 끼우는 동안 잠근다 — 새 편집이 시작되지 않는다
-- 그래도 들어온 확정(열려 있던 블록의 blur 등)은 **거절하고 알린다** —
-  받아 두었다가 버리는 것은 조용히 버리는 것과 같다
-- 변경 목록의 되돌리기·전체 되돌리기·`Ctrl+Z` 도 같은 이유로 잠근다 — 이전 문서를
-  고치는 일이라 결과가 설치 순간 사라진다. 버튼은 눌리지 않게 하고, 그래도 들어온
-  단축키는 편집 확정과 같이 거절하고 알린다
-- 잠그는 범위는 물음에 답한 순간부터 설치(또는 실패)까지다 — 드롭한 폴더의 훑기가
-  아직 도는 중이면 그 기다림도 포함이다. 이 사이의 틈은 전부 편집이 사라질 자리다
-- 화면의 잠금(프리뷰·제목 칸·변경 목록·툴바)은 전부 갈아 끼우기 예약 상태
-  **하나**에서 나온다 (§5 · 갈아 끼우기 예약)
+- The title field and the preview lock during replacement — no new edit can begin
+- Commits that arrive anyway (blur of an already-open block, etc.) are **rejected
+  with a notice** — accepting and then discarding equals discarding quietly
+- Revert, revert all, and `Ctrl+Z` in the change list lock for the same reason —
+  they edit the old document, and the result dies at install. The buttons are
+  disabled; shortcuts that arrive anyway are rejected with a notice, like commits
+- The locked span runs from the moment the prompt is answered until install (or
+  failure) — including the wait if a dropped folder's scan is still running. Every
+  gap in between is a place edits would vanish
+- Everything the screen locks (preview · title field · change list · toolbar)
+  derives from the **single** replacement reservation state (§5 · replacement
+  reservations)
 
-**저장하는 동안은 다르다.** 파일을 쓰는 사이의 편집은 살아남는다 — 저장이 끝나면
-결과물과 다시 견줘 저장 안 된 편집으로 남는다 (§5). 그래서 저장은 편집을 잠그지 않는다.
+**Saving is different.** Edits made while the file is being written survive — when
+the save finishes they are re-compared against the output and remain as unsaved
+edits (§5). So saving locks nothing.
 
-## 5. 저장 동작
+## 5. Save behavior
 
-1. 패치 목록을 `innerStart` **내림차순**으로 정렬 (앞에서부터 자르면 뒤쪽 offset이 전부 밀림)
-2. 원본 문자열에 순서대로 스플라이스
-3. 결과를 파일 핸들에 write, 실패 시 다운로드 폴백
+1. Sort the patch list by `innerStart` **descending** (splice front-first and every later offset shifts)
+2. Splice into the original string in that order
+3. Write the result to the file handle; on failure, fall back to download
 
-편집하지 않은 블록은 패치 목록에 없으므로 원본 바이트가 그대로 남는다.
+Unedited blocks are absent from the patch list, so their original bytes remain untouched.
 
-저장할 것이 있는지는 패치 개수가 아니라 **파일과 다른가**(`unsaved`)로 판단한다.
-"파일과 다른가"는 **지금 만들 결과물**(원본 + 패치)을 **파일이 들고 있는 내용**
-(열 때 읽었거나 마지막으로 쓴 것)과 견준 결과다. 패치 개수는 어느 방향으로도 못 미덥다.
+Whether there is anything to save is judged not by patch count but by **"does it
+differ from the file"** (`unsaved`). "Differs from the file" compares **the output
+that would be built now** (original + patches) against **what the file holds** (what
+was read at open, or last written). Patch count is unreliable in both directions.
 
-- 이미 저장한 편집을 되돌리면 패치는 0개인데 파일에는 옛 편집이 남아 있다 — 그때의
-  저장은 원본 그대로를 되써서 파일을 화면과 같게 만든다. 패치 개수로 막으면
-  "저장하고 계속하기" 가 쓸 것이 없다며 멈춰, 대화상자에서 빠져나갈 길이 취소와 버리기뿐이 된다
-- 반대로 저장한 적 없는 편집을 되돌려 결과물이 파일과 같아지면 패치가 있었어도
-  잃을 것이 없다 — 저장할 것도, 물을 것도 없다
+- Revert an already-saved edit and patches hit zero while the file still holds the
+  old edit — saving then writes the original back, making the file match the
+  screen. Gate on patch count and "Save and continue" halts with nothing to write,
+  leaving cancel and discard as the only exits from the dialog
+- Conversely, revert a never-saved edit until the output equals the file, and
+  nothing is at stake despite the patches — nothing to save, nothing to ask
 
-저장 버튼·`Ctrl+S` 의 조기 반환·탭 닫기 확인(`beforeunload`)·저장 대화상자가
-전부 이 한 기준을 본다. 기준이 갈리면 "버튼은 눌리는데 아무 일도 없는" 틈이 생긴다.
+The save button, `Ctrl+S`'s early return, the tab-close check (`beforeunload`), and
+the save dialog all read this one criterion. Split criteria create the gap where
+"the button presses but nothing happens."
 
-저장이 파일을 **쓰고 있는 동안**의 기준은 지금 쓰는 그 결과물이다 — 쓰기가 끝나면
-파일이 들 내용이 그것이라서다. 옛 내용과 견주면 쓰는 사이에 편집을 되돌렸을 때
-"잃을 것 없음" 으로 읽혀, 그 창에서 탭을 닫으면 경고 없이 닫히고 화면과 디스크가
-어긋난다. 쓰기가 실패하면 파일은 옛 내용 그대로이므로 기준도 다시 옛 내용이다.
+While a save is **writing** the file, the criterion is the output being written —
+because that is what the file will hold when the write ends. Compare against the
+old content and reverting an edit mid-write reads as "nothing to lose": close the
+tab in that window and it closes without warning, leaving screen and disk split.
+If the write fails, the file still holds the old content, so the criterion returns
+to the old content.
 
-"파일이 들고 있는 내용" 은 저장할 때마다 결과물로 갱신된다. 핸들이 있으면 디스크가
-그 내용을 들고 있으므로 프리뷰를 다시 그릴 일이 생기면 디스크에서 다시 읽는다.
-**핸들 없이(드롭·zip) 내려받기로 저장한 문서는 그 사본이 곧 파일의 내용이다** —
-메모리의 문서 내용도 결과물로 갈아 끼워야, 폴더 연결처럼 문서를 다시 읽는 길이
-저장 전 내용으로 되돌아가지 않는다.
+"What the file holds" is updated to the output at every save. With a handle, the
+disk holds that content, so whenever the preview must be redrawn it is re-read from
+disk. **For a document saved by download without a handle (drop · zip), the copy is
+what the file holds** — the in-memory document content must also be swapped to the
+output, so that paths which re-read the document (like linking a folder) do not
+fall back to pre-save content.
 
-저장이 파일을 쓰는 사이에 문서를 갈아탈 수도 있다. 뒤늦게 끝난 저장의 결과는
-**이전 문서의 것이다** — 새 문서의 상태에 적으면 옛 결과물이 새 문서의 저장본
-행세를 한다. 그래서 뒤늦게 끝나는 비동기는 시작할 때 지금 문서의 표를 받아 두고,
-끝났을 때 표가 달라졌으면 결과를 **버린다** — 파일에는 이미 썼고 그것은 그 파일의
-몫이라 잃는 것이 없다. 버리는 것은 상태 갱신과 알림·저장 중 표시의 해제뿐이다.
-이 판정("이 결과가 지금 문서의 것인가")은 한 자리에 모은다 — 저장만이 아니라
-갈아탄 뒤에 끝나는 어떤 비동기도 같은 표로 저 자신의 문서를 확인한다.
+A save may also still be writing when the document is switched. A late-finishing
+save's result belongs to **the previous document** — write it into the new
+document's state and the old output impersonates the new document's saved copy. So
+late-finishing async work takes the current document's token at start and, if the
+token changed by the end, **discards** its result — the file was already written,
+and that belongs to that file; nothing is lost. Discarded means only the state
+update, the notice, and lowering the saving indicator. The judgment ("is this
+result the current document's?") is gathered in one place — not just saves: any
+async that can finish after a switch checks its own document by the same token.
 
-**프리뷰가 보내는 메시지도 같은 문제를 갖는다.** iframe 은 재사용되고 `srcDoc` 을
-갈아 끼워도 `contentWindow` 의 신원은 그대로라, 옛 문서의 에이전트가 띄워 둔
-`ready`·`edit` 가 새 문서가 선 뒤에 도착하면 출처 검사를 통과한다. 블록 id 는
-문서마다 0부터 다시 시작하므로, 옛 문서의 내용이나 잠금이 새 문서의 같은 번호
-블록을 건드린다. 그래서 프리뷰 문서마다 **다른 표(토큰)를 에이전트에 실어 보내고**,
-에이전트는 모든 메시지에 그 표를 붙인다 — 호스트는 지금 문서의 표가 아닌 메시지를
-버린다. 표는 문서를 세울 때(load) 만들며, 세션 안에서 문서마다 다르기만 하면 된다.
+**Messages from the preview share this problem.** The iframe is reused, and
+swapping `srcDoc` leaves `contentWindow`'s identity intact — a `ready` or `edit`
+launched by the old document's agent that lands after the new document stands
+passes the origin check. Block ids restart at 0 per document, so old content or
+locks would strike the new document's same-numbered blocks. So each preview
+document **carries a distinct token to its agent**, the agent stamps every message
+with it, and the host drops messages that lack the current document's token. The
+token is minted at document load; it only needs to differ per document within a
+session.
 
-**저장이 파일을 쓰는 동안의 저장 요청은 겹쳐 시작하지 않는다.** 저장 버튼은 저장 중
-표시(`saving`)로 잠기지만 `Ctrl+S` 는 언제든 눌린다 — 쓰는 사이에 편집해 `unsaved` 가
-다시 서면 조기 반환도 못 막는다. 겹치면 두 저장이 서로 다른 스냅샷을 들고 나란히
-쓰다가, 끝나는 순서에 따라 **옛 결과물이 디스크에서 이기고** 상태(`savedText`)와
-디스크가 어긋난다. 그래서 저장은 시작할 때 `saving` 을 보고 도는 중이면 시작하지
-않는다. 잃는 것은 없다 — 도는 저장이 끝나면 그 사이의 편집은 저장 안 된 것으로
-남아(위) 다시 저장하면 된다.
+**A save request while a save is writing does not start a second save.** The save
+button locks on the saving indicator (`saving`), but `Ctrl+S` presses any time —
+edit mid-write and `unsaved` stands again, so the early return cannot stop it
+either. Overlap, and two saves hold different snapshots writing side by side; by
+finishing order **the older output can win on disk**, splitting state (`savedText`)
+from disk. So a save checks `saving` at start and does not begin while one is
+running. Nothing is lost — when the running save ends, edits made meanwhile remain
+unsaved (above), and saving again suffices.
 
-### 갈아 끼우기 예약
+### Replacement reservations
 
-갈아 끼우기끼리도 겹칠 수 있다 — 폴더를 연달아 놓으면 앞의 읽기가 끝나기 전에
-다음 읽기가 시작된다. 겹치면 **나중에 시작한 쪽이 이긴다.** 그것이 사용자의 마지막
-선택이기 때문이다. 문서의 표로는 못 가린다 — 표는 새 상태가 **설치될 때** 바뀌어,
-겹친 둘 중 먼저 끝난 쪽이 이겨 버린다. 그래서 문서를 바꾸려는 흐름은 전부
-한 규칙을 따른다 — **갈아 끼우기 예약** (ADR-010).
+Replacements can also overlap each other — drop folders in quick succession and the
+next read starts before the last finishes. When they overlap, **the later one
+wins**: it is the user's most recent choice. The document token cannot arbitrate —
+the token changes when the new state **installs**, so of two overlapped flows the
+one that finishes first would win. So every flow that changes the document follows
+one rule — the **replacement reservation** (ADR-010).
 
-- 예약은 **사용자 행동의 순간**에 한다 — 훑기·읽기·대화상자·묻기·저장처럼 오래
-  걸리는 일을 시작하기 **전에**. OS 가 들려 보낸 파일도 마찬가지다 — 읽기가 끝난
-  뒤에 예약하면, 먼저 시작했지만 늦게 준비를 마친 흐름이 더 새 예약을 받아
-  사용자의 마지막 선택을 덮는다
-- 예약한 뒤의 모든 단계(대화상자 → 훑기 → 프리뷰 확정 기다림 → 묻기 → 저장 →
-  읽기 → 설치)는 단계를 마칠 때마다 **자기 예약이 아직 최신인지** 한 자리에서
-  확인한다. 물음에 저장으로 답하고 돌아온 흐름도, 폴더 훑기를 기다린 흐름도,
-  대화상자가 늦게 닫힌 흐름도 같은 확인을 거친다. 특히 **묻기 전에** 확인한다 —
-  프리뷰 확정 답을 기다리는 사이(§4)에도 더 새 흐름은 예약할 수 있고, 밀려난 채
-  물으면 그 물음이 최신 흐름의 물음을 취소하고, 저장으로 답하면 밀려난 흐름이
-  저장을 불러 사용자의 마지막 선택이 사라진다
-- 밀려난 흐름은 **제가 만든 것만 정리하고 물러난다** — 설치도, 알림도, 잠금
-  해제도 하지 않는다. 화면이 쓰고 있는 자원(blob URL)을 놓아줄 권리는 그 문서를
-  세운(또는 세울) 흐름에 있고, 잠금 해제는 최신 예약의 몫이다
-- 물음에 저장으로 답하고 돌아온 흐름은 멈추기 전에 받아 둔 상태를 그대로 쓰지
-  않는다 — 저장이 묶음(§5.1)을 방금 결과물로 갈아 끼웠을 수 있다. 계속하기 전에
-  지금 상태를 다시 읽는다. 다만 **드롭으로 받은 파일**은 다시 읽을 길이 없다 —
-  옛 드롭 API 는 핸들을 주지 않아 놓은 순간의 바이트가 그 묶음의 전부다. 지금 연
-  문서의 폴더를 드롭하고 저장으로 답하면 방금 쓴 내용이 드롭 스냅샷에는 없을 수
-  있다 (드롭 저장이 사본 내려받기로 가는 것과 같은 한계, §5.1)
-- 화면이 무엇을 잠글지는 예약 상태 **하나**에서 나온다 — 물음에 답한 순간부터
-  설치까지 프리뷰·제목 칸·변경 목록·툴바(열기·문서 고르기·폴더 연결·저장)가
-  잠긴다 (§4 · 갈아 끼우는 동안은 편집을 받지 않는다)
-- 저장 중 표시는 저장의 것이다. 앞선 저장이 갈아 끼우는 사이에 끝나도 제 표시만
-  내리고, 갈아 끼우기의 잠금은 건드리지 않는다
-- 예약이 취소로 끝나면(물음의 취소, 대화상자 닫기) 아무 갈아 끼우기도 일어나지
-  않는다 — 그보다 먼저 시작해 아직 읽는 중이던 흐름도 이미 밀려났으므로 설치되지
-  않는다. 취소는 언제나 "보던 문서에 그대로" 다
+- Reserve at **the moment of user action** — before the slow work begins (scanning,
+  reading, dialogs, prompts, saving). Files handed over by the OS included —
+  reserve after the read finishes, and a flow that started earlier but got ready
+  later takes a newer reservation and buries the user's most recent choice
+- Every step after reserving (dialog → scan → waiting for preview commits → prompt
+  → save → read → install) checks **whether its reservation is still the newest**,
+  in one place, as each step completes. The flow that answered the prompt with
+  save and returned, the flow that waited out a folder scan, the flow whose dialog
+  closed late — all pass the same check. Above all, check **before asking** —
+  while awaiting the preview's commit answer (§4), a newer flow can still reserve;
+  ask while superseded and that prompt cancels the newest flow's prompt, and
+  answering save makes the superseded flow save, erasing the user's most recent
+  choice
+- A superseded flow **cleans up only what it created, then steps aside** — no
+  installing, no notices, no unlocking. The right to release resources the screen
+  is using (blob URLs) belongs to the flow that installed (or will install) that
+  document, and unlocking belongs to the newest reservation
+- A flow that answered the prompt with save does not reuse state captured before it
+  paused — the save may have just swapped the bundle (§5.1) to the output. It
+  re-reads current state before continuing. **Dropped files** are the exception
+  with no way to re-read — the old drop API grants no handle, so the bytes at drop
+  time are all that bundle will ever hold. Drop the current document's folder and
+  answer save, and what was just written may be absent from the drop snapshot (the
+  same limitation that routes drop saves to copy download, §5.1)
+- What the screen locks derives from the reservation state **alone** — from prompt
+  answered to install, the preview, title field, change list, and toolbar (open ·
+  document picker · link folder · save) lock (§4 · no edits while replacing)
+- The saving indicator belongs to the save. An earlier save finishing mid-
+  replacement lowers only its own indicator and leaves the replacement's lock alone
+- A reservation ending in cancel (prompt cancel, dialog dismissed) replaces
+  nothing — a flow that started earlier and is still reading was already
+  superseded, so it does not install either. Cancel always means "stay on the
+  document you were looking at"
 
 ---
 
-## 5.1 외부 자원
+## 5.1 External resources
 
-한 파일로 완결된 문서가 아니어도 연다. `deck.css` 나 `logo.png` 를 옆에 두고 참조하는
-문서는 **프리뷰에서만** 그 자원을 붙여 원래 모습대로 보여준다.
+Documents that are not self-contained open too. A document that keeps `deck.css` or
+`logo.png` alongside gets those resources attached **in the preview only**, showing
+it as intended.
 
-### 왜 그냥은 안 보이는가
+### Why it does not render by itself
 
-프리뷰는 `srcdoc` 이라 자기 주소가 없다. 상대 경로는 부모 문서, 즉 **이 앱의 주소**를
-기준으로 풀린다.
+The preview is `srcdoc`, so it has no address of its own. Relative paths resolve
+against the parent document — **this app's address.**
 
 ```
-문서 URL : about:srcdoc
-기준 URL : https://code0xff.github.io/nighteditor/
+document URL : about:srcdoc
+base URL     : https://code0xff.github.io/nighteditor/
 deck.css → https://code0xff.github.io/nighteditor/deck.css   404
 ```
 
-`<base href>` 로도 못 고친다. 원본은 사용자 디스크의 `file:///…/deck.css` 인데
-`https://` 페이지는 `file://` 을 읽을 수 없다. 애초에 파일 하나를 열면 받는 권한도
-**그 파일 하나**뿐이라 형제 파일을 볼 자격이 없다. 곧 iframe 의 문제가 아니라 권한의 문제다.
+`<base href>` cannot fix it either. The originals live at `file:///…/deck.css` on
+the user's disk, and an `https://` page cannot read `file://`. Opening one file
+grants permission for **that one file** — no standing to see its siblings. It is a
+permissions problem, not an iframe problem.
 
-### 어떻게 붙이는가
+### How resources are attached
 
-자원을 손에 넣는 길은 셋이다.
+There are three roads to the resources.
 
-| 여는 방법 | 자원 | 저장 |
+| How you open | Resources | Saving |
 |---|---|---|
-| **폴더 열기** | 그 폴더에서 읽는다 | 원본 덮어쓰기 |
-| 파일 열기 + **폴더 연결** | 폴더에서 읽는다 | 원본 덮어쓰기 (핸들 유지) |
-| 폴더 드롭 | 드롭한 폴더에서 읽는다 | 사본 내려받기 |
-| zip 열기·드롭 | 압축을 풀어 읽는다 | 사본 내려받기 |
+| **Open a folder** | Read from that folder | Overwrites the original |
+| Open a file + **Link a folder** | Read from the folder | Overwrites the original (handle kept) |
+| Drop a folder | Read from the dropped folder | Downloads a copy |
+| Open or drop a zip | Unpacked and read | Downloads a copy |
 
-여는 버튼이 **파일 열기**와 **폴더 열기**로 갈린 것은 취향이 아니라 플랫폼 제약이다.
-웹에는 파일과 폴더를 함께 고르는 대화상자가 없다 — `showOpenFilePicker` 는 파일만,
-`showDirectoryPicker` 는 폴더만 준다. 어느 쪽 창을 띄울지 **누르기 전에** 정해야 한다.
-메뉴로 묶으면 버튼은 하나가 되지만 누르는 횟수가 늘어난다. 끌어다 놓기는 놓인 것을
-보고 정할 수 있으므로 하나로 받는다 — 파일을 놓으면 파일로, 폴더를 놓으면 폴더로 연다.
+The split into **Open a file** and **Open a folder** buttons is a platform
+constraint, not taste. The web has no dialog that picks files and folders
+together — `showOpenFilePicker` gives files only, `showDirectoryPicker` folders
+only. Which window to show must be decided **before the click.** A menu would
+merge the buttons but add a click. Drag and drop can decide by looking at what was
+dropped, so it takes one target — a file opens as a file, a folder as a folder.
 
-**폴더 열기**는 편집 권한(`readwrite`)까지 함께 받는다. 열기로 연 것은 덮어쓴다는 규칙을
-폴더에서도 지키려면 되쓸 핸들이 있어야 하고, 그 핸들은 대화상자에서만 나온다.
-드롭은 옛 API 라 권한을 주지 않아 같은 폴더라도 사본으로 간다.
+**Open a folder** requests edit permission (`readwrite`) as well. Keeping the rule
+"what you opened via Open, you overwrite" for folders requires a writable handle,
+and that handle only comes from the dialog. Drop uses the old API, which grants no
+permission — the same folder still goes the copy route.
 
-**폴더 연결**은 `read` 로 받는다. 자원만 붙이러 가는 길이라 필요 없는 권한을 묻지 않는다.
-연결한 폴더에 지금 문서의 자리가 있으면 쓰기 핸들을 그 경로에 남겨 덮어쓰기를 지키되,
-**같은 파일임을 증명한 때에만** 남긴다(`isSameEntry`). 경로가 겹친다고 같은 파일은
-아니다 — 이름만 같은 남의 파일 경로에 이 핸들을 걸면, 갔다 돌아올 때 그 자리에서
-엉뚱한 문서가 열리고 저장이 남의 자리 내용을 덮는다.
+**Link a folder** requests `read`. It exists only to attach resources, so it does
+not ask for permissions it does not need. If the linked folder contains the current
+document's location, a write handle is kept at that path so overwriting still
+works — but **only when it is proven to be the same file** (`isSameEntry`). A
+matching path does not mean the same file — hang this handle on a same-named
+stranger's path and, on return, the wrong document opens at that spot and saving
+overwrites someone else's content.
 
-증명하지 못한 문서는 핸들만 안 남기는 것이 아니라 **묶음의 일원도 아니다**.
-겹친 경로를 이 문서의 묶음 경로로 삼으면, 저장이 그 경로의 묶음 내용을 이 문서의
-결과물로 갈아 끼워 폴더의 **다른** 문서를 바꿔치기하고, 목록에서 그 문서를 여는
-길도 "이미 열려 있다" 며 막힌다. 되찾은 자리는 자원을 찾는 기준으로만 쓰고 묶음
-경로는 비워 둔다 — 폴더의 그 문서는 목록에 남아 언제든 따로 열 수 있다.
+A document that fails the proof does not merely lose the handle — it is **not a
+member of the bundle either.** Adopt the colliding path as this document's bundle
+path and saving would swap the bundle's content at that path for this document's
+output, switching out the folder's **other** document, while opening that document
+from the list gets blocked as "already open". The recovered location is used only
+as the base for finding resources; the bundle path stays empty — the folder's own
+document stays in the list, openable on its own at any time.
 
-폴더가 너무 크면 한도(파일 수·용량·깊이·훑는 항목 수)까지만 읽고 그 사실을 알린다.
-한도까지 읽었는데 문서가 없으면 "문서가 없다" 라고만 말하지 않는다 — 문서는 한도 밖에
-있었을 수 있다. **끝까지 읽지 못했다는 사정을 함께 말한다** (대원칙 3).
-한도는 담는 것뿐 아니라 **훑는 일 자체**를 묶는다 — 담지 못할 파일이 아무리 많아도
-순회가 끝나지 않아 탭이 굳는 일은 없어야 한다. 지나치는 항목(숨김 파일 등)도 훑은
-것으로 센다 — 거르는 데도 걷는 값은 들어서, 세지 않으면 숨김 항목만 가득한 폴더가
-한도를 비켜 간다.
+When a folder is too large, reading stops at the limits (file count, size, depth,
+scanned entries) and says so. If the limit was hit and no document was found, it
+does not just say "no documents" — the document may have been beyond the limit.
+**It also states that the scan did not finish** (core principle 3).
+The limits bound not just what is kept but **the scanning itself** — however many
+files will not fit, traversal must never run unbounded and freeze the tab. Skipped
+entries (hidden files and the like) count as scanned — skipping costs a step too,
+and uncounted, a folder full of hidden entries slips past the limit.
 
-깊이는 **고르거나 놓은 폴더를 0층**으로 세어, 여덟째 층 폴더까지 들어가고 그 아래는
-잘렸다고 적는다. 드롭한 폴더의 경로에는 뿌리 이름이 붙지만 그 이름은 깊이가 아니다 —
-같은 폴더라면 대화상자로 고르든 끌어다 놓든 같은 자리에서 잘려야 한다.
+Depth counts **the picked or dropped folder as level 0**: descend as far as the
+folder at level eight, and below that is recorded as cut off. A dropped folder's
+paths carry the root name, but that name is not depth — the same folder must cut at
+the same place whether picked from a dialog or dropped.
 
-드롭한 폴더의 훑기는 저장 물음(§4)이 떠 있는 동안에도 돈다 — 드롭 항목은 이벤트가
-끝나면 사라져 묻기 전에 시작해야 한다. 그 훑기가 실패하면 **물음을 취소했더라도
-실패를 알린다** — 실패는 만들어진 자리에서 바로 받는다. 답을 기다린 뒤에 받으면
-취소한 쪽 실패는 아무도 못 받아, 알림 없이 사라진다 (대원칙 3).
+A dropped folder's scan keeps running even while the save prompt (§4) is up — drop
+items vanish when the event ends, so the scan must start before asking. If that
+scan fails, **the failure is reported even if the prompt was cancelled** — a
+failure is received where it is created. Receive it after the answer and the
+cancelled side's failure has no receiver, vanishing without notice
+(core principle 3).
 
-zip 도 같은 한도를 따르되, 통째로 메모리에 올리기 **전에** 압축된 크기부터 본다.
-한도를 넘는 zip 은 풀어 봐야 어차피 한도를 넘으므로, 읽기 시작하기 전에 거절한다 —
-목차를 읽겠다고 수백 MB 를 복사하다 탭이 굳으면 한도가 있으나 마나다.
-파일 수 한도도 **목차를 읽는 동안** 센다 — 다 읽고 나서 세면, 거절할 zip 의 항목을
-목차 최대치(65,534개)까지 전부 만들고 검증한 뒤에야 거절하게 된다. 같은 이름이
-겹쳐 담긴 항목도 각각 센다 — 한도가 묶는 것은 담는 수가 아니라 읽는 일 자체다.
+Zips follow the same limits, but the compressed size is checked **before** loading
+the whole thing into memory. A zip over the limit will exceed it once unpacked
+anyway, so it is refused before reading starts — copying hundreds of MB just to
+read a table of contents, freezing the tab, makes the limit pointless.
+The file-count limit is enforced **while reading the index** — count after reading
+and a to-be-refused zip gets all its entries built and validated up to the index
+maximum (65,534) before refusal. Entries duplicated under one name each count —
+the limit bounds the reading itself, not the number kept.
 
-항목의 **내용은 목차의 CRC-32 로 검사한다.** 크기만 견주면 같은 크기로 깨진 바이트가
-그대로 통과한다 — 그대로 담긴 항목은 한 바이트만 뒤집혀도 크기가 같고, 깨진 deflate
-스트림도 기대한 크기로 풀릴 수 있다. 실제로 나온 바이트의 CRC 가 목차와 다르면 깨진
-파일을 조용히 여는 대신 이유를 들고 멈춘다 (대원칙 3).
+Entry **contents are checked against the index's CRC-32.** Compare sizes alone and
+same-sized corrupt bytes pass — a stored entry differs by one flipped bit at the
+same size, and a corrupt deflate stream can inflate to the expected size. When the
+actual bytes' CRC differs from the index, it stops with a reason instead of quietly
+opening a broken file (core principle 3).
 
-zip 항목의 이름은 **플래그대로** 읽는다. UTF-8 표시(범용 비트 11)가 있으면 UTF-8 이고,
-없으면 옛 zip 의 규정 인코딩은 CP437 이다 — 무조건 UTF-8 로 풀면 옛 zip 의 비 ASCII
-이름(`café.png`)이 U+FFFD 로 깨져 묶음의 키가 어긋나고, 멀쩡한 zip 에서 문서 후보나
-상대 자원이 안 잡힌다. Info-ZIP 계열은 진짜 이름을 유니코드 경로 부가 필드(0x7075)에
-UTF-8 로 실어 두기도 한다 — 그 필드의 CRC 가 표준 이름과 맞을 때만 믿는다 (이름만
-바뀌고 필드는 옛것으로 남은 zip 이 있다). 표시도 필드도 없는 이름은 **엄격한 UTF-8 로
-풀리면 UTF-8, 아니면 CP437** 로 읽는다 — macOS 의 `zip` 은 한글 이름에도 비트 11 을
-세우지 않아, 플래그만 보면 요즘 zip 이 도리어 깨진다. ASCII 는 두 해석이 같고, CP437 로
-적힌 비 ASCII 이름이 우연히 올바른 UTF-8 열이 되는 일은 사실상 없다.
+Zip entry names are read **as flagged.** With the UTF-8 flag (general-purpose bit
+11) the name is UTF-8; without it, the legacy zip standard encoding is CP437 —
+decode everything as UTF-8 and old zips' non-ASCII names (`café.png`) shatter into
+U+FFFD, the bundle keys mismatch, and healthy zips lose document candidates and
+relative resources. Info-ZIP tools may carry the real name in the Unicode Path
+extra field (0x7075) as UTF-8 — trusted only when that field's CRC matches the
+standard name (zips exist where the name changed and the field went stale). A name
+with neither flag nor field is read as **UTF-8 if it decodes strictly, else
+CP437** — macOS's `zip` does not set bit 11 even for Korean names, so trusting the
+flag alone breaks modern zips instead. ASCII reads the same either way, and a
+CP437-written non-ASCII name that happens to be valid UTF-8 is practically
+nonexistent.
 
-묶음 안에 HTML 이 여럿이면 하나를 골라 열고, **몇 개 중에 무엇을 열었는지 말한다.**
-고르는 순서는 얕은 것 → `index` → 짧은 이름 → 사전순이다. 겉면에 있는 문서가 그 묶음의 얼굴이고,
-깊이 묻힌 것은 대개 부품이기 때문이다.
+When a bundle holds several HTML files, one is chosen and opened, and **it says
+which one out of how many.** The order: shallower → `index` → shorter name →
+lexicographic. The document at the surface is the bundle's face; the deeply buried
+ones are usually parts.
 
-알려주기만 하고 바꿀 수 없으면 나머지 문서는 없는 것과 같다. 후보가 둘 이상이면 툴바에
-목록을 띄워 갈아탈 수 있게 한다. 이미 풀어 둔 파일을 그대로 쓰므로 zip 을 다시 풀지 않는다.
-프리뷰를 다시 그리는 일이라 고치던 내용이 있으면 먼저 묻는다.
+Telling without letting the user switch makes the other documents as good as
+absent. With two or more candidates, the toolbar shows the list to switch between.
+Already-unpacked files are reused, so the zip is not unpacked again. It redraws the
+preview, so unsaved edits prompt first.
 
-상대 참조의 기준은 문서가 놓인 자리지만, 문서가 `<base href>` 로 기준을 옮겨 두면
-**그 기준을 따른다** (href 가 있는 첫 `<base>` 하나 — HTML 사양과 같다). 문서 자리만
-보고 찾으면 실제로 옆에 있는 파일을 없다고 세고, 프리뷰도 붙일 것을 안 붙인다.
-base 가 바깥(절대 URL·`//`)을 가리키면 상대 참조는 로컬 파일이 아니다 — 붙일 것도
-없다고 셀 것도 없이 문서를 그대로 보여준다. 문서 안 `<style>` 의 `url()` 도 문서
-기준이라 같은 규칙을 따르고, 붙인 CSS **파일** 안의 `url()` 은 그 파일 자리 기준
-그대로다 — base 는 문서의 것이지 스타일시트의 것이 아니다.
+The base for relative references is the document's own location — unless the
+document moved its base with `<base href>`, in which case **that base is followed**
+(the first `<base>` with an href, same as the HTML spec). Judge by document
+location alone and files actually sitting alongside get counted missing, and the
+preview skips what it should attach.
+If base points outside (an absolute URL, `//`), relative references are not local
+files — nothing to attach, nothing to count missing; the document renders as-is.
+`url()` inside the document's own `<style>` follows the same rule (the document is
+its base), while `url()` inside an attached CSS **file** stays relative to that
+file's location — base belongs to the document, not to stylesheets.
 
-경로를 접을 때 `.`·`..` 은 퍼센트 인코딩으로 적혀 있어도 같다 — URL 사양은
-`%2e`/`%2e%2e` 조각도 점 조각으로 접으므로, 문서에 `%2e%2e/logo.png` 라고 적혀
-있으면 브라우저는 한 단계 올라간다. 우리도 조각을 **먼저 풀고 나서** 접어야 실제로
-옆에 있는 파일을 찾는다. 풀 수 없는(잘못된 인코딩의) 조각은 적힌 그대로 둔다.
-`<base href="..">` 처럼 base 의 마지막 조각이 `.`·`..` 이면 그것은 파일 이름이
-아니라 자리 표시다 — base URL 을 끝까지 푼 **뒤에** 디렉터리를 떼어낸다.
-마지막 조각을 먼저 떼면 `deck/sub` 의 `..` 가 `deck` 이 아니라 `deck/sub` 로 남는다.
+When collapsing paths, `.`·`..` count even when percent-encoded — the URL spec
+collapses `%2e`/`%2e%2e` segments as dot segments too, so a document that writes
+`%2e%2e/logo.png` makes the browser go up one level. We must **decode segments
+first, then collapse** to find the file actually sitting there. Segments that
+cannot be decoded (bad encoding) stay as written.
+When base's last segment is `.`·`..`, as in `<base href="..">`, it is a position
+marker, not a file name — resolve the base URL fully **first**, then strip the
+directory. Strip the last segment first and `deck/sub`'s `..` lands at `deck/sub`
+instead of `deck`.
 
-조각 안의 `%2F` 만은 **풀지 않고 적힌 그대로 둔다.** 디스크의 파일 이름에는 슬래시가
-있을 수 없으므로, 푸는 순간 이름의 일부가 경로 구분자로 변한다 — `a%2Fb.png` 라는
-실제 파일을 두고 `a/b.png` 라는 없는 자리를 찾게 된다. 묶음의 키는 디스크의 이름이고,
-디스크에서 `%2F` 는 언제나 글자 그대로다.
+`%2F` inside a segment is the one thing **left encoded, as written.** Disk file
+names cannot contain slashes, so decoding turns part of a name into a path
+separator — with a real file named `a%2Fb.png`, you would go looking for a
+nonexistent `a/b.png`. Bundle keys are disk names, and on disk `%2F` is always
+literal.
 
-읽은 파일은 `blob:` URL 로 만들어 **프리뷰 문서 안의 상대 경로만** 바꿔치기한다.
-원본 문자열은 손대지 않는다 (대원칙 1) — 저장본에는 blob URL 이 단 하나도 들어가지 않는다.
-마커 주입과 같은 자리에서, 같은 규칙(내림차순 적용)으로 한다.
+Read files become `blob:` URLs and **only the relative paths inside the preview
+document** are swapped. The original string is untouched (core principle 1) — not
+one blob URL enters the saved output. It happens in the same place as marker
+injection, under the same rule (descending-order application).
 
-blob 의 형식(MIME)은 **아는 확장자면 확장자가 정한다.** 폴더·드롭이 준 `File` 의
-보고된 형식은 못 믿는다 — `.js` 를 `text/plain` 으로 주는 환경이 있고, 그 형식
-그대로 blob 을 만들면 브라우저가 링크된 스크립트를 형식이 다르다며 거절해 파일이
-옆에 있는데도 프리뷰에서 돌지 않는다. 문서가 확장자로 참조한 파일에 기대하는 형식은
-확장자의 것이다. 모르는 확장자만 보고된 형식을 믿고, 그것도 없으면
-`application/octet-stream` 이다. 스타일시트는 언제나 `text/css` 다 — 표준 모드의
-브라우저는 다른 형식의 응답을 스타일시트로 쓰지 않는다.
+A blob's format (MIME) is **decided by the extension when the extension is
+known.** The `File`'s reported type from folders and drops cannot be trusted —
+some environments report `.js` as `text/plain`, and a blob made with that type gets
+the linked script refused for its type, so the file sits right there and still does
+not run in the preview. The type a document expects of a file it references by
+extension is the extension's. Only unknown extensions trust the reported type, and
+failing that, `application/octet-stream`. Stylesheets are always `text/css` —
+standards-mode browsers refuse other types for stylesheets.
 
-치환은 편집 가능한 블록 **안**에서도 일어난다 — `<p>설명 <img src="logo.png"></p>`
-의 `src` 도 프리뷰에서는 blob URL 이다. 그래서 이 경계는 **양방향**이다 (ADR-011).
+Swaps happen **inside** editable blocks too — the `src` in
+`<p>caption <img src="logo.png"></p>` is a blob URL in the preview. So this
+boundary is **two-way** (ADR-011).
 
-- **나가는 길** — 프리뷰에 밀어 넣는 원본 조각(되돌리기의 `sourceInner`)은 문서를
-  처음 조립할 때와 같은 치환 목록으로 blob URL 을 단 채 내보낸다. 안 하면 되돌린
-  블록만 그림이 깨져, 되돌리기가 화면을 망가뜨리는 조작이 된다
-- **들어오는 길** — 프리뷰에서 돌아온 편집(innerHTML)은 blob URL 을 **원문 표기
-  그대로** 되돌린 뒤에야 패치가 된다. 안 하면 블록을 고치는 순간 blob URL 이 패치에
-  실려, 탭을 닫으면 죽는 주소가 파일에 박힌다 (INV-9 위반)
+- **Outbound** — original fragments pushed into the preview (revert's
+  `sourceInner`) go out with blob URLs applied, using the same swap list as the
+  initial assembly. Otherwise only the reverted block's images break, and revert
+  becomes an operation that damages the screen
+- **Inbound** — edits returning from the preview (innerHTML) become patches only
+  after blob URLs are turned back into **the exact source spelling.** Otherwise
+  editing a block loads blob URLs into the patch, and an address that dies with
+  the tab gets baked into the file (violating INV-9)
 
-두 방향은 **한 치환 목록**에서 나온다 — 나갈 때 쓴 표기와 되돌릴 표기가 다른 자리에서
-계산되면 반드시 어긋나는 짝이 생긴다. 치환했다 되돌린 결과는 원본과 **바이트 단위로
-같다** — 따옴표·대소문자·엔티티 표기가 달라지면 그 자체가 diff 를 만든다 (대원칙 1·2).
-브라우저가 innerHTML 직렬화로 표기를 갈아 끼워 돌아와도(`&#32;` → 공백 등) 같은
-규칙이다 — 직렬화 짝의 원문 쪽도 파서가 디코딩한 값을 재인코딩한 것이 아니라
-**원본 슬라이스**에서 나온다. 직렬화된 문맥은 언제나 큰따옴표 속성이므로, 값을
-조기 종료시키는 `"` 하나만 `&quot;` 로 바꾼다 — 파서를 지나면 같은 값이다.
-자원을 못 붙여 치환이 일어나지 않은 참조와, 원래부터 `blob:` 로 적힌 문서는 어느
-방향으로도 건드리지 않는다.
+Both directions come from **one swap list** — compute the outbound spelling and the
+restore spelling in different places and mismatched pairs are inevitable. A swap
+followed by a restore equals the original **byte for byte** — a changed quote,
+case, or entity spelling is itself a diff (core principles 1·2). The same rule
+holds when the browser returns a respelled reference via innerHTML serialization
+(`&#32;` → space, etc.) — the serialized pair's source side also comes from the
+**original slice**, not a re-encode of the parser-decoded value. The serialized
+context is always a double-quoted attribute, so only `"`, which would end the value
+early, becomes `&quot;` — past the parser it is the same value.
+References the swap never touched (resources that failed to attach) and documents
+that already wrote `blob:` themselves are untouched in either direction.
 
-되돌림의 기준은 표가 아니라 **자리**다. `logo.png` 와 `./logo.png` 는 같은 파일이라
-프리뷰 표기가 같다 — 표기 하나당 원문 하나만 든 표로 되돌리면, 그 블록의 글자만 고쳐도
-손대지 않은 참조의 표기가 다른 자리의 표기로 갈린다 (대원칙 2). 돌아온 편집이 어느
-블록에서 왔는지는 호스트가 아는 사실이므로, 그 블록 범위 안의 치환을 **원문에 나온
-순서대로** 각자 제 표기로 되돌린다 — k번째로 나온 같은 표기는 그 블록의 k번째 그 표기
-자리다. 자리에 맬 수 없는 표기(다른 블록에서 복사해 붙인 blob URL, 지우거나 옮겨 수가
-안 맞게 된 같은 표기)는 먼저 나온 원문 표기로 되돌린다 — 어느 표기든 같은 파일을
-가리키므로 뜻은 같고, 그 자리는 사용자가 실제로 고친 범위 안이다.
+Restoring is keyed by **position, not by lookup table.** `logo.png` and
+`./logo.png` are the same file, so their preview spelling is identical — restore
+through a one-spelling-one-source table and editing just the text of that block
+flips an untouched reference's spelling to another position's spelling
+(core principle 2). The host knows which block an edit came from, so the swaps
+within that block's range are restored **each to its own spelling, in source
+order** — the k-th occurrence of a spelling is that block's k-th slot of that
+spelling. Spellings that cannot be tied to a slot (a blob URL pasted from another
+block; counts thrown off by deletions or moves) restore to the first-seen source
+spelling — any spelling names the same file, so the meaning holds, and that spot
+is inside the range the user actually edited.
 
-경로 뒤에 붙어 있던 것 중 blob URL 에 다시 다는 것은 **조각(`#icon`)뿐**이다.
-잃으면 스프라이트에서 무엇을 꺼낼지가 사라지기 때문이다. 질의(`?v=3`)는 **뗀다** —
-blob URL 은 질의가 붙는 순간 만들어 둔 객체와 다른 이름이 되어 아예 열리지 않고,
-캐시 무력화는 blob 에는 의미도 없다. HTML 속성과 CSS `url()` 양쪽 다 같은 규칙이다.
+Of everything that trailed the path, only the **fragment (`#icon`)** is re-attached
+to the blob URL. Lose it and which piece of the sprite to pull is gone. The query
+(`?v=3`) is **dropped** — a blob URL with a query appended is a different name from
+the created object and simply fails to load, and cache busting means nothing to a
+blob. The same rule for HTML attributes and CSS `url()`.
 
-바꾸는 대상은 자원을 **가리키는 속성**이다: `link[href]`, `script[src]`, `img[src]`,
-`source[src]`, `video[src|poster]`, `audio[src]`, `iframe[src]`, `embed[src]`,
-`object[data]`, `track[src]`, `input[src]`, `use[href]`.
-`<a href>` 는 바꾸지 않는다 — 이동할 곳이지 붙일 자원이 아니다.
+The rewritten targets are the attributes that **point at resources**:
+`link[href]`, `script[src]`, `img[src]`, `source[src]`, `video[src|poster]`,
+`audio[src]`, `iframe[src]`, `embed[src]`, `object[data]`, `track[src]`,
+`input[src]`, `use[href]`.
+`<a href>` is not rewritten — it is a place to go, not a resource to attach.
 
-CSS 안의 `url(...)` 도 바꾼다. 안 바꾸면 스타일시트는 붙어도 그 안의 글꼴이 깨진다.
-blob URL 에는 디렉터리가 없어서 스타일시트가 자기 옆의 파일을 못 찾기 때문이다.
-`<style>` 블록과 붙여넣은 CSS 파일 양쪽 모두에 적용한다.
-`url()` 값의 CSS 이스케이프(`\)`·`\ `·16진)는 **푼 뒤에** 경로로 해석한다 —
-묶음의 키는 문서의 표기가 아니라 디스크의 이름이다. 이스케이프된 괄호에서 값을
-끊으면 `url(foo\)bar.png)` 같은 멀쩡한 CSS 의 자원이 붙지 않는다. 되적는 조각은
-토큰을 끊는 글자(따옴표·괄호·공백)만 다시 이스케이프한다.
+`url(...)` inside CSS is rewritten too. Skip it and the stylesheet attaches but its
+fonts break — blob URLs have no directories, so a stylesheet cannot find the files
+beside it. Applied to both `<style>` blocks and attached CSS files.
+CSS escapes in `url()` values (`\)`·`\ `·hex) are **decoded first**, then resolved
+as paths — bundle keys are disk names, not the document's spelling. Cut the value
+at an escaped parenthesis and perfectly valid CSS like `url(foo\)bar.png)` loses
+its resource. Rewritten fragments re-escape only the characters that would break
+the token (quotes, parentheses, whitespace).
 
-스타일시트가 `@import url(…)` 로 **다른 스타일시트**를 부를 수도 있다. 부르는 쪽의
-blob 을 먼저 만들면 불리는 쪽의 URL 이 아직 없어 참조가 상대 경로로 남고, blob
-문서에서 상대 경로는 풀리지 않는다 — 그래서 **불리는 쪽부터** 만든다.
-서로를 부르는 순환은 blob 으로는 어차피 이을 수 없으므로, **고리에 든 시트만**
-그때까지 생긴 URL 을 단 채로 만든다. 고리를 밖에서 부르는 시트까지 한꺼번에 만들면
-고리 멤버의 URL 이 생기기 전에 만들어져 그 `@import` 가 상대 경로로 남는다 —
-고리가 만들어진 **뒤에** 만들어 거기서 나온 URL 을 단다.
-고리가 여럿이면 **한 덩어리씩** 만든다 — 서로 얽힌 시트들(강결합 덩어리)이 한
-단위다. 다른 고리에 기대는 고리까지 한꺼번에 만들면 기대는 쪽의 `@import` 가 그
-고리의 URL 이 생기기 전에 만들어져 상대 경로로 남는다 — 남은 시트에 더는 기대지
-않는 덩어리부터 만들고, 기대던 쪽은 다음 바퀴에서 방금 생긴 URL 을 단다.
+A stylesheet may also pull **another stylesheet** via `@import url(…)`. Build the
+importer's blob first and the imported one's URL does not exist yet — the reference
+stays relative, and relative paths do not resolve in a blob document. So **the
+imported side is built first.**
+Mutual-import cycles cannot be joined with blobs anyway, so **only the sheets in
+the cycle** are built carrying whatever URLs exist by then. Build the sheets that
+import the cycle from outside in the same batch and they get built before the cycle
+members' URLs exist, leaving those `@import`s relative — they are built **after**
+the cycle, carrying the URLs it produced.
+With several cycles, build **one clump at a time** — a strongly-connected clump of
+interlinked sheets is the unit. Build a cycle that leans on another cycle in the
+same batch and the leaning side's `@import`s get built before that cycle's URLs
+exist, staying relative — build the clump that no remaining sheet depends on
+first; the leaning side takes the just-minted URLs on the next round.
 
-### 하지 않는 것
+### Not done
 
-- `srcset` — 값 하나에 URL 여러 개가 쉼표로 들어와 파싱 규칙이 따로 있다. 그대로 둔다
-- `@import` — `url()` 만 바꾼다
-- `style="background:url(…)"` 속성 안의 CSS
-- **자원 편집** — 붙이기만 한다. 고쳐서 저장하는 대상은 언제나 HTML 한 개다
+- `srcset` — multiple URLs in one comma-separated value with its own parsing rules. Left as-is
+- `@import` — only `url()` is rewritten
+- CSS inside `style="background:url(…)"` attributes
+- **Editing resources** — attach only. The one thing edited and saved is always a single HTML document
 
-### 못 붙였을 때
+### When resources cannot be attached
 
-조용히 깨진 채로 두지 않는다 (대원칙 3). 참조는 있는데 자원이 없으면 무엇을
-못 불러왔는지 세어 보여주고, 폴더를 연결할 길을 함께 낸다.
-편집과 저장은 그 상태에서도 정확하다 — 언제나 원본 문자열만 만지므로,
-화면이 어떻게 보이든 diff 는 사용자가 고친 범위를 넘지 않는다.
+Never left quietly broken (core principle 3). When references exist but resources
+do not, it counts what failed to load, shows it, and offers the road to link a
+folder alongside.
+Editing and saving stay exact in that state — only the original string is ever
+touched, so however the screen looks, the diff never exceeds what the user edited.
 
 ---
 
-## 6. 합격 기준
+## 6. Acceptance criteria
 
-픽스처(`src/__fixtures__/artifact.html`) 기준. 모두 자동 테스트로 확인한다.
+Against the fixture (`src/__fixtures__/artifact.html`). All verified by automated tests.
 
-- [x] 편집 블록 **27개**가 모두 인식된다 (`<title>` 과 잠긴 빈 요소 포함)
-- [x] 빈 `.pg` 4개와 `#cnt` 는 블록이 되지 않는다
-- [x] DOM 재구성(`wrapSheets` 식) 후에도 모든 블록의 마커가 유효하다
-- [x] 블록 1개 수정 → `diff` 결과가 **해당 줄만**
-- [x] BOM 으로 시작하는 문서는 BOM 째로 읽는다 — 파일 하나·zip·폴더 모두 (대원칙 1)
-- [x] UTF-8 이 아닌 문서는 이유를 들고 거절한다 (대원칙 3)
-- [x] 아무것도 수정하지 않고 저장 → 원본과 **바이트 단위로 동일**
-- [x] 인라인 `<b>`가 있는 블록 편집 후에도 `<b>`가 보존된다
-- [x] `<title>` 을 별도 필드로 수정 → diff 해당 줄만
-- [x] 암시적 `<tbody>` 에서 순회가 죽지 않는다
-- [x] `&amp;` 포함 블록이 `SCRIPT_GENERATED` 로 오탐 잠금되지 않는다
-- [x] `&amp;amp;` 같은 이중 엔티티가 라이브 텍스트와 일치한다
-- [x] `.code` 안에 중첩 요소가 있어도 잠금이 자손까지 상속된다
-- [x] 편집 중 클릭·방향키가 아티팩트 핸들러로 새지 않는다
-- [x] 편집 중이 아니면 아티팩트 네비게이션이 정상 동작한다
-- [x] 조합 중 포커스가 빠져도 한글 편집을 잃지 않는다
-- [x] Escape 가 편집 전 내용으로 되돌린다
-- [x] 고치지 않고 빠져나오면 패치가 생기지 않는다
-- [x] 편집 가능·잠김·편집 중이 프리뷰에서 서로 다르게 보인다 (주입 스타일)
-- [x] 주입 스타일이 레이아웃을 바꾸는 속성을 쓰지 않는다
-- [x] 잠금 목록이 갱신되면 이전 잠금 표식이 남지 않는다
-- [x] `Ctrl+S` 가 편집을 확정한 뒤 저장한다 (프리뷰 안에서 눌러도)
-- [x] 조합 중 `Ctrl+S` 는 저장하지 않고 브라우저 대화상자도 뜨지 않는다
-- [x] `Ctrl+Shift+S` 는 저장이 아니라 사본 내려받기다
-- [x] `Ctrl+Z` 가 마지막으로 확정한 변경만 되돌린다 (같은 블록 재편집 포함)
-- [x] `Ctrl+Z` 가 입력 칸 안에서는 블록을 되돌리지 않는다
-- [x] 저장하지 않은 변경이 있으면 탭 닫기를 되묻는다
+- [x] All **27** editable blocks are recognized (including `<title>` and locked empty elements)
+- [x] The 4 empty `.pg` elements and `#cnt` do not become blocks
+- [x] After DOM restructuring (`wrapSheets`-style), every block's marker is still valid
+- [x] Editing 1 block → `diff` shows **only those lines**
+- [x] A document starting with a BOM is read BOM and all — single file, zip, and folder alike (core principle 1)
+- [x] Non-UTF-8 documents are refused with a reason (core principle 3)
+- [x] Save with no edits → **byte-identical** to the original
+- [x] A block containing inline `<b>` keeps the `<b>` after editing
+- [x] Editing `<title>` via the dedicated field → diff shows only that line
+- [x] Traversal survives an implicit `<tbody>`
+- [x] A block containing `&amp;` is not false-positive-locked as `SCRIPT_GENERATED`
+- [x] Double entities like `&amp;amp;` match the live text
+- [x] Locks inherit to descendants even with nested elements inside `.code`
+- [x] Clicks and arrow keys during editing do not leak to artifact handlers
+- [x] Artifact navigation works normally when not editing
+- [x] Hangul editing survives focus loss mid-composition
+- [x] Escape restores the pre-edit content
+- [x] Leaving without changing creates no patch
+- [x] Editable, locked, and editing states look distinct in the preview (injected styles)
+- [x] The injected styles use no layout-changing properties
+- [x] When the lock list updates, no stale lock markers remain
+- [x] `Ctrl+S` commits the open edit, then saves (inside the preview too)
+- [x] `Ctrl+S` during composition neither saves nor opens the browser dialog
+- [x] `Ctrl+Shift+S` downloads a copy, not a save
+- [x] `Ctrl+Z` reverts only the most recently committed change (re-edited blocks included)
+- [x] `Ctrl+Z` inside an input field does not revert a block
+- [x] Closing the tab with unsaved changes prompts
 
-외부 자원 (§5.1):
+External resources (§5.1):
 
-- [x] `link`·`script`·`img` 의 상대 경로를 프리뷰에서만 blob URL 로 바꾼다
-- [x] `<a href>` 는 바꾸지 않는다
-- [x] 조각(`#icon`)은 blob URL 에 다시 달고, 질의(`?v=3`)는 뗀다 — 붙으면 그 blob 이 열리지 않는다
-- [x] `<style>` 과 CSS 파일 안의 `url()` 도 그 파일 위치를 기준으로 바꾼다
-- [x] 저장본에는 `blob:` 이 들어가지 않고, 바뀐 줄은 고친 블록뿐이다
-- [x] 자원 참조가 든 블록을 고쳐 저장해도 blob URL 이 들어가지 않는다 — 원문 표기로 되돌아간다
-- [x] 블록을 되돌려도 프리뷰의 자원 치환은 풀리지 않는다
-- [x] 치환했다 되돌린 원본 조각은 바이트 단위로 같다
-- [x] 자원이 없어도 문서는 그대로 열리고 편집된다
-- [x] 하위 폴더의 문서는 자기 자리를 기준으로 자원을 찾는다
-- [x] `<base href>` 가 기준을 옮겨 두면 그 기준으로 자원을 찾는다
-- [x] 인코딩된 점 조각(`%2e%2e`)도 점으로 접어 자원을 찾는다
-- [x] 조각 안의 `%2F` 는 구분자로 풀지 않는다 — `a%2Fb.png` 라는 이름 그대로 찾는다
-- [x] base 의 마지막 조각이 `.`·`..` 이면 자리 표시다 — 파일 이름으로 떼지 않는다
-- [x] zip 을 풀어 문서를 고르고, `__MACOSX` 와 디렉터리 항목은 걸러낸다
-- [x] 문서가 여럿이면 후보를 순서대로 모두 알 수 있다 (고른 하나만 남기지 않는다)
-- [x] 변경 카드를 누르면 그 블록으로 스크롤하고 잠깐 짚어준다
-- [x] 굵게·기울임·밑줄은 태그로, 색·크기는 `style` 로 나온다 (`<font>` 를 만들지 않는다)
-- [x] 서식 막대를 누른 클릭은 편집을 닫지 않는다
-- [x] 서식 막대는 블록 밖에 살고, `<body>` 자체가 블록이어도 저장본에 실리지 않는다 (INV-9)
-- [x] 알림이 오른쪽 위에 뜨고, 오류는 스스로 사라지지 않는다
-- [x] 같은 알림이 연달아 오면 갈아 끼운다
-- [x] 폴더로 연 문서는 되쓸 핸들을 들고 와 덮어쓰기로 저장된다
-- [x] 폴더 연결 뒤 묶음의 다른 문서로 갔다 돌아와도 지금 문서의 덮어쓰기 핸들이 살아 있다
-- [x] 연결한 폴더의 같은 이름이 다른 파일이면 핸들을 그 경로에 걸지 않는다
-- [x] 편집 허용을 거절하면 아무 일도 일어나지 않는다
-- [x] HTML 이 없는 폴더는 이유를 말한다
-- [x] 스캔이 잘린 채 문서를 못 찾았으면 끝까지 읽지 못했다는 사정도 함께 말한다
-- [x] 폴더를 연달아 놓으면 마지막에 놓은 폴더가 열리고, 그 문서의 blob URL 은 살아 있다
-- [x] 물러난 갈아 끼우기는 제가 만든 blob URL 만 놓아준다
-- [x] 물음이 떠 있는 동안 폴더 훑기가 실패하면 취소해도 이유를 알린다
-- [x] 드롭한 폴더는 놓은 순간 예약된다 — 훑기가 늦어도 나중에 놓은 쪽이 이긴다
-- [x] 물음에 답하고 훑기를 기다리는 동안에도 화면이 잠긴다
-- [x] 물음에 저장으로 답한 갈아타기는 저장 뒤의 묶음으로 연다
-- [x] 저장을 기다리는 사이 더 새 흐름이 시작됐으면 앞의 흐름은 물러난다
-- [x] 저장이 파일을 쓰는 동안의 `Ctrl+S` 는 겹쳐 시작하지 않는다
-- [x] 갈아 끼우는 동안 되돌리기·전체 되돌리기·`Ctrl+Z` 가 막힌다
-- [x] 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리지 않는다
-- [x] 갈아탄 뒤 도착한 옛 프리뷰의 메시지는 버린다 — 문서마다 다른 표로 가린다
+- [x] Relative paths in `link`·`script`·`img` are swapped to blob URLs in the preview only
+- [x] `<a href>` is not swapped
+- [x] Fragments (`#icon`) are re-attached to the blob URL; queries (`?v=3`) are dropped — attached, the blob would not load
+- [x] `url()` inside `<style>` and CSS files is rewritten relative to that file's location
+- [x] The saved output contains no `blob:`, and the changed lines are only the edited blocks
+- [x] Editing and saving a block holding a resource reference admits no blob URL — it restores the source spelling
+- [x] Reverting a block does not undo the preview's resource swaps
+- [x] A swapped-then-restored original fragment is byte-identical
+- [x] Without resources, the document still opens and edits
+- [x] A document in a subfolder finds resources relative to its own location
+- [x] When `<base href>` moves the base, resources are found from that base
+- [x] Encoded dot segments (`%2e%2e`) collapse as dots when finding resources
+- [x] `%2F` inside a segment is not decoded as a separator — the literal name `a%2Fb.png` is found
+- [x] A base whose last segment is `.`·`..` is a position marker — not stripped as a file name
+- [x] Zips are unpacked, a document is chosen, and `__MACOSX` and directory entries are filtered out
+- [x] With several documents, every candidate is visible in order (not just the chosen one)
+- [x] Clicking a change card scrolls to that block and briefly highlights it
+- [x] Bold·italic·underline come out as tags; color·size as `style` (no `<font>` is produced)
+- [x] Clicking the format bar does not close the edit
+- [x] The format bar lives outside blocks and never enters the saved output, even when `<body>` itself is the block (INV-9)
+- [x] Notices float at the top right, and errors do not fade on their own
+- [x] Identical consecutive notices replace instead of stacking
+- [x] A document opened from a folder carries a writable handle and saves by overwriting
+- [x] After linking a folder, switching to another bundle document and back keeps the current document's overwrite handle alive
+- [x] If the linked folder's same-named entry is a different file, no handle is hung on that path
+- [x] Declining the edit permission does nothing at all
+- [x] A folder with no HTML says why
+- [x] If the scan was cut short and no document was found, the unfinished scan is reported too
+- [x] Dropping folders in succession opens the last one dropped, and its blob URLs are alive
+- [x] A superseded replacement releases only the blob URLs it created
+- [x] If a folder scan fails while the prompt is up, the reason is reported even after cancel
+- [x] A dropped folder reserves at the moment of the drop — even with a slow scan, the later drop wins
+- [x] The screen stays locked while waiting out the scan after answering the prompt
+- [x] A switch answered with save opens the post-save bundle
+- [x] If a newer flow started while waiting on the save, the earlier flow steps aside
+- [x] `Ctrl+S` while a save is writing does not start a second save
+- [x] Revert, revert all, and `Ctrl+Z` are blocked while replacing
+- [x] An earlier save finishing does not lift the replacement lock
+- [x] Old preview messages arriving after a switch are dropped — screened by per-document tokens
 
-저장하지 않은 편집 (§4):
+Unsaved edits (§4):
 
-- [x] 고친 것이 없으면 묻지 않는다
-- [x] 편집을 되돌려 결과물이 파일과 같아지면 묻지 않는다
-- [x] 물음의 "{count}곳" 은 저장한 패치를 세지 않고, 저장한 것을 되돌린 자리는 센다
-- [x] 취소하면 하던 자리에 그대로 있는다
-- [x] 저장을 고르면 저장한 뒤에 계속한다
-- [x] 저장이 실패하면 계속하지 않는다
-- [x] 묻는 중에 또 물으면 앞의 물음은 취소로 닫는다
-- [x] zip 이 아니거나 잘렸거나 암호가 걸렸으면 이유를 들고 멈춘다
-- [x] EOCD 보다 짧은 입력도 zip 이 아니라는 이유로 멈춘다
-- [x] 주석 끝의 zip64 흉내 레코드에 속지 않는다 — 진짜 목차로 연다
-- [x] 제 위치를 목차 칸에 적은 가짜 "빈 zip" EOCD 에도 속지 않는다 — 진짜 목차로 연다
-- [x] 목차에 적힌 크기와 실제로 풀린 크기가 다르면 조작으로 보고 거부한다
-- [x] 목차의 CRC 와 실제 바이트가 다르면 깨진 파일로 보고 거부한다
-- [x] 목차 항목이 EOCD 를 넘어가면 지어낸 항목 없이 깨진 목차 사유로 멈춘다
-- [x] UTF-8 이 아닌 항목 이름은 CP437 로 읽고, 유니코드 경로 필드는 CRC 가 맞을 때만 쓴다
+- [x] With nothing edited, no prompt
+- [x] With edits reverted until the output equals the file, no prompt
+- [x] The prompt's "{count}" does not count saved patches, and does count reverted-after-save spots
+- [x] Cancel stays right where you were
+- [x] Choosing save saves first, then continues
+- [x] If the save fails, it does not continue
+- [x] Asking during a prompt closes the earlier prompt as cancel
+- [x] Not a zip, truncated, or password-protected → stops with the reason
+- [x] Input shorter than an EOCD also stops as "not a zip"
+- [x] A zip64-lookalike record at the comment's end does not fool it — it opens by the real index
+- [x] A fake "empty zip" EOCD that writes its own position into the index field does not fool it — it opens by the real index
+- [x] If the size in the index differs from the actually-inflated size, it is treated as tampering and refused
+- [x] If the index CRC differs from the actual bytes, it is treated as corrupt and refused
+- [x] An index entry running past the EOCD stops with a broken-index reason, inventing no entries
+- [x] Non-UTF-8 entry names are read as CP437, and the Unicode Path field is used only when its CRC matches
 
-### 자동으로 확인하지 않는 것
+### What is not verified automatically
 
-- **실제 IME 입력** — 조합 이벤트 흐름은 테스트하지만, 실제 한글 IME 로
-  타이핑한 결과는 사람이 확인해야 한다
-- **폴더 연결** — `showDirectoryPicker` 는 사람이 골라야 열리는 대화상자다.
-  폴더를 읽은 뒤의 처리는 zip 과 같은 코드라 테스트가 덮지만, 대화상자 자체는 수동 확인 영역이다
-- **저장 후 재열기** — File System Access API 로 덮어쓴 파일을 다시 열어
-  아티팩트가 정상 동작하는지는 수동 확인 영역이다
+- **Real IME input** — the composition event flow is tested, but the result of
+  typing with a real Hangul IME must be checked by a person
+- **Linking a folder** — `showDirectoryPicker` is a dialog only a person can
+  operate. Everything after the folder is read shares code with the zip path and is
+  covered by tests, but the dialog itself is manual territory
+- **Reopen after save** — whether a file overwritten via the File System Access API
+  reopens with the artifact fully working is manual territory
