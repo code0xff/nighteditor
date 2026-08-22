@@ -29,6 +29,7 @@ export function isLocale(value: unknown): value is Locale {
 
 const ko = {
   'app.emptyTitle': 'HTML 파일이나 zip, 폴더를 여기에 끌어다 놓으세요',
+  'app.emptyTitleTouch': '위의 열기를 눌러 HTML 파일이나 zip을 고르세요',
   'app.emptyHint': '글자를 눌러 고치면, 저장할 때 고친 부분만 바뀌어요',
   'app.blocked': '여기는 고칠 수 없어요 · {reason}',
   'app.editWhileReplacing': '다른 문서를 여는 중이라 이 편집은 반영되지 않았어요',
@@ -83,7 +84,6 @@ const ko = {
   'changes.revertAll': '전체 되돌리기',
   'changes.empty': '아직 고친 곳이 없어요. 프리뷰에서 글자를 눌러 보세요.',
   'changes.panel': '고친 곳 목록',
-  'changes.panelClose': '목록 닫기',
 
   'lock.RAW_TEXT': '코드 영역',
   'lock.SCRIPT_GENERATED': '스크립트가 만든 글자',
@@ -143,6 +143,7 @@ export const MESSAGE_KEYS = Object.keys(ko) as MessageKey[];
 
 const en: Record<MessageKey, string> = {
   'app.emptyTitle': 'Drag an HTML file, a zip, or a folder here',
+  'app.emptyTitleTouch': 'Press Open above to choose an HTML file or a zip',
   'app.emptyHint': 'Click any text to edit it. Saving changes only what you edited.',
   'app.blocked': "You can't edit this one · {reason}",
   'app.editWhileReplacing': "Another document is being opened, so this edit wasn't applied",
@@ -198,7 +199,6 @@ const en: Record<MessageKey, string> = {
   'changes.revertAll': 'Revert all',
   'changes.empty': 'Nothing yet. Click some text in the preview to start.',
   'changes.panel': 'Change list',
-  'changes.panelClose': 'Close the list',
 
   'lock.RAW_TEXT': 'Code area',
   'lock.SCRIPT_GENERATED': 'Written by a script',

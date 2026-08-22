@@ -371,6 +371,13 @@ overflow at any width.
 Anything off-screen must also be **out of reach** — the closed panel is `inert`, so
 it cannot be tabbed into from the preview.
 
+Where the pointer is a finger, the empty screen stops saying "drag a file here":
+nothing can be dragged onto a phone, and no folder can be picked there either (the
+folder button already hides itself where the browser cannot open one). Telling
+someone to do what their device cannot is worse than saying nothing (Principle 3).
+Buttons in the preview's format bar grow for the same reason — a 12px color dot is
+a coin toss to tap.
+
 ### Editing interactions
 - Click: only that block gets `contenteditable=true`; the rest are false
 - `Enter`: **commit and close.** Inserts no line break and is not forwarded to

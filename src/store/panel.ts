@@ -6,8 +6,8 @@
  * leaves the document unreadable — so the list becomes a panel over the
  * preview, and this is its switch.
  */
-import { useEffect, useState } from 'react';
 import { create } from 'zustand';
+import { useMediaQuery } from '@/lib/media';
 
 interface PanelState {
   /** True only while the panel is over the preview. Ignored from `lg` up. */
@@ -33,17 +33,5 @@ const BESIDE = '(min-width: 1024px)';
  * off-screen must not be reachable by tab. Beside the preview it always is.
  */
 export function useListBeside(): boolean {
-  const [beside, setBeside] = useState(() => window.matchMedia?.(BESIDE).matches ?? true);
-
-  useEffect(() => {
-    const mq = window.matchMedia?.(BESIDE);
-    if (!mq) return;
-    const onChange = () => setBeside(mq.matches);
-    // The width may have changed between the first render and this effect.
-    onChange();
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  return beside;
+  return useMediaQuery(BESIDE);
 }

@@ -4,6 +4,7 @@ import { Toaster } from '@/components/Toaster';
 import { Button } from '@/components/ui/button';
 import { onFileLaunch, readDroppedFolder } from '@/lib/fs';
 import { IconDrop, IconLinkFolder, IconUnlinked } from '@/lib/icons';
+import { useMediaQuery, TOUCH } from '@/lib/media';
 import { onEditorShortcuts } from '@/lib/shortcuts';
 import { onBeforeUnload } from '@/lib/unsaved';
 import { ERROR_NOTICES } from '@/lib/messages';
@@ -40,6 +41,10 @@ export function App() {
   const panelOpen = usePanel((s) => s.open);
   const closePanel = usePanel((s) => s.close);
   const listBeside = useListBeside();
+  // There is no dragging a file onto a phone, and no folder picker there
+  // either. Telling someone to do what their device cannot is worse than
+  // saying nothing (Principle 3).
+  const touch = useMediaQuery(TOUCH);
   const { t } = useI18n();
   // Unsaved edits live only in memory. Have the browser ask before the tab closes.
   // The criterion is not the patch count — patches survive a save (INV-1), so
@@ -136,7 +141,9 @@ export function App() {
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <IconDrop className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                <p className="text-sm font-medium">{t('app.emptyTitle')}</p>
+                <p className="text-sm font-medium">
+                  {t(touch ? 'app.emptyTitleTouch' : 'app.emptyTitle')}
+                </p>
                 <p className="mt-1.5 text-xs text-muted-foreground">{t('app.emptyHint')}</p>
               </div>
             </div>
