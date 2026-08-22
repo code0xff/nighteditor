@@ -29,10 +29,10 @@ export function applyEdits(source: string, edits: readonly Edit[]): string {
   let limit = source.length;
   for (const edit of ordered) {
     if (edit.start < 0 || edit.end > source.length || edit.start > edit.end) {
-      throw new EditError(`편집 범위가 원본을 벗어난다: [${edit.start}, ${edit.end})`);
+      throw new EditError(`edit runs past the source: [${edit.start}, ${edit.end})`);
     }
     if (edit.end > limit) {
-      throw new EditError(`편집이 겹친다: [${edit.start}, ${edit.end})`);
+      throw new EditError(`edits overlap: [${edit.start}, ${edit.end})`);
     }
     out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
     limit = edit.start;

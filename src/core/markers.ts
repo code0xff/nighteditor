@@ -31,7 +31,9 @@ export function markerEdits(source: string, blocks: readonly Block[]): Edit[] {
     // innerStart is just past the opening tag's '>'. Insert right before that '>'.
     const at = block.innerStart - 1;
     if (source[at] !== '>') {
-      throw new MarkerError(`여는 태그 끝을 찾지 못했다: id=${block.id} <${block.tag}>`);
+      throw new MarkerError(
+        `cannot find the end of the opening tag: id=${block.id} <${block.tag}>`
+      );
     }
     return { start: at, end: at, text: ` ${MARKER_ATTR}="${block.id}"` };
   });
