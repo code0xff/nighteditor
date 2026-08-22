@@ -23,7 +23,8 @@ export function Toolbar() {
   const closeFile = useEditor((s) => s.closeFile);
   // Below `lg` the change list is a panel over the preview, and this opens it.
   const togglePanel = usePanel((s) => s.toggle);
-  const titleInHeader = useMediaQuery(MD);
+  // Below `md` the toolbar holds actions on the document and nothing else.
+  const roomy = useMediaQuery(MD);
   const { t } = useI18n();
 
   return (
@@ -31,6 +32,11 @@ export function Toolbar() {
     // wider than the window. An overflowing header does not merely look cramped:
     // opening the language select scrolls the page sideways to bring the popup
     // into view, and the whole document jumps with it.
+    //
+    // Everything but the title field is `shrink-0`. Without it the row never
+    // reports an overflow — the controls just squash, and a 28px app mark ends
+    // up 19px wide and out of shape. Squashed icons are the harder thing to
+    // notice, so the flexible element is the one that gives.
     <header className="sticky top-0 z-10 flex h-12 items-center gap-1.5 border-b border-border bg-background/80 px-2 backdrop-blur sm:gap-3 sm:px-3">
       <Brand />
 
@@ -48,6 +54,7 @@ export function Toolbar() {
           <Button
             variant="ghost"
             size="icon"
+            className="shrink-0"
             onClick={() => void closeFile()}
             disabled={busy}
             aria-label={t('toolbar.close')}
@@ -60,7 +67,7 @@ export function Toolbar() {
               the header cannot overflow at any width, however narrow the window gets.
               Below `sm` there is no room left to absorb, and it moves to the change
               list instead (TitleField). */}
-          {titleInHeader ? <TitleField /> : <div className="flex-1" />}
+          {roomy ? <TitleField /> : <div className="flex-1" />}
         </>
       )}
 
@@ -73,7 +80,7 @@ export function Toolbar() {
             {t(canOverwrite() ? 'toolbar.droppedNoOverwrite' : 'toolbar.noOverwriteSupport')}
           </span>
         )}
-        {file && (
+        {file && roomy && (
           <Button
             variant="outline"
             size="icon"
@@ -111,9 +118,19 @@ export function Toolbar() {
             <IconChangeList />
           </Button>
         )}
-        <LangSelect />
-        <RepoLink />
-        <ThemeToggle />
+        {/* Below `md` these leave the header for the foot of the change list
+            (SideControls). Kept here they take about 140px, and everything on
+            the left — the wordmark, the open buttons — squashes to make room:
+            a flex child shrinks below its width before the row overflows, so
+            the 28px app mark ends up 19px wide and out of shape. The header
+            is what you do to the document; the rest lives one press away. */}
+        {roomy && (
+          <>
+            <LangSelect />
+            <RepoLink />
+            <ThemeToggle />
+          </>
+        )}
       </div>
     </header>
   );

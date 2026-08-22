@@ -1,3 +1,4 @@
+import { SideControls } from '@/components/SideControls';
 import { TitleField } from '@/components/TitleField';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,8 +38,8 @@ export function ChangeList() {
   // the new document stands (spec §4 · ADR-010).
   const replacing = useReplacement((s) => s.replacing);
   const closePanel = usePanel((s) => s.close);
-  // Where the toolbar has no room for it, the title is edited here (TitleField).
-  const titleInHeader = useMediaQuery(MD);
+  // Below `md` the toolbar is actions only; what it sheds is shown here.
+  const roomy = useMediaQuery(MD);
   const { t, tn } = useI18n();
 
   // On a narrow screen this list is a panel over the preview. Jumping to a spot
@@ -55,7 +56,7 @@ export function ChangeList() {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
-      {!titleInHeader && <TitleField stacked />}
+      {!roomy && <TitleField stacked />}
 
       <section>
         <h2 className="mb-2 text-xs font-semibold">{t('changes.blocks')}</h2>
@@ -176,6 +177,8 @@ export function ChangeList() {
           </ul>
         )}
       </section>
+
+      {!roomy && <SideControls />}
     </div>
   );
 }

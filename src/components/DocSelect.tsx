@@ -40,7 +40,7 @@ export function DocSelect() {
           and from the check mark in the list. (The `!` is needed: the trigger's own
           `[&>span]:line-clamp-1` sets a display that otherwise beats `hidden`.) */}
       <SelectTrigger
-        className="h-8 w-auto max-w-64 gap-1.5 [&>span]:!hidden [&>svg:last-child]:hidden lg:[&>span]:!block lg:[&>svg:last-child]:block"
+        className="h-8 w-auto max-w-64 shrink-0 gap-1.5 [&>span]:!hidden [&>svg:last-child]:hidden lg:[&>span]:!block lg:[&>svg:last-child]:block"
         aria-label={label}
         title={`${label} · ${docPath}`}
       >

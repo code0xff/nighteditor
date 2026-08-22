@@ -18,7 +18,7 @@ export function Brand({
   icon?: LucideIcon;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       {logo ? (
         <img src={logo} alt="" className="h-7 w-7 rounded-md" />
       ) : (

@@ -370,10 +370,23 @@ the whole document sideways** the moment a popup inside it opens, and
 at any width — measured with a five-document bundle open, which is the widest the
 header ever gets.
 
-**The title field is not a control, so below `md` it is not in the header.** Fitted
-there it comes out around 20px wide, which is a field in name only; it moves to the
-top of the change list instead. One instance either way, never two — the label
-points at an id, and two of those point at whichever came first.
+**Below `md` the toolbar holds actions on the document and nothing else.** What it
+sheds goes to the change list, which is where everything that is not an edit already
+lives:
+
+- the **title field**, at the head. Fitted into the toolbar it comes out around 20px
+  wide, which is a field in name only. One instance either way, never two — its label
+  points at an id, and two of those point at whichever came first
+- **language, theme, the source link, and download-a-copy**, at the foot. In the
+  toolbar they take about 140px
+
+Every toolbar item but the title field is `shrink-0`. Without that the row never
+reports an overflow at all — the controls quietly squash instead, and the 28px app
+mark ends up 19px wide and out of shape. Squashed icons are the harder thing to
+notice, so the flexible element is the one that gives.
+
+The panel itself is capped at 85% of the window: 288px of it in a 320px window leaves
+32px of document, not enough to see what closing it would take you back to.
 
 Anything off-screen must also be **out of reach** — the closed panel is `inert`, so
 it cannot be tabbed into from the preview.

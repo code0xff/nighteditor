@@ -164,7 +164,9 @@ export function App() {
             )}
             <aside
               className={cn(
-                'w-72 shrink-0 border-l border-border bg-background',
+                // 288px of panel in a 320px window leaves 32px of document —
+                // not enough to see what closing it would take you back to.
+                'w-72 max-w-[85%] shrink-0 border-l border-border bg-background',
                 // From `lg` up it simply stands beside the preview. Below that
                 // 288px of list would leave the document unreadable, so it
                 // slides over the preview instead of taking its width.

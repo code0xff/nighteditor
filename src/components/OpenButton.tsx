@@ -28,7 +28,7 @@ export function OpenButton() {
   const { t } = useI18n();
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex shrink-0 items-center gap-1.5">
       <Button
         variant="outline"
         size="sm"
