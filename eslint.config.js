@@ -31,6 +31,9 @@ export default tseslint.config(
         { name: 'document', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
         { name: 'window', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
         { name: 'navigator', message: 'INV-6: core/ 는 브라우저 API를 참조할 수 없다' },
+        // Web Encoding 전역 — 15차 리뷰에서 core/zip.ts 로 새어 들어온 적이 있다.
+        { name: 'TextDecoder', message: 'INV-6: core/ 는 Web Encoding 전역을 참조할 수 없다' },
+        { name: 'TextEncoder', message: 'INV-6: core/ 는 Web Encoding 전역을 참조할 수 없다' },
       ],
       'no-restricted-syntax': [
         'error',

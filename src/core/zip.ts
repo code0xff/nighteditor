@@ -76,6 +76,68 @@ const CP437 =
   '└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀' +
   'αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00a0';
 
+/**
+ * UTF-8 을 직접 푼다. 올바른 열이 아니면 fatal 에서는 null, 아니면 그 바이트만
+ * U+FFFD 로 바꾸고 계속 간다.
+ *
+ * `TextDecoder` 를 쓰지 않는다 — Web Encoding 전역이라 `core/` 가 실행 환경을
+ * 타게 된다 (INV-6 · rules §4). zip 이름은 짧고, 여기 필요한 것은 "올바른 UTF-8
+ * 인가" 라는 엄격 판정이라 손으로 푸는 비용이 작다. 과잉 표기(overlong)·서로게이트·
+ * 범위 밖은 전부 올바르지 않은 열이다.
+ */
+function decodeUtf8(bytes: Uint8Array, fatal: boolean): string | null {
+  let out = '';
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i] as number;
+    if (b < 0x80) {
+      out += String.fromCharCode(b);
+      i++;
+      continue;
+    }
+    // 선두 바이트가 약속하는 이어짐 길이와 최소 코드포인트 (과잉 표기 검사용).
+    let rest: number;
+    let min: number;
+    let cp: number;
+    if (b >= 0xc2 && b <= 0xdf) {
+      rest = 1;
+      min = 0x80;
+      cp = b & 0x1f;
+    } else if (b >= 0xe0 && b <= 0xef) {
+      rest = 2;
+      min = 0x800;
+      cp = b & 0x0f;
+    } else if (b >= 0xf0 && b <= 0xf4) {
+      rest = 3;
+      min = 0x10000;
+      cp = b & 0x07;
+    } else {
+      if (fatal) return null;
+      out += '�';
+      i++;
+      continue;
+    }
+    let ok = true;
+    for (let k = 1; k <= rest; k++) {
+      const c = bytes[i + k];
+      if (c === undefined || (c & 0xc0) !== 0x80) {
+        ok = false;
+        break;
+      }
+      cp = (cp << 6) | (c & 0x3f);
+    }
+    if (!ok || cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
+      if (fatal) return null;
+      out += '�';
+      i++;
+      continue;
+    }
+    out += String.fromCodePoint(cp);
+    i += rest + 1;
+  }
+  return out;
+}
+
 /** IEEE CRC-32 — Unicode Path 필드가 표준 이름과 같은 판인지 확인하는 데만 쓴다 */
 function crc32(bytes: Uint8Array): number {
   let crc = ~0;
@@ -103,7 +165,7 @@ function unicodePathName(extra: Uint8Array, nameBytes: Uint8Array): string | nul
     if (id === UNICODE_PATH_ID) {
       const size = end - (at + 4);
       if (size >= 5 && extra[at + 4] === 1 && dv.getUint32(at + 5, true) === crc32(nameBytes)) {
-        return new TextDecoder().decode(extra.subarray(at + 9, end));
+        return decodeUtf8(extra.subarray(at + 9, end), false);
       }
       return null;
     }
@@ -120,18 +182,16 @@ function unicodePathName(extra: Uint8Array, nameBytes: Uint8Array): string | nul
  * zip 에서 문서가 안 잡히거나 자원이 없다고 세게 된다.
  */
 function decodeName(nameBytes: Uint8Array, flags: number, extra: Uint8Array): string {
-  if (flags & UTF8_NAME_FLAG) return new TextDecoder().decode(nameBytes);
+  if (flags & UTF8_NAME_FLAG) return decodeUtf8(nameBytes, false) ?? '';
   const unicode = unicodePathName(extra, nameBytes);
   if (unicode !== null) return unicode;
   // 표시가 없어도 요즘 zip 은 UTF-8 이름을 그대로 담는다 — macOS 의 zip 은 한글
   // 이름에도 bit 11 을 세우지 않는다. 엄격한 UTF-8 로 풀리면 그것이 이름이다:
   // ASCII 는 두 해석이 같고, CP437 로 적힌 비 ASCII 이름이 우연히 올바른 UTF-8
   // 열이 되는 일은 사실상 없다 (0x80–0xBF 가 홀로 오면 UTF-8 이 아니다).
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(nameBytes);
-  } catch {
-    // 올바른 UTF-8 이 아니다 — 옛 zip 의 CP437 이름이다.
-  }
+  const strict = decodeUtf8(nameBytes, true);
+  if (strict !== null) return strict;
+  // 올바른 UTF-8 이 아니다 — 옛 zip 의 CP437 이름이다.
   let out = '';
   for (const byte of nameBytes) out += CP437[byte] as string;
   return out;

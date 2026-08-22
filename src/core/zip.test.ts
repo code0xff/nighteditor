@@ -274,6 +274,44 @@ describe('readZip · 픽스처 회귀', () => {
     expect(names).not.toContain('deck/옛이름.html');
   });
 
+  it('UTF-8 표시(bit 11)가 선 이름의 깨진 바이트는 U+FFFD 로 푼다', () => {
+    // TextDecoder 없이 직접 푸는 경로다 (INV-6) — 깨진 바이트에서 죽거나 조용히
+    // 건너뛰지 않고, 표준 디코더처럼 그 자리만 대체 문자로 남긴다.
+    const zip = new Uint8Array(fixtureBundle());
+    const dv = new DataView(zip.buffer);
+    const at = centralRecordOf(zip, 'deck/index.html');
+    dv.setUint16(at + 8, 0x0800, true); // UTF-8 이름 플래그
+    zip[at + 46 + 'deck/'.length] = 0x82; // 홀로 온 이어짐 바이트 — UTF-8 이 아니다
+
+    const names = readZip(zip).map((e) => e.name);
+
+    expect(names).toContain('deck/�ndex.html');
+  });
+
+  it('과잉 표기(overlong)는 올바른 UTF-8 이 아니다 — CP437 로 넘어간다', () => {
+    // 0xC0 0xAF 는 '/' 의 과잉 표기다. 엄격 판정이 이걸 받으면 이름 속에 경로
+    // 구분자가 숨어 들어온다 — 표준 디코더와 같이 거절해야 한다.
+    const zip = new Uint8Array(fixtureBundle());
+    const at = centralRecordOf(zip, 'deck/index.html');
+    zip[at + 46 + 'deck/'.length] = 0xc0;
+    zip[at + 46 + 'deck/i'.length] = 0xaf;
+
+    const names = readZip(zip).map((e) => e.name);
+
+    expect(names).toContain('deck/└»dex.html');
+  });
+
+  it('표시 없는 4바이트 UTF-8 이름도 그대로 읽는다', () => {
+    // BMP 밖(이모지)까지 — 손으로 푼 디코더가 서로게이트 쌍을 제대로 만드는지.
+    const zip = new Uint8Array(fixtureBundle());
+    const at = centralRecordOf(zip, 'deck/index.html');
+    zip.set([0xf0, 0x9f, 0x93, 0x84], at + 46 + 'deck/'.length); // 📄 가 'inde' 자리에
+
+    const names = readZip(zip).map((e) => e.name);
+
+    expect(names).toContain('deck/📄x.html');
+  });
+
   it('파일 수 한도를 목차를 읽는 동안 센다', () => {
     // 다 만들고 나서 세면 거절할 zip 의 항목을 전부(최대 65,534개) 만든 뒤에야
     // 거절하게 된다 — 한도는 담는 수가 아니라 읽는 일 자체를 묶는다 (spec §5.1).

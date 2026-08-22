@@ -30,6 +30,9 @@ new XMLSerializer().serializeToString(document)
 
 ### INV-6 · `core/`는 브라우저 API를 모른다
 `core/` 아래에서 `document`, `window`, `HTMLElement` 참조 금지.
+`TextDecoder`·`TextEncoder` 같은 Web Encoding 전역도 마찬가지다 — 어느 실행 환경에나
+있다고 가정하는 순간 파서가 환경을 탄다. 바이트를 글자로 푸는 일이 필요하면
+`core/` 안에서 직접 풀거나 부르는 쪽(`lib/`)이 푼 것을 받는다.
 문자열 in, 문자열 out. 이 경계가 테스트 가능성의 전부다.
 
 ### INV-7 · `sourceCodeLocation`은 항상 null 가드
