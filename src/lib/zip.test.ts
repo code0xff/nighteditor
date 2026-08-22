@@ -127,7 +127,10 @@ describe('unzip · 조작된 크기 (spec §6)', () => {
 
 describe('unzip · 깨진 내용은 목차의 CRC 로 잡는다 (spec §6)', () => {
   /** 목차에서 항목을 찾아 [로컬 헤더 위치, 압축된 크기, 목차의 CRC 칸 위치]를 돌려준다 */
-  function centralOf(bytes: Uint8Array, name: string): { localAt: number; compressed: number; crcAt: number } {
+  function centralOf(
+    bytes: Uint8Array,
+    name: string
+  ): { localAt: number; compressed: number; crcAt: number } {
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let eocd = -1;
     for (let at = bytes.length - 22; at >= 0; at--) {
@@ -163,7 +166,8 @@ describe('unzip · 깨진 내용은 목차의 CRC 로 잡는다 (spec §6)', () 
     const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
     // deck/js/deck.js 는 그대로 담긴(method 0) 항목이다 — 로컬 헤더 뒤의 데이터를 뒤집는다.
     const { localAt } = centralOf(out, 'deck/js/deck.js');
-    const dataAt = localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
+    const dataAt =
+      localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
     out[dataAt] = (out[dataAt] as number) ^ 0xff;
 
     await expect(unzip(new Blob([out as BlobPart]))).rejects.toMatchObject({

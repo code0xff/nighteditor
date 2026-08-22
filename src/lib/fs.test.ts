@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { FOLDER_LIMITS, pickFolder, readDroppedFolder } from './fs.js';
+import { FOLDER_LIMITS, NotUtf8Error, pickFolder, readDroppedFolder, readText } from './fs.js';
 
 /** 내용은 읽지 않고 크기만 세므로, 실제로 64MB 를 만들지 않는다 */
 function fakeFile(name: string, size: number): File {
@@ -261,5 +261,33 @@ describe('폴더 깊이 한도 (spec §5.1)', () => {
     const over = await pickFolder();
     expect(over?.files.size).toBe(0);
     expect(over?.truncated).toBe(true);
+  });
+});
+
+describe('readText · 바이트 그대로 읽는다 (spec §1 · 문서 인코딩)', () => {
+  it('앞머리의 BOM 을 지운 채 열지 않는다 (대원칙 1)', async () => {
+    // Blob.text() 는 BOM 을 지운다 — 그러면 고치지도 않은 문서의 첫 바이트가
+    // 저장본에서 사라진다. U+FEFF 가 문자열 맨 앞에 그대로 남아야 한다.
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+    const text = await readText(new Blob([bom, '<html><body>본문</body></html>']));
+
+    expect(text.startsWith('\ufeff')).toBe(true);
+    expect(text).toContain('<html>');
+  });
+
+  it('CRLF 줄바꿈을 정리하지 않는다 (대원칙 1)', async () => {
+    const text = await readText(new Blob(['<p>줄1</p>\r\n<p>줄2</p>\r\n']));
+    expect(text).toBe('<p>줄1</p>\r\n<p>줄2</p>\r\n');
+  });
+
+  it('UTF-8 이 아니면 거절한다 — 깨진 채 열면 저장이 원본을 망가뜨린다 (대원칙 3)', async () => {
+    // EUC-KR 로 적힌 "한글" — 이어짐 바이트가 홀로 와서 올바른 UTF-8 열이 아니다.
+    const eucKr = new Uint8Array([0xc7, 0xd1, 0xb1, 0xdb]);
+    await expect(readText(new Blob([eucKr]))).rejects.toBeInstanceOf(NotUtf8Error);
+  });
+
+  it('UTF-16 BOM 으로 시작하는 문서도 거절한다', async () => {
+    const utf16 = new Uint8Array([0xff, 0xfe, 0x41, 0x00, 0x42, 0x00]);
+    await expect(readText(new Blob([utf16]))).rejects.toBeInstanceOf(NotUtf8Error);
   });
 });

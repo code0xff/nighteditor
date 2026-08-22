@@ -1045,9 +1045,10 @@ describe('editor · 앞선 저장이 끝나도 갈아 끼우기 잠금은 풀리
         [
           'index.html',
           {
-            text: async () => {
+            // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+            arrayBuffer: async () => {
               await readGate;
-              return '<html><body><p>새 폴더</p></body></html>';
+              return new TextEncoder().encode('<html><body><p>새 폴더</p></body></html>').buffer;
             },
           },
         ],
@@ -1233,7 +1234,7 @@ describe('editor · 폴더 연결이 문서 자리를 되찾는다', () => {
 });
 
 describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴다 (spec §5)', () => {
-  /** text() 가 release 를 부를 때까지 멈춰 있는 폴더 — 흐름의 완료 순서를 손에 쥔다 */
+  /** 읽기가 release 를 부를 때까지 멈춰 있는 폴더 — 흐름의 완료 순서를 손에 쥔다 */
   function gatedFolder(tag: string) {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -1242,9 +1243,10 @@ describe('editor · 겹친 갈아 끼우기는 나중에 시작한 쪽이 이긴
       [
         'index.html',
         {
-          text: async () => {
+          // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+          arrayBuffer: async () => {
             await gate;
-            return html;
+            return new TextEncoder().encode(html).buffer;
           },
         },
       ],
@@ -1493,9 +1495,10 @@ describe('editor · 저장을 기다리는 사이 시작된 더 새 흐름이 �
         [
           'index.html',
           {
-            text: async () => {
+            // 문서는 바이트에서 읽는다 (spec §1 · 문서 인코딩) — 멈추는 자리도 그 길이다.
+            arrayBuffer: async () => {
               await readGate;
-              return '<html><body><p>B 문서</p></body></html>';
+              return new TextEncoder().encode('<html><body><p>B 문서</p></body></html>').buffer;
             },
           },
         ],
@@ -1904,6 +1907,49 @@ describe('editor · 문서 닫기', () => {
     useUnsaved.getState().reply('save');
     await closing;
 
+    expect(useEditor.getState().file).toBeNull();
+  });
+});
+
+describe('editor · BOM 과 인코딩 (spec §1 · 문서 인코딩)', () => {
+  const BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
+
+  it('파일 하나로 연 문서의 BOM 이 소스에 남는다 (대원칙 1)', async () => {
+    // Blob.text() 로 읽으면 BOM 이 지워져, 고치지 않은 문서의 첫 바이트가
+    // 저장본에서 사라진다 — 저장은 source 를 그대로 되쓰므로(INV-1) 소스에
+    // 남아 있으면 저장본에도 남는다.
+    const file = new File([BOM, fixtureSource()], 'bom.html', { type: 'text/html' });
+    await useEditor.getState().loadDropped(file);
+
+    const { source, savedText, notice } = useEditor.getState();
+    expect(notice).toBeNull();
+    expect(source.charCodeAt(0)).toBe(0xfeff);
+    expect(savedText.charCodeAt(0)).toBe(0xfeff);
+  });
+
+  it('묶음(폴더·zip) 항목의 BOM 도 남는다', async () => {
+    const read: FolderRead = {
+      files: new Map([
+        ['doc.html', new File([BOM, '<html><body><p>본문</p></body></html>'], 'doc.html')],
+      ]),
+      handles: new Map(),
+      truncated: false,
+    };
+    await useEditor.getState().loadFolder(read);
+
+    const { source, notice } = useEditor.getState();
+    expect(notice).toBeNull();
+    expect(source.charCodeAt(0)).toBe(0xfeff);
+  });
+
+  it('UTF-8 이 아닌 문서는 이유를 들고 거절한다 (대원칙 3)', async () => {
+    // UTF-16LE 문서 — UTF-8 로 풀면 깨진 글자가 문서 행세를 하고, 저장이
+    // 그 깨진 결과를 되써서 원본을 조용히 망가뜨린다.
+    const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x70, 0x00, 0x3e, 0x00]);
+    await useEditor.getState().loadDropped(new File([utf16], 'utf16.html'));
+
+    expect(useEditor.getState().notice).toEqual({ key: 'notice.notUtf8' });
+    // 문서는 열리지 않았다 — 보던 화면(빈 화면)이 그대로다.
     expect(useEditor.getState().file).toBeNull();
   });
 });

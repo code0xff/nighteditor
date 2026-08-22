@@ -47,6 +47,29 @@ export interface OpenedFile {
 
 export type SaveResult = 'overwritten' | 'downloaded';
 
+/** UTF-8 이 아닌 문서 — 열지 않는다. 사용자 문장은 언어팩이 만든다 (spec §1) */
+export class NotUtf8Error extends Error {}
+
+/**
+ * 문서 텍스트를 바이트에서 읽는다 (spec §1 · 문서 인코딩).
+ *
+ * `Blob.text()` 를 쓰지 않는다 — 그 해독은 맨 앞의 BOM(EF BB BF)을 조용히 지워,
+ * 고치지도 않은 문서의 첫 바이트가 저장본에서 사라진다 (대원칙 1·2). `ignoreBOM` 은
+ * "BOM 을 특별 취급하지 말라" 는 뜻이라 U+FEFF 가 문자열 맨 앞에 그대로 남고,
+ * 저장이 그 문자열을 UTF-8 로 되쓰면 같은 바이트로 돌아간다.
+ *
+ * UTF-8 이 아니면 여기서 거절한다(fatal) — U+FFFD 로 바꿔 가며 열면 깨진 글자가
+ * 문서 행세를 하고, 저장이 그 깨진 결과를 되써서 원본을 조용히 망가뜨린다 (대원칙 3).
+ */
+export async function readText(blob: Blob): Promise<string> {
+  const bytes = await blob.arrayBuffer();
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw new NotUtf8Error('not valid utf-8');
+  }
+}
+
 const picker = (): PickerWindow['showOpenFilePicker'] =>
   (window as unknown as PickerWindow).showOpenFilePicker;
 
@@ -196,7 +219,7 @@ export async function pickFolder(
 /** 핸들에서 읽는다. 핸들이 있으므로 나중에 원본을 덮어쓸 수 있다. */
 export async function fromHandle(handle: FileHandle): Promise<OpenedFile> {
   const file = await handle.getFile();
-  return { name: handle.name, text: await file.text(), handle };
+  return { name: handle.name, text: await readText(file), handle };
 }
 
 /**

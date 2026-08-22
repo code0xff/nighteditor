@@ -9,8 +9,10 @@ import {
   canPickFolder,
   downloadFile,
   droppedFile,
+  NotUtf8Error,
   pickFile,
   pickFolder,
+  readText,
   saveFile,
   type FolderRead,
   type OpenedFile,
@@ -322,7 +324,7 @@ async function reread(file: OpenedFile): Promise<OpenedFile> {
   // 자리 표시가 그대로 열려 문서가 빈 화면이 되고, 폴더 연결에서는 옛 원본으로 다시
   // 그려 놓고 나중에 저장할 때 디스크의 새 내용을 옛 것으로 덮어쓴다.
   // 던지면 부르는 쪽의 catch 가 이유를 알림으로 돌리고, 보던 화면은 그대로 남는다.
-  return { ...file, text: await (await file.handle.getFile()).text() };
+  return { ...file, text: await readText(await file.handle.getFile()) };
 }
 
 /**
@@ -350,6 +352,8 @@ function rebasePath(
 /** 오류 원문이 있으면 붙여서 보여준다. 없으면 짧은 문장만 */
 function openFailedNotice(e: unknown): Notice {
   if (e instanceof BundleEmptyError) return { key: 'notice.bundleNoDocument' };
+  // UTF-8 이 아닌 문서는 열면 저장 때 원본이 깨진다 — 왜 못 여는지 말한다 (spec §1 · 대원칙 3).
+  if (e instanceof NotUtf8Error) return { key: 'notice.notUtf8' };
   // zip 오류는 우리 것이라 코드로 온다 — 문장은 언어팩이 만든다 (spec §1 · INV-6).
   // 원문을 그대로 붙이는 것은 번역할 수 없는 브라우저 오류의 몫이다.
   if (e instanceof ZipError) {
@@ -461,7 +465,8 @@ async function openPicked(picked: Picked): Promise<Partial<EditorState>> {
 
   const file: OpenedFile = {
     name: picked.name,
-    text: await picked.blob.text(),
+    // 바이트에서 읽는다 — Blob.text() 는 앞머리의 BOM 을 지운다 (spec §1 · 대원칙 1).
+    text: await readText(picked.blob),
     handle: picked.handle,
   };
   return load(file);
@@ -491,7 +496,8 @@ async function openBundle(
   const next = await load(
     {
       name: path.split('/').pop() ?? path,
-      text: handle ? fresh.text : await entry.text(),
+      // 바이트에서 읽는다 — Blob.text() 는 앞머리의 BOM 을 지운다 (spec §1 · 대원칙 1).
+      text: handle ? fresh.text : await readText(entry),
       handle,
       path,
     },

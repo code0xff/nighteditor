@@ -90,6 +90,7 @@ const ko = {
 
   'notice.openFailed': '파일을 열지 못했어요',
   'notice.openFailedDetail': '파일을 열지 못했어요: {detail}',
+  'notice.notUtf8': 'UTF-8 문서가 아니에요. 그대로 열면 저장할 때 원본이 깨져서, 열지 않았어요',
   'notice.saved': '{name} 파일에 저장했어요 (고친 곳 {count}개)',
   'notice.downloaded': '{name} 파일로 내려받았어요. 이 브라우저는 원본 덮어쓰기를 지원하지 않아요',
   'notice.copyDownloaded': '{name} 사본을 내려받았어요 (고친 곳 {count}개 반영)',
@@ -202,6 +203,8 @@ const en: Record<MessageKey, string> = {
 
   'notice.openFailed': "Couldn't open that file",
   'notice.openFailedDetail': "Couldn't open that file: {detail}",
+  'notice.notUtf8':
+    "Not a UTF-8 document. Opening it would corrupt the original on save, so it wasn't opened",
   'notice.saved': 'Saved to {name} ({count} edited)',
   'notice.downloaded': "Downloaded {name}. This browser can't overwrite the original",
   'notice.copyDownloaded': 'Downloaded a copy of {name} ({count} edited)',
