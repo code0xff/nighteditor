@@ -1885,4 +1885,25 @@ describe('editor · 문서 닫기', () => {
 
     expect(useEditor.getState().file).toBeNull();
   });
+
+  it('물음이 떠 있는 사이 깨끗해진 뒤의 저장 답도 닫기를 잇는다 (spec §4)', async () => {
+    // 닫기도 다른 진입점과 같은 물음을 지난다 — 그 사이 단축키 저장이 끝났거나
+    // 편집을 되돌려 이미 깨끗해졌다면, 저장의 "쓸 것 없음" 이 닫기를 취소하면 안 된다.
+    await useEditor.getState().loadDropped(dropped());
+    const target = useEditor.getState().blocks.find((b) => b.locked === null);
+    useEditor.getState().onEdit(target?.id ?? -1, '고친 값');
+
+    const closing = useEditor.getState().closeFile();
+    for (let tries = 0; useUnsaved.getState().why === null; tries++) {
+      if (tries > 1000) throw new Error('묻지 않았다');
+      await Promise.resolve();
+    }
+    // 물음이 떠 있는 사이 문서가 깨끗해졌다 (되돌리기 — 저장한 적 없는 편집이라 잃을 것이 없다).
+    useEditor.getState().revert(target?.id ?? -1);
+    expect(useEditor.getState().unsaved).toBe(false);
+    useUnsaved.getState().reply('save');
+    await closing;
+
+    expect(useEditor.getState().file).toBeNull();
+  });
 });
