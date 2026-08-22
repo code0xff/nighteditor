@@ -541,8 +541,12 @@ export function previewAgent(token = ''): () => void {
     el.textContent = label;
     el.setAttribute('data-ne-label', name);
     el.title = labels[name] ?? '';
+    // A finger is not a mouse pointer: the same 12px dot that is easy to click
+    // is a coin toss to tap. Widen the targets where the pointer is coarse.
+    const touch = matchMedia('(pointer: coarse)').matches;
     el.style.cssText =
-      'all:unset;cursor:pointer;padding:2px 6px;border-radius:4px;font:600 12px/1.4 system-ui;';
+      `all:unset;cursor:pointer;padding:${touch ? '6px 10px' : '2px 6px'};` +
+      'border-radius:4px;font:600 12px/1.4 system-ui;';
     // Focus moving at the moment of the press would collapse the selection.
     // Block the default first.
     el.addEventListener('mousedown', (e) => e.preventDefault());
@@ -564,8 +568,13 @@ export function previewAgent(token = ''): () => void {
     box.addEventListener('mousedown', () => {
       barHeld = true;
     });
+    // Wrapping is what keeps the bar inside a phone-sized window. The palette
+    // grows with the document's colors, so on one line it would be wider than
+    // the screen — and a bar hanging off the right edge scrolls the document
+    // sideways the moment it appears.
     box.style.cssText =
       'position:absolute;z-index:2147483647;display:none;gap:2px;align-items:center;' +
+      'flex-wrap:wrap;max-width:calc(100vw - 16px);box-sizing:border-box;' +
       'padding:4px;border-radius:8px;background:#101014;color:#e9e9ec;' +
       'box-shadow:0 6px 20px rgba(0,0,0,.35);font:12px system-ui;';
 
@@ -582,8 +591,9 @@ export function previewAgent(token = ''): () => void {
       // The base button is `all:unset`, so display is inline and side padding
       // remains. Left that way, width/height would not apply and the dot
       // becomes a sideways-stretched oval.
+      const size = matchMedia('(pointer: coarse)').matches ? 20 : 12;
       dot.style.cssText +=
-        'display:block;padding:0;width:12px;height:12px;border-radius:50%;' +
+        `display:block;padding:0;width:${size}px;height:${size}px;border-radius:50%;` +
         `background:${color};box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);`;
       box.append(dot);
     }
@@ -637,7 +647,10 @@ export function previewAgent(token = ''): () => void {
     // coordinates so it follows when scrolling.
     const top = rect.top + scrollY - bar.offsetHeight - 8;
     bar.style.top = `${Math.max(scrollY + 4, top)}px`;
-    bar.style.left = `${Math.max(4, rect.left + scrollX)}px`;
+    // Clamp both edges. Selecting a word near the right side of a narrow window
+    // would otherwise push the bar past the edge and widen the document.
+    const room = document.documentElement.clientWidth - bar.offsetWidth - 8;
+    bar.style.left = `${scrollX + Math.max(4, Math.min(rect.left, room))}px`;
   };
 
   on(document, 'selectionchange', () => placeBar());

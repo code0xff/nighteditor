@@ -73,7 +73,9 @@ export function App() {
 
   return (
     <div
-      className="flex h-screen flex-col bg-background text-foreground"
+      // `dvh`, not `vh`: on a phone the browser's own bars are part of the
+      // window height, so `100vh` puts the bottom of the app underneath them.
+      className="flex h-dvh flex-col bg-background text-foreground"
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);

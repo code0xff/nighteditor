@@ -66,9 +66,15 @@ export function Dialog({
             {description && <p className="text-sm text-muted-foreground">{description}</p>}
           </div>
         )}
-        <div className="max-h-[70vh] overflow-y-auto p-4">{children}</div>
+        <div className="max-h-[70dvh] overflow-y-auto p-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-border p-4">{footer}</div>
+          // Wrapping, because these buttons carry whole sentences ("Save and
+          // continue") and there are up to three of them — on a phone they do
+          // not fit on one line, and a button pushed off the edge cannot be
+          // pressed at all.
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border p-4">
+            {footer}
+          </div>
         )}
       </div>
     </div>
