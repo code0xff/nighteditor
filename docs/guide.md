@@ -1,185 +1,208 @@
-# 사용 가이드
+# User guide
 
-아티팩트 HTML 을 열고, 글자를 눌러 고치고, 원본을 최소 diff 로 되돌려받는 전체 과정.
-설계 배경은 [architecture.md](architecture.md), 판정 규칙은 [spec.md](spec.md) 에 있다.
+The whole journey: open an artifact HTML, click its text to fix it, and get the
+original back as a minimal diff.
+Design background lives in [architecture.md](architecture.md); detection rules in [spec.md](spec.md).
 
 ---
 
-## 1. 시작하기
+## 1. Getting started
 
-| 방법 | 하는 법 | 쓸 곳 |
+| Method | How | When |
 | --- | --- | --- |
-| 웹 | https://code0xff.github.io/nighteditor/ 를 연다 | 그때그때 한 번 |
-| 설치 (PWA) | 주소창의 설치 버튼 | 자주 쓸 때. 오프라인·OS 연동이 붙는다 |
-| 로컬 | `pnpm install && pnpm dev` | 코드를 고칠 때 |
+| Web | Open https://code0xff.github.io/nighteditor/ | One-off use |
+| Install (PWA) | The install button in the address bar | Frequent use. Adds offline and OS integration |
+| Local | `pnpm install && pnpm dev` | When working on the code |
 
-설치하면 두 가지가 늘어난다.
+Installing adds two things.
 
-- **오프라인에서 동작한다.** 백엔드가 없어 앱 전체가 미리 캐시된다
-- **OS 에서 바로 열린다.** HTML 파일을 우클릭해 nighteditor 로 열면 파일 선택
-  대화상자 없이 편집이 시작되고, 원본 덮어쓰기도 그대로 된다
+- **It works offline.** There is no backend, so the entire app is pre-cached
+- **The OS opens files with it directly.** Right-click an HTML file and open it with
+  nighteditor: editing starts without a file picker, and overwriting the original
+  still works
 
-파일은 이 기기를 떠나지 않는다. 업로드도 텔레메트리도 없다.
+Files never leave this machine. No uploads, no telemetry.
 
-## 2. 파일 여는 두 가지 방법 — 저장 방식이 여기서 갈린다
+## 2. Two ways to open a file — this is where saving diverges
 
-| 여는 방법 | 파일 핸들 | 저장을 누르면 |
+| How you open | File handle | Pressing Save |
 | --- | --- | --- |
-| 툴바의 **파일 열기** (Chromium) | 있다 | **원본 파일에 그대로 덮어쓴다** |
-| 툴바의 **폴더 열기** (Chromium) | 있다 | **원본 파일에 그대로 덮어쓴다** |
-| 창에 **끌어다 놓기** | 없다 | 같은 이름으로 **내려받는다** |
-| **파일 열기** (Firefox·Safari) | 없다 | 같은 이름으로 **내려받는다** |
-| **zip** 열기·끌어다 놓기 | 없다 | 같은 이름으로 **내려받는다** |
-| **폴더** 끌어다 놓기 | 없다 | 같은 이름으로 **내려받는다** |
+| **Open a file** in the toolbar (Chromium) | Yes | **Overwrites the original file in place** |
+| **Open a folder** in the toolbar (Chromium) | Yes | **Overwrites the original file in place** |
+| **Drag and drop** into the window | No | **Downloads** under the same name |
+| **Open a file** (Firefox·Safari) | No | **Downloads** under the same name |
+| Opening or dropping a **zip** | No | **Downloads** under the same name |
+| Dropping a **folder** | No | **Downloads** under the same name |
 
-버튼이 **파일 열기**와 **폴더 열기** 둘인 것은 브라우저 사정이다. 파일용 대화상자와
-폴더용 대화상자가 따로라, 어느 쪽을 띄울지 누르기 전에 정해야 한다.
-끌어다 놓을 때는 그런 구분이 없다 — 파일을 놓으면 파일로, 폴더를 놓으면 폴더로 열린다.
+There being two buttons — **Open a file** and **Open a folder** — is the browser's
+doing. The file dialog and the folder dialog are separate, so which one to show must
+be decided before the click. Drag and drop has no such split — drop a file and it
+opens as a file, drop a folder and it opens as a folder.
 
-**폴더 열기**를 누르면 폴더를 통째로 열면서 옆 파일까지 함께 읽는다. 이때 브라우저가
-`이 폴더의 파일 편집을 허용하겠느냐` 고 한 번 묻는데, 허용해야 원본에 그대로 저장된다.
-허용하지 않아도 잃는 것은 없다 — 아무 일도 일어나지 않으니 다시 열면 된다.
+**Open a folder** opens the whole folder and reads the neighboring files along with
+it. The browser then asks once whether to let this site edit files in that folder —
+you must allow it for saving to write the original in place.
+Declining loses nothing — nothing happens, so just open it again.
 
-zip 이나 폴더를 놓으면 그 안의 HTML 을 찾아 연다. 문서가 여럿이면 겉면에 있는 것
-(`index.html` 을 먼저)을 고르고, 몇 개 중에 무엇을 열었는지 알려준다.
-**툴바의 문서 목록**에서 다른 문서로 갈아탈 수 있다 — 압축을 다시 풀지 않으므로 곧바로 열린다.
-고치던 내용이 있으면 먼저 물어본다.
+Dropping a zip or a folder finds the HTML inside and opens it. If there are several
+documents, the one nearest the surface wins (`index.html` first), and you are told
+which of them was opened.
+The **document list in the toolbar** switches to another document — the zip is not
+unpacked again, so it opens instantly. If you have unsaved edits, you are asked first.
 
-어느 경우든 **사본 내려받기**(⤓ 버튼 · `Ctrl+Shift+S`)로 결과물을 파일로 따로 받을 수 있다.
-덮어쓰기가 싫을 때, 또는 고치기 전 백업이 필요할 때 쓴다.
+In every case, **Download a copy** (the ⤓ button · `Ctrl+Shift+S`) gets you the
+result as a separate file. Use it when you do not want to overwrite, or when you
+need a backup before editing.
 
-덮어쓰기는 File System Access API 를 쓰므로 **Chromium 계열에서만** 된다.
-지금 어느 쪽인지는 저장을 누르기 전에 툴바 오른쪽에서 확인할 수 있다 —
-`끌어다 놓은 파일은 덮어쓸 수 없어요` 나 `이 브라우저는 덮어쓰기를 지원하지 않아요` 가
-보이면 내려받기 경로다.
-원본에 직접 쓰고 싶으면 드롭하지 말고 **파일 열기** 로 다시 열면 된다.
+Overwriting uses the File System Access API, so it works **in Chromium-based
+browsers only.** Which path you are on shows on the right of the toolbar before
+you press Save — if you see `Dropped files can't be overwritten` or
+`This browser can't overwrite files`, you are on the download path.
+To write to the original directly, do not drop it — reopen it via **Open a file**.
 
-## 3. 고치기
+## 3. Editing
 
-아티팩트는 그대로 렌더된다. 자체 스크립트도 정상 실행되므로 슬라이드 넘김 같은
-동작은 살아 있다 — 편집하려면 **글자를 직접 누른다.**
+The artifact renders as-is. Its own scripts run normally, so behaviors like slide
+navigation stay alive — to edit, **click the text itself.**
 
-마우스를 올리면 상태가 보인다.
+Hover to see the state.
 
-| 보이는 것 | 뜻 |
+| What you see | Meaning |
 | --- | --- |
-| 실선 테두리 | 고칠 수 있다 |
-| 진한 실선 테두리 + 옅은 배경 | 지금 고치는 중이다 |
-| 점선 테두리, 금지 커서 | 잠겼다 — 누르면 이유가 뜬다 (§6) |
+| Solid outline | Editable |
+| Strong solid outline + faint background | Being edited right now |
+| Dashed outline, not-allowed cursor | Locked — clicking shows the reason (§6) |
 
-테두리 색은 문서를 따라간다 — 배경이 어두운 곳에서는 흰색, 밝은 곳에서는 검은색이다.
-한 문서 안에서도 블록이 놓인 자리에 따라 갈린다.
+The outline color follows the document — white where the background is dark, black
+where it is light. It can differ block by block within a single document, depending
+on where each block sits.
 
-| 조작 | 결과 |
+| Action | Result |
 | --- | --- |
-| 블록 클릭 | 그 블록만 편집 상태가 된다 |
-| `Enter` | **확정하고 편집을 닫는다.** 줄바꿈이 들어가지 않는다 |
-| `Shift+Enter` | 블록 **안에서 줄바꿈.** 편집은 열린 채로 둔다 |
-| `Ctrl+B` · `Ctrl+I` · `Ctrl+U` | 고른 글자를 **굵게 · 기울임 · 밑줄** |
-| `Esc` | 취소. 열기 전 내용으로 되돌린다 |
-| 블록 밖 클릭 | 확정하고 닫는다 |
-| 붙여넣기 | 서식을 버리고 평문만 들어간다 |
-| `Ctrl+S` (`⌘S`) | 편집 중이면 확정하고 **저장한다.** 프리뷰 안에서 눌러도 된다 |
-| `Ctrl+Shift+S` (`⌘⇧S`) | **사본 내려받기.** 원본은 그대로 두고 결과물만 파일로 받는다 |
-| `Ctrl+Z` (`⌘Z`) | 편집 중이면 브라우저 undo. 편집 중이 아니면 **마지막 변경 되돌리기** |
+| Click a block | That block alone enters editing |
+| `Enter` | **Commits and closes the edit.** No line break is inserted |
+| `Shift+Enter` | Line break **inside the block.** The edit stays open |
+| `Ctrl+B` · `Ctrl+I` · `Ctrl+U` | **Bold · italic · underline** on the selected text |
+| `Esc` | Cancel. Restores the content from before the edit opened |
+| Click outside the block | Commits and closes |
+| Paste | Formatting is stripped; plain text only |
+| `Ctrl+S` (`⌘S`) | Commits any open edit and **saves.** Works inside the preview too |
+| `Ctrl+Shift+S` (`⌘⇧S`) | **Download a copy.** Leaves the original alone; the result goes to a file |
+| `Ctrl+Z` (`⌘Z`) | Browser undo while editing. Outside of editing, **reverts the last change** |
 
-편집 중에는 클릭·방향키가 아티팩트로 넘어가지 않는다. 편집을 여닫는 그 클릭도
-링크를 따라가지 않는다 — 그 동작의 역할은 편집을 여닫는 것 하나다.
+While editing, clicks and arrow keys do not pass through to the artifact. The click
+that opens or closes an edit does not follow links either — that click's one and
+only job is to open or close the edit.
 
-`Ctrl+Z` 는 상황에 따라 갈린다 — 블록을 고치는 중이면 브라우저의 undo 가 타이핑을
-되돌리고, 편집을 닫은 뒤면 **가장 최근에 확정한 블록 하나**가 원래대로 돌아간다
-(변경 목록의 `되돌리기` 와 같은 동작). 같은 블록을 여러 번 고쳤다면 그 블록이 가장 최근이다.
-제목 칸처럼 입력 칸에 포커스가 있으면 그 칸의 undo 가 우선이고, 다시 실행(redo)은 없다.
+`Ctrl+Z` depends on context — while editing a block, the browser's undo reverses your
+typing; after the edit is closed, **the single most recently committed block** goes
+back to how it was (same as **Revert** in the change list). If you edited the same
+block several times, that block is the most recent. When an input field (such as the
+title) has focus, that field's own undo wins, and there is no redo.
 
-**한글 입력**은 조합이 끝난 뒤에 확정된다. 조합 중의 `Enter` 는 글자를 완성하는
-키이므로 편집을 닫지 않는다 — 줄바꿈도 남지 않으니, 글자를 완성한 뒤 한 번 더 누르면 닫힌다.
-조합 중에 다른 곳을 눌러도 입력이 사라지지 않는다.
+**Korean IME input** commits after composition ends. `Enter` during composition is
+the key that completes the character, so it does not close the edit — and no line
+break is left behind; press it once more after the character is complete to close.
+Clicking elsewhere mid-composition does not lose your input.
 
-**문서 제목**(`<title>`)은 화면에 렌더되지 않아 클릭이 닿지 않는다.
-툴바의 **제목** 칸에서 고친다. 여기는 평문만 들어가고, `&` `<` `>` 는 저장할 때
-엔티티로 인코딩된다.
+**The document title** (`<title>`) is not rendered on screen, so no click can reach
+it. Edit it in the **Title** field in the toolbar. It takes plain text only, and
+`&` `<` `>` are encoded as entities on save.
 
-## 3.1 스타일이 빠진 채로 보일 때
+## 3.1 When styles are missing from the view
 
-`deck.css` 나 `logo.png` 를 **옆에 두고 참조하는** 문서는 파일 하나만 열면 그 자원이 빠진 채
-보인다. 파일 하나를 여는 것으로는 브라우저가 옆 파일을 볼 권한을 주지 않기 때문이다.
+A document that **references** a `deck.css` or `logo.png` sitting alongside renders
+without those resources when you open just the one file. Opening a single file does
+not give the browser permission to see its neighbors.
 
-이때는 위에 이런 줄이 뜬다.
+When that happens, a line like this appears at the top.
 
 ```
 옆에 있어야 할 파일 3개를 못 찾았어요. 화면만 달라 보일 뿐,
 고치고 저장하는 데는 문제없어요                       [폴더 연결하기]
 ```
 
-**폴더 연결하기**를 누르고 그 문서가 든 폴더를 고르면 원래 모습대로 보인다.
-이때도 **원본 덮어쓰기는 그대로 된다** — 폴더는 읽기 전용으로만 받는다.
+Press **Link a folder** and pick the folder holding that document, and it renders as
+intended. **Overwrite saving keeps working** — the folder is taken read-only.
 
-처음부터 폴더나 zip 을 통째로 놓아도 된다. 다만 그 경우 저장은 사본 내려받기가 된다.
+You can also drop the folder or the zip whole from the start. In that case, though,
+saving becomes a copy download.
 
-> 자원을 못 붙여도 **고치고 저장하는 데는 지장이 없다.** 이 도구는 화면이 아니라 원본
-> 문자열을 고치므로, 스타일이 빠져 보이든 아니든 결과물의 diff 는 똑같이 정확하다.
-> 폴더를 연결하면 프리뷰를 다시 그리므로, 고치던 내용이 있으면 먼저 물어본다.
+> Even without the resources attached, **editing and saving are unaffected.** This
+> tool edits the original string, not the screen, so the diff of the output is
+> exactly as precise whether the styles are missing or not.
+> Linking a folder redraws the preview, so if you have unsaved edits, you are asked first.
 
-## 3.2 서식 넣기
+## 3.2 Formatting
 
-글자를 고르면 그 위에 작은 막대가 뜬다. **굵게 · 기울임 · 밑줄 · 색 · 크기 · 지우기**가 있다.
-굵게·기울임·밑줄은 `Ctrl+B` · `Ctrl+I` · `Ctrl+U` 로도 된다.
+Select some text and a small bar appears above it: **bold · italic · underline ·
+color · size · clear**. Bold, italic, and underline also work via
+`Ctrl+B` · `Ctrl+I` · `Ctrl+U`.
 
-크기는 절대값이 아니라 **원래 크기의 배수**로 들어간다. 문서마다 본문 크기가 달라서,
-절대값을 박으면 그 문서의 크기 체계와 어긋난다.
+Size goes in as a **multiple of the original size**, not an absolute value. Every
+document has its own body size; hard-coding an absolute value fights that document's
+size system.
 
-색은 몇 가지만 고르게 해 뒀다. 아무 색이나 열어 주면 문서가 가진 색 체계를 이기기 쉽다.
+Colors are limited to a handful. Offer any color at all, and it is too easy to
+overpower the color scheme the document already has.
 
-> 넣은 서식은 **그 블록 안에** 들어간다. 저장하면 그 줄만 바뀌고, 다시 열어도 그 문단은
-> 그대로 고칠 수 있다.
+> Formatting you add lands **inside that block**. Saving changes only that line, and
+> reopening the file leaves that paragraph just as editable.
 
-## 4. 오른쪽 패널 읽기
+## 4. Reading the right panel
 
-- **블록** — 문서 전체 블록 수와 그중 고칠 수 있는 수. `살펴보는 중…` 은 렌더 결과와
-  소스를 맞춰보는 중이라는 뜻이고, 끝나면 잠금이 확정된다
-- **고칠 수 없는 이유** — 사유별 개수 (§6)
-- **고친 곳 n개** — 고친 블록 목록. **카드를 누르면 프리뷰의 그 자리로 데려간다.** 항목마다 **고치기 전(취소선)** 과 **고친 뒤**를 함께 보여준다.
-  각 항목의 **되돌리기**, 위쪽의 **전체 되돌리기**로 원래 내용으로 돌아간다.
-  프리뷰 화면에도 같이 반영된다. 프리뷰에서 고르고 있는 블록은 목록에서 테두리로 짚어준다
+- **Blocks** — the document's total block count and how many are editable.
+  `Checking…` means the rendered result is being matched against the source; when it
+  finishes, the locks are final
+- **Why you can't edit these** — counts per reason (§6)
+- **{n} edited** — the list of edited blocks. **Click a card to be taken to that spot
+  in the preview.** Each item shows **before (struck through)** and **after** side by side.
+  **Revert** on each item, or **Revert all** at the top, restores the original content.
+  The preview reflects it too. The block currently selected in the preview is
+  outlined in the list
 
-되돌리면 그 블록은 패치 목록에서 빠지므로, 저장해도 원본과 한 바이트도 달라지지 않는다.
+Reverting removes that block from the patch list, so saving changes not a single
+byte relative to the original.
 
-## 5. 저장하고 결과물 받기
+## 5. Saving and getting the result
 
-고친 게 없으면 저장 버튼은 비활성이고 `Ctrl+S` 도 아무 일도 하지 않는다.
-버튼의 숫자는 고친 블록 수다.
+With nothing edited, the save button is disabled and `Ctrl+S` does nothing.
+The number on the button is the count of edited blocks.
 
-저장하면 **어떻게 저장됐는지 문장으로 뜬다.**
+Saving tells you, **in a sentence, how it was saved.**
 
-| 알림 | 결과물이 있는 곳 |
+| Notice | Where the result is |
 | --- | --- |
-| `artifact.html 에 저장했다 (3개 블록)` | **원래 그 파일.** 경로 그대로 내용만 바뀌었다 |
-| `artifact.html 을 내려받았다 — …` | **다운로드 폴더.** 이름이 겹치면 `artifact (1).html` |
-| `artifact.html 사본을 내려받았다 (3개 블록 반영)` | **다운로드 폴더** |
-| `저장 거부: …` | 아무것도 쓰지 않았다. 사유가 뒤에 붙는다 |
+| `Saved to artifact.html (3 edited)` | **The original file.** Same path, new content |
+| `Downloaded artifact.html — …` | **Your downloads folder.** Name collisions become `artifact (1).html` |
+| `Downloaded a copy of artifact.html (3 edited)` | **Your downloads folder** |
+| `Didn't save: …` | Nothing was written. The reason follows |
 
-덮어쓴 경우 따로 내려받을 것이 없다. 원본이 곧 결과물이다.
-사본이 필요하면 툴바의 **⤓ 사본 내려받기**(`Ctrl+Shift+S`) — 저장과 달리 원본을 건드리지 않고,
-고친 게 없어도 눌린다(원본 그대로 받는 백업). 이름은 원본과 같게 두므로 받은 파일이
-원본을 대체할 수 있고, 같은 이름이 이미 있으면 브라우저가 번호를 붙인다.
+When it overwrote, there is nothing to download — the original is the result.
+If you need a copy, use **⤓ Download a copy** in the toolbar (`Ctrl+Shift+S`) —
+unlike Save, it leaves the original alone, and it works even with nothing edited
+(a backup of the original as-is). The name stays the same as the original so the
+downloaded file can replace it; if the name already exists, the browser numbers it.
 
-**내려받기는 원본을 건드리지 않는다.** 브라우저 다운로드는 다운로드 폴더에만 쓸 수 있고,
-이름이 겹쳐도 덮어쓰지 않고 번호를 붙인다. 브라우저가 "저장 위치 묻기" 로 설정돼 있다면
-대화상자에서 직접 원본 폴더를 골라 덮어쓸 수는 있다 — Firefox·Safari 에서 고친 파일을
-원래 자리로 되돌리는 방법이 이것뿐이다.
-제대로 됐는지 보려면 저장 전 사본과 비교한다.
+**Downloads never touch the original.** Browser downloads can only write to the
+downloads folder, and on a name collision they number the file instead of
+overwriting. If your browser is set to "ask where to save", you can pick the
+original folder in the dialog and overwrite there — in Firefox and Safari this is
+the only way to put an edited file back in its place.
+To confirm it worked, compare against a copy made before saving.
 
 ```bash
-cp artifact.html artifact.bak.html   # 고치기 전에
-diff artifact.bak.html artifact.html # 고친 뒤
+cp artifact.html artifact.bak.html   # before editing
+diff artifact.bak.html artifact.html # after editing
 ```
 
-diff 는 **고친 블록의 줄만** 나와야 한다. 그 범위를 넘으면 버그다.
+The diff must show **only the lines of the blocks you edited.** Anything beyond that
+range is a bug.
 
-### 저장하지 않은 편집은 지켜준다
+### Unsaved edits are protected
 
-고친 것이 있는 채로 다른 파일을 열거나, 묶음 안의 다른 문서로 갈아타거나,
-폴더를 연결하려 하면 이렇게 묻는다.
+If you try to open another file, switch to another document in the bundle, or link a
+folder while you have unsaved edits, you are asked first.
 
 ```
 저장하지 않은 변경이 있어요
@@ -188,60 +211,73 @@ diff 는 **고친 블록의 줄만** 나와야 한다. 그 범위를 넘으면 �
           [취소]  [버리고 계속하기]  [저장하고 계속하기]
 ```
 
-**저장하고 계속하기**를 누르면 저장한 뒤에 옮긴다. 덮어쓸 수 없는 문서(드롭·zip)라면
-버튼이 `사본 받고 계속하기` 로 바뀐다 — 원본을 되쓸 자리가 없기 때문이다.
-저장이 실패하면 옮기지 않고 그 자리에 남는다.
+**Save and continue** saves first, then moves on. For a document that cannot be
+overwritten (dropped, or from a zip) the button reads **Save a copy and continue**
+instead — there is no place to write the original back to.
+If saving fails, you stay right where you are; nothing moves.
 
-탭을 닫거나 새로고침할 때는 브라우저가 대신 되묻는다.
-## 6. 못 고치는 것
+When you close the tab or reload, the browser asks on our behalf.
 
-되짚을 수 없거나 구조가 깨질 수 있는 블록은 **잠근다.** 잠긴 블록을 누르면
-사유가 상단에 뜬다. 추측으로 고치느니 못 고친다고 말하는 쪽을 택했다.
+## 6. What cannot be edited
 
-| 사유 | 뜻 |
+Blocks that cannot be traced back, or whose structure could break, are **locked.**
+Clicking a locked block shows the reason at the top. We chose to say "can't edit
+this" over fixing it by guesswork.
+
+| Reason | Meaning |
 | --- | --- |
-| 코드 영역 | `script`·`style`·`textarea` 안 — 텍스트가 아니라 코드다 |
-| 스크립트가 만든 글자 | 렌더 결과가 소스와 달라 소스에서 되짚을 곳이 없다 |
-| 원본에는 비어 있는 자리 | 소스에는 빈 요소이고 내용은 스크립트가 채운다 |
-| 코드 블록 | 수동 하이라이팅된 코드·JSON — 고치면 구조가 깨진다 |
-| 고칠 범위가 불분명 | 닫는 태그가 생략돼 고칠 범위를 확정할 수 없다 |
+| Code area | Inside `script`·`style`·`textarea` — code, not text |
+| Written by a script | The rendered result differs from the source; there is nothing in the source to trace back to |
+| Empty in the original | Empty in the source; a script fills in the content |
+| Code block | Hand-highlighted code·JSON — editing would break the structure |
+| Unclear range | A closing tag is omitted, so the edit range cannot be pinned down |
 
-스타일·레이아웃 편집, 요소 추가·삭제·이동, 이미지 교체는 하지 않는다.
-텍스트를 담은 블록(`p`·`h2`·`li`·`td` …)만 대상이다.
+No style or layout editing, no adding, deleting, or moving elements, no image
+replacement. Only blocks that hold text (`p`·`h2`·`li`·`td` …) are in scope.
 
-## 7. 언어와 테마
+## 7. Language and theme
 
-툴바 오른쪽에서 **한국어 / English** 를 고른다. 선택은 브라우저에 남고,
-바꾸면 이미 떠 있는 알림까지 그 언어로 다시 그려진다. 첫 방문은 브라우저 언어를 따른다.
-그 옆 버튼은 밝은/어두운 테마를 바꾼다. 편집 대상 아티팩트의 내용은 번역·변형하지 않는다.
+Pick **한국어 / English** on the right of the toolbar. The choice sticks in the
+browser, and switching redraws even the notices already on screen in the new
+language. The first visit follows the browser language.
+The button next to it switches the light/dark theme. The artifact being edited is
+never translated or altered.
 
-알림은 화면 **오른쪽 위**에 잠깐 떴다 사라진다. 잘 안 된 일(못 열었다·저장하지 못했다)은
-스스로 사라지지 않는다 — 직접 닫아야 한다. 몇 초 만에 사라지면 못 본 사람은 된 줄 안다.
+Notices appear briefly at the **top right** and fade away. Things that went wrong
+(couldn't open, couldn't save) do not fade on their own — you must dismiss them.
+If a failure disappears in seconds, whoever missed it assumes it worked.
 
-맨 오른쪽 깃허브 표시는 이 도구의 소스로 간다. 남의 문서를 열어 고치는 물건이니,
-무엇을 하는지 직접 확인할 길을 화면에 둔다.
+The GitHub mark at the far right goes to this tool's source. A thing that opens and
+edits other people's documents should leave a way, right on screen, to check what it
+actually does.
 
-## 8. 잘 안 될 때
+## 8. When something goes wrong
 
-**저장 버튼이 눌리지 않는다** — 고친 블록이 없다. 되돌리기로 전부 되돌린 뒤에도 같다.
-`Ctrl+S` 도 같은 조건에서 아무 일도 하지 않는다.
+**The save button won't press** — no blocks are edited. Same after reverting
+everything. `Ctrl+S` also does nothing under the same condition.
 
-**다운로드로 받고 싶은데 덮어쓰기가 된다** — `파일 열기`·`폴더 열기` 로 연 Chromium 이다.
-**사본 내려받기**(`Ctrl+Shift+S`)를 쓰면 원본을 건드리지 않고 파일로 받는다.
+**I wanted a download but it overwrote** — you are in Chromium and opened via
+**Open a file** / **Open a folder**. Use **Download a copy** (`Ctrl+Shift+S`) to get
+a file without touching the original.
 
-**고쳤는데 원본 파일이 그대로다** — 내려받기 경로였다. 다운로드 폴더를 보고,
-원본에 직접 쓰려면 **파일 열기** 로 다시 연다 (§2).
+**I edited but the original file is unchanged** — you were on the download path.
+Check your downloads folder; to write to the original directly, reopen via
+**Open a file** (§2).
 
-**고치려는 글자가 눌리지 않는다** — 잠긴 블록이다. 상단 알림에 사유가 나온다 (§6).
+**The text I want won't take a click** — it is a locked block. The notice at the top
+shows the reason (§6).
 
-**`저장 거부` 가 떴다** — 패치가 원본과 맞지 않아 아무것도 쓰지 않았다.
-문서를 다시 열고 고치면 된다. 조용히 망가진 파일을 남기지 않으려는 동작이다.
+**A `Didn't save` notice appeared** — the patches did not match the original, so
+nothing was written. Reopen the document and edit again. This behavior exists so a
+silently corrupted file is never left behind.
 
-**한글이 자모로 깨진다** — 조합이 끝나기 전에 확정된 경우다. 재현되면 버그다.
+**Korean text breaks into jamo** — the edit was committed before composition ended.
+If you can reproduce it, it is a bug.
 
-**오프라인에서 안 열린다** — 설치(PWA) 후 한 번은 온라인으로 열려야 캐시가 채워진다.
+**It won't open offline** — after installing (PWA), it must be opened online once to
+fill the cache.
 
-## 9. 이 도구가 하지 않는 것
+## 9. What this tool does not do
 
-협업·계정·클라우드 저장, 다중 파일이나 zip 프로젝트, HTML 을 처음부터 만드는 기능,
-한국어·영어 외 UI 언어, 아티팩트 내용 번역.
+Collaboration, accounts, or cloud storage; multi-file or zip projects; creating HTML
+from scratch; UI languages beyond Korean and English; translating artifact content.
