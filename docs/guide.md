@@ -169,6 +169,11 @@ document and the list cannot both have room, so the list moves over the preview 
 the toolbar gains a button that opens it. Press beside the panel to close it —
 pressing a change card also closes it, since the spot it takes you to is underneath.
 
+Under about 768px the panel holds more than the list. The toolbar keeps only what
+acts on the document — open, close, save — so the **title field** moves to the top of
+the panel, and **language, theme, the source link, and Download a copy** to the
+bottom of it.
+
 ## 5. Saving and getting the result
 
 With nothing edited, the save button is disabled and `Ctrl+S` does nothing.

@@ -43,10 +43,13 @@ src/
     preview.ts          preview document assembly (markers + resource swaps + agent injection)
     shortcuts.ts        host-side shortcuts (inside the preview, the agent intercepts)
     theme.ts            light/dark theme (localStorage + <html class>)
+    media.ts            useMediaQuery — the breakpoints read from JavaScript, where the answer
+                        changes behavior rather than appearance (reach, and which sentence is true)
     unsaved.ts          beforeunload — when the tab is closing over unsaved edits
     utils.ts            cn() — class name merging
   ui/                   ← screen skeleton: App · Toolbar · PreviewFrame · ChangeList
-  components/           ← screen parts. `ui/*` are shadcn artifacts; keep their original shape
+  components/           ← screen parts (TitleField · SideControls · Brand · OpenButton …).
+                          `ui/*` are shadcn artifacts; keep their original shape
   store/                ← Zustand
     editor.ts           original, blocks, patches, bundle. Notices are stored as message keys, not sentences
     replacement.ts      document replacement reservations — the single place that decides who wins and what locks (ADR-010)
