@@ -1550,6 +1550,25 @@ describe('editor · 물음의 "{count}곳" 은 파일과 다른 블록 수다 (s
     expect(useEditor.getState().unsaved).toBe(true);
     expect(unsavedCount(useEditor.getState())).toBe(1);
   });
+
+  it('원본 그대로를 저장해 둔 자리를 되돌리면 세지 않는다 — 파일도 그 자리가 원본이다', async () => {
+    // 고쳐 저장 → 원본 내용으로 다시 고쳐 저장 → 되돌리기. savedPatches 에는 항목이
+    // 남지만 파일의 그 자리는 원본 그대로다 — 항목의 있고 없음으로 세면 다른 블록
+    // 하나를 고쳤을 때 물음이 두 곳이라고 말한다 (spec §4).
+    await useEditor.getState().loadDropped(dropped());
+    const [a, b] = useEditor.getState().blocks.filter((x) => x.locked === null);
+    if (!a || !b) throw new Error('편집 가능한 블록이 둘 필요하다');
+    useEditor.getState().onEdit(a.id, '고침 A');
+    expect(await useEditor.getState().save()).toBe(true);
+    useEditor.getState().onEdit(a.id, a.sourceInner);
+    expect(await useEditor.getState().save()).toBe(true);
+    useEditor.getState().revert(a.id);
+
+    useEditor.getState().onEdit(b.id, '고침 B');
+
+    // 파일과 다른 곳은 b 하나뿐이다 — a 의 남은 savedPatches 항목은 원본과 같다.
+    expect(unsavedCount(useEditor.getState())).toBe(1);
+  });
 });
 
 describe('editor · 대조가 지우는 패치는 조용히 사라지지 않는다 (spec §4)', () => {

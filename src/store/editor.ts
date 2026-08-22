@@ -216,11 +216,23 @@ function differsFromDisk(
  * 저장한 편집을 되돌리면 패치가 없는데도 파일과 다르다(그 자리가 1곳이다).
  * 그래서 지금 패치를 마지막 저장 때의 패치와 블록별로 견준다 — 같은 블록의 패치가
  * 그대로면 파일의 그 자리도 그대로라, 이 차이가 곧 결과물과 파일이 다른 자리다.
+ *
+ * 한쪽에만 있는 항목은 그 블록의 **원본 내용**을 빈자리에 놓고 견준다 (spec §4).
+ * 항목의 있고 없음만으로 세면, 원본 그대로를 저장해 둔 자리(고쳤다가 원본으로
+ * 되돌려 저장)를 되돌렸을 때 — 결과물도 파일도 그 자리가 원본이라 같은데 —
+ * savedPatches 에 남은 항목 때문에 한 곳으로 더 세인다.
  */
-export function unsavedCount(s: Pick<EditorState, 'patches' | 'savedPatches'>): number {
+export function unsavedCount(s: Pick<EditorState, 'patches' | 'savedPatches' | 'blocks'>): number {
+  // 항목이 없는 자리의 내용은 원본이다 — 제목(rcdata)의 패치는 평문이라 sourceText 와 짝이다.
+  const originalOf = (id: number): string | undefined => {
+    const block = s.blocks.find((b) => b.id === id);
+    return block ? (block.rcdata ? block.sourceText : block.sourceInner) : undefined;
+  };
   let count = 0;
-  for (const [id, html] of s.patches) if (s.savedPatches.get(id) !== html) count++;
-  for (const id of s.savedPatches.keys()) if (!s.patches.has(id)) count++;
+  for (const id of new Set([...s.patches.keys(), ...s.savedPatches.keys()])) {
+    const original = originalOf(id);
+    if ((s.patches.get(id) ?? original) !== (s.savedPatches.get(id) ?? original)) count++;
+  }
   return count;
 }
 
