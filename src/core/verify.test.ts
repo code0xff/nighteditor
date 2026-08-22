@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseBlocks } from './parse.js';
 import { applyLiveLocks } from './verify.js';
 
-const live = (entries: [number, string][]) => new Map(entries);
+const live = (entries: [number, string][]) => entries.map(([id, text]) => ({ id, text }));
 
 describe('applyLiveLocks (ADR-005)', () => {
   it('소스와 라이브가 같으면 잠그지 않는다', () => {
@@ -42,6 +42,34 @@ describe('applyLiveLocks (ADR-005)', () => {
     const blocks = parseBlocks('<p>Protocols &amp;amp; Standards</p>');
     const [b] = applyLiveLocks(blocks, live([[0, 'Protocols &amp; Standards']]));
     expect(b?.locked).toBeNull();
+  });
+
+  it('같은 id 의 표식이 둘이면 MARKER_CLASH 로 잠근다 — 문서가 마커를 흉내 냈다 (spec §3)', () => {
+    // 어느 쪽이 원본 블록인지 렌더만으로는 가릴 수 없다. 추측으로 고치면 가짜의
+    // 내용이 이 블록의 편집으로 저장에 실린다.
+    const blocks = parseBlocks('<p>안녕</p>');
+    const [b] = applyLiveLocks(
+      blocks,
+      live([
+        [0, '안녕'],
+        [0, '안녕'],
+      ])
+    );
+    expect(b?.locked).toBe('MARKER_CLASH');
+  });
+
+  it('흉내의 텍스트가 소스와 달라도 사유는 MARKER_CLASH 다 — 겹침이 먼저다', () => {
+    // SCRIPT_GENERATED 로 잠겨도 안전하긴 하다. 하지만 사용자에게 보일 이유는
+    // "스크립트가 만든 글자" 가 아니라 "표식이 겹쳐 되짚을 수 없다" 쪽이 사실이다.
+    const blocks = parseBlocks('<p>안녕</p>');
+    const [b] = applyLiveLocks(
+      blocks,
+      live([
+        [0, '안녕'],
+        [0, '전혀 다른 텍스트'],
+      ])
+    );
+    expect(b?.locked).toBe('MARKER_CLASH');
   });
 
   it('입력 배열을 변형하지 않는다', () => {

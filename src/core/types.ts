@@ -1,6 +1,6 @@
 /** 블록이 편집 불가인 이유. null 이면 편집 가능. (docs/spec.md §3) */
 export type LockReason =
-  'RAW_TEXT' | 'SCRIPT_GENERATED' | 'EMPTY_IN_SOURCE' | 'CODE_BLOCK' | 'AMBIGUOUS';
+  'RAW_TEXT' | 'SCRIPT_GENERATED' | 'EMPTY_IN_SOURCE' | 'CODE_BLOCK' | 'AMBIGUOUS' | 'MARKER_CLASH';
 
 /**
  * 편집 단위. offset 은 모두 **원본 문자열** 기준이다 (INV-3).

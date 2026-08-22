@@ -86,6 +86,7 @@ const ko = {
   'lock.EMPTY_IN_SOURCE': '원본에는 비어 있는 자리',
   'lock.CODE_BLOCK': '코드 블록',
   'lock.AMBIGUOUS': '고칠 범위가 불분명',
+  'lock.MARKER_CLASH': '문서가 편집 표식을 흉내 냄',
 
   'notice.openFailed': '파일을 열지 못했어요',
   'notice.openFailedDetail': '파일을 열지 못했어요: {detail}',
@@ -196,6 +197,7 @@ const en: Record<MessageKey, string> = {
   'lock.EMPTY_IN_SOURCE': 'Empty in the original',
   'lock.CODE_BLOCK': 'Code block',
   'lock.AMBIGUOUS': 'Unclear range',
+  'lock.MARKER_CLASH': "Mimics the editor's markers",
 
   'notice.openFailed': "Couldn't open that file",
   'notice.openFailedDetail': "Couldn't open that file: {detail}",
@@ -257,6 +259,7 @@ const LOCK_KEY: Record<LockReason, MessageKey> = {
   EMPTY_IN_SOURCE: 'lock.EMPTY_IN_SOURCE',
   CODE_BLOCK: 'lock.CODE_BLOCK',
   AMBIGUOUS: 'lock.AMBIGUOUS',
+  MARKER_CLASH: 'lock.MARKER_CLASH',
 };
 
 /** 패치 거부 코드 → 메시지 키. `core/` 는 언어를 모르므로 코드만 넘겨받는다 (INV-6) */

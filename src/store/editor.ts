@@ -708,8 +708,9 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   // 렌더 결과와 소스를 대조해 스크립트가 만든 블록을 잠근다 (ADR-005).
   onReady: (live) => {
-    const liveText = new Map(live.map((b) => [b.id, b.text]));
-    const blocks = applyLiveLocks(get().blocks, liveText);
+    // Map 으로 추리지 않고 겹침째로 넘긴다 — 같은 id 의 표식이 둘이면 문서가
+    // 마커를 흉내 낸 것이고, 그 판정(MARKER_CLASH)은 core 의 몫이다 (spec §3).
+    const blocks = applyLiveLocks(get().blocks, live);
     // 뒤늦게 잠긴 블록의 패치를 그대로 두면 저장 때 applyPatches 가 목록 전체를
     // 거부해 멀쩡한 편집까지 함께 죽는다 (INV-5).
     const lockedIds = new Set(blocks.filter((b) => b.locked !== null).map((b) => b.id));

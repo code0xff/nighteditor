@@ -24,7 +24,13 @@ export type FromPreview =
 
 /** 호스트 → 프리뷰 */
 export type ToPreview =
-  | { type: 'locked'; ids: number[] }
+  /**
+   * 대조가 끝났다. `ids` 는 잠긴 블록, `all` 은 실제 블록 id **전부**다.
+   * 문서가 `data-ne-id` 를 흉내 낼 수 있어(spec §3), 에이전트는 명단에 없는
+   * 표식을 블록으로 치지 않는다 — 없으면 가짜 요소에 편집이 열리고 그 확정은
+   * 어느 블록의 것도 아니어서 조용히 사라진다.
+   */
+  | { type: 'locked'; ids: number[]; all: number[] }
   | { type: 'revert'; id: number; html: string }
   /** 변경 목록에서 고른 블록을 화면에 보여준다 (스크롤 + 잠깐 짚어주기) */
   | { type: 'reveal'; id: number }

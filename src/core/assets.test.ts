@@ -317,9 +317,11 @@ describe('rewriteCssUrls', () => {
   });
 
   it('따옴표 값 안의 이스케이프도 푼다', () => {
-    expect(rewriteCssUrls('a{background:url("we\\"ird.png")}', '', (path) =>
-      path === 'we"ird.png' ? 'blob:ok' : undefined
-    )).toBe('a{background:url("blob:ok")}');
+    expect(
+      rewriteCssUrls('a{background:url("we\\"ird.png")}', '', (path) =>
+        path === 'we"ird.png' ? 'blob:ok' : undefined
+      )
+    ).toBe('a{background:url("blob:ok")}');
   });
 
   it('되적는 조각은 토큰을 끊는 글자만 다시 잠근다', () => {

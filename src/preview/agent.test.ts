@@ -1239,3 +1239,92 @@ describe('previewAgent · 팔레트는 body 자신도 훑는다 (spec §4.1)', (
     expect(dots.map((d) => d.style.backgroundColor)).toContain('rgb(12, 34, 56)');
   });
 });
+
+describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)', () => {
+  it('흉내 낸 data-ne-bar 속 블록도 편집이 열린다 — 견주는 것은 속성이 아니라 우리 막대다', () => {
+    // closest('[data-ne-bar]') 로 걸렀다면 이 블록의 클릭이 전부 막대 클릭으로
+    // 삼켜져, 그 안의 블록은 영영 편집할 수 없다.
+    mount(`<div data-ne-bar=""><p ${MARKER_ATTR}="0">본문</p></div>`);
+
+    click(el(0)!);
+
+    expect(sent).toContainEqual({ type: 'select', id: 0 });
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+  });
+
+  it('흉내 낸 data-ne-bar 로 포커스가 빠져도 확정된다', () => {
+    // 속성으로 거르면 확정이 건너뛰어져 편집이 확정도 취소도 없이 열린 채 남는다.
+    mount(`<div data-ne-bar=""><p ${MARKER_ATTR}="0">본문</p><button id="decoy">x</button></div>`);
+    click(el(0)!);
+    sent = [];
+
+    el(0)!.dispatchEvent(
+      new FocusEvent('focusout', {
+        bubbles: true,
+        relatedTarget: document.getElementById('decoy'),
+      })
+    );
+
+    expect(sent.some((m) => m.type === 'edit' && m.id === 0)).toBe(true);
+  });
+
+  it('명단(all)에 없는 표식은 블록이 아니다 — 편집이 열리지 않는다', () => {
+    // 가짜에 편집이 열리면 그 확정은 어느 블록의 것도 아니어서 조용히 사라진다.
+    mount(`<div ${MARKER_ATTR}="99">가짜</div><p ${MARKER_ATTR}="0">본문</p>`, {
+      verified: false,
+    });
+    fromHost({ type: 'locked', ids: [], all: [0] });
+    sent = [];
+    const fake = document.querySelector(`[${MARKER_ATTR}="99"]`)!;
+
+    click(fake);
+
+    expect(fake.getAttribute('contenteditable')).toBeNull();
+    expect(sent.filter((m) => m.type === 'select' || m.type === 'edit')).toHaveLength(0);
+
+    // 진짜 블록은 여느 때처럼 열린다.
+    click(el(0)!);
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+  });
+
+  it('블록 안의 흉내 표식은 내용이다 — 클릭이 바깥의 진짜 블록으로 흘러간다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="99">가짜</span></p>`, {
+      verified: false,
+    });
+    fromHost({ type: 'locked', ids: [], all: [0] });
+    const fake = document.querySelector(`[${MARKER_ATTR}="99"]`)!;
+
+    click(fake);
+
+    expect(el(0)?.getAttribute('contenteditable')).toBe('true');
+    expect(fake.getAttribute('contenteditable')).toBeNull();
+  });
+
+  it('확정은 편집을 연 그 요소에서 읽는다 — 뒤늦게 끼어든 흉내가 가로채지 못한다', () => {
+    mount(`<p ${MARKER_ATTR}="0">본문</p>`);
+    click(document.querySelector(`p[${MARKER_ATTR}="0"]`)!);
+    // 아티팩트 스크립트가 편집 중에 같은 id 의 표식을 문서 앞쪽에 끼워 넣는다 —
+    // id 로 되찾으면 querySelector 가 이 가짜를 먼저 돌려준다.
+    document.body.insertAdjacentHTML('afterbegin', `<div ${MARKER_ATTR}="0">가짜</div>`);
+    sent = [];
+
+    keydown('Enter');
+
+    const edit = sent.find((m) => m.type === 'edit');
+    expect(String(edit?.html)).toBe('본문');
+  });
+
+  it('블록 안의 흉내에는 잠금 표식을 칠하지 않는다 — 내용에 실려 저장본으로 샌다', () => {
+    // 흉내가 미리 달고 온 data-ne-locked 를 떼면 그 변화가 바깥 블록의 innerHTML 에
+    // 실려, 그 블록을 편집하는 순간 저장본이 바뀐다 (INV-9).
+    mount(`<p ${MARKER_ATTR}="0">본문 <span ${MARKER_ATTR}="7" ${LOCKED_ATTR}="">가짜</span></p>`, {
+      verified: false,
+    });
+    fromHost({ type: 'locked', ids: [], all: [0] });
+
+    const fake = document.querySelector(`[${MARKER_ATTR}="7"]`)!;
+    expect(fake.hasAttribute(LOCKED_ATTR)).toBe(true);
+    // 진짜 블록의 표식은 여느 때처럼 관리된다 — 잠기지 않았으니 없다.
+    expect(el(0)?.hasAttribute(LOCKED_ATTR)).toBe(false);
+  });
+});

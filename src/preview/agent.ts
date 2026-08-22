@@ -30,6 +30,12 @@ export function previewAgent(): () => void {
   };
 
   let editingId: number | null = null;
+  /**
+   * 편집 중인 **그 요소**. 확정·복원 때 id 로 되찾지 않는다 — 문서(또는 아티팩트
+   * 스크립트)가 같은 id 의 `data-ne-id` 를 흉내 내면 querySelector 가 문서 앞쪽의
+   * 가짜를 먼저 돌려줘, 가짜의 내용이 이 블록의 편집으로 저장에 실린다 (spec §3).
+   */
+  let editingEl: HTMLElement | null = null;
   /** 편집을 열 때의 innerHTML. Escape 복원과 pristine 판정에 쓴다. */
   let snapshot: string | null = null;
   let composing = false;
@@ -49,6 +55,12 @@ export function previewAgent(): () => void {
   let pendingCommit = false;
   const locked = new Set<number>();
   /**
+   * 호스트가 알려준 실제 블록 id 전부. 문서가 `data-ne-id` 를 흉내 낼 수 있어(spec §3),
+   * 이 명단에 없는 표식은 블록으로 치지 않는다 — 가짜에 편집이 열리면 그 확정은
+   * 어느 블록의 것도 아니어서 조용히 사라진다. null 이면 아직 명단을 못 받았다.
+   */
+  let known: Set<number> | null = null;
+  /**
    * 대조(ADR-005)가 끝나 잠금 목록을 받았는가. 그 전에는 편집을 열지 않는다 —
    * 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져 화면과 저장본이
    * 갈라지고, 어느 블록이 잠길지도 아직 몰라 잠긴 블록의 편집까지 열린다 (spec §4).
@@ -66,11 +78,30 @@ export function previewAgent(): () => void {
     revealed = null;
   };
 
-  /** 이벤트 대상에서 위로 올라가며 마커가 붙은 조상을 찾는다 */
+  /** 다른 마커 안에 든 마커 — 진짜 블록은 겹치지 않으므로 문서가 흉내 낸 것이다 (spec §3) */
+  const mimicked = (el: Element): boolean => !!el.parentElement?.closest('[' + MARKER + ']');
+
+  /**
+   * 이벤트 대상에서 위로 올라가며 마커가 붙은 조상을 찾는다.
+   *
+   * 명단(known)에 없는 표식과 다른 표식 안에 든 표식은 흉내다 — 멈추지 않고 계속
+   * 올라가, 클릭이 바깥의 진짜 블록이나 문서로 흘러가게 한다 (spec §3). 명단을
+   * 받기 전(대조 전)에는 어느 표식이든 블록으로 보고 "아직 준비 안 됨" 안내로
+   * 흘려보낸다.
+   */
   const blockOf = (target: EventTarget | null): HTMLElement | null => {
     let el = target instanceof Element ? target : null;
-    while (el && !el.hasAttribute(MARKER)) el = el.parentElement;
-    return el as HTMLElement | null;
+    while (el) {
+      if (
+        el.hasAttribute(MARKER) &&
+        !mimicked(el) &&
+        (known === null || known.has(Number(el.getAttribute(MARKER))))
+      ) {
+        return el as HTMLElement;
+      }
+      el = el.parentElement;
+    }
+    return null;
   };
 
   const idOf = (el: HTMLElement): number => Number(el.getAttribute(MARKER));
@@ -84,7 +115,8 @@ export function previewAgent(): () => void {
       pendingCommit = true;
       return;
     }
-    const el = elementFor(editingId);
+    // id 로 되찾지 않는다 — 흉내(spec §3)가 앞쪽에 있으면 가짜가 먼저 잡힌다.
+    const el = editingEl;
     if (el) {
       el.removeAttribute('contenteditable');
       // 마지막 방어선 (INV-9): 아티팩트 스크립트가 DOM 을 휘저어 막대를 블록 안으로
@@ -101,6 +133,7 @@ export function previewAgent(): () => void {
       });
     }
     editingId = null;
+    editingEl = null;
     snapshot = null;
     pendingCommit = false;
     hideBar();
@@ -110,7 +143,8 @@ export function previewAgent(): () => void {
   /** 편집을 버리고 열기 전 내용으로 되돌린다 */
   const cancel = (): void => {
     if (editingId === null) return;
-    const el = elementFor(editingId);
+    // commit 과 같은 이유 — id 로 되찾으면 흉내가 먼저 잡힌다 (spec §3).
+    const el = editingEl;
     if (el) {
       el.removeAttribute('contenteditable');
       // commit 과 같은 방어: 아티팩트 스크립트가 막대를 블록 안으로 옮겨 놨을 수 있다.
@@ -121,6 +155,7 @@ export function previewAgent(): () => void {
       if (snapshot !== null) el.innerHTML = snapshot;
     }
     editingId = null;
+    editingEl = null;
     snapshot = null;
     pendingCommit = false;
     hideBar();
@@ -144,6 +179,7 @@ export function previewAgent(): () => void {
     // 여기서 새로 열면 이전 블록이 contenteditable 인 채로 남는다.
     if (editingId !== null) return;
     editingId = id;
+    editingEl = el;
     snapshot = el.innerHTML;
     el.setAttribute('contenteditable', 'true');
     el.focus();
@@ -167,7 +203,7 @@ export function previewAgent(): () => void {
 
   const format = (command: string, value?: string): void => {
     if (editingId === null) return;
-    const el = elementFor(editingId);
+    const el = editingEl;
     if (!el) return;
 
     // 막대를 누르는 사이에 선택이 풀렸을 수 있다. 들고 있던 범위를 되살린다.
@@ -286,7 +322,7 @@ export function previewAgent(): () => void {
    */
   const resize = (times: string): void => {
     if (editingId === null) return;
-    const el = elementFor(editingId);
+    const el = editingEl;
     if (!el) return;
 
     format('fontSize', '7');
@@ -421,7 +457,7 @@ export function previewAgent(): () => void {
   /** 고른 글자 위에 막대를 놓는다. 고른 것이 없으면 감춘다 */
   const placeBar = (): void => {
     const sel = getSelection();
-    const el = editingId === null ? null : elementFor(editingId);
+    const el = editingEl;
     // 시작과 끝 모두 편집 중인 블록 안이어야 한다. 시작만 보면 이웃 블록까지 걸친
     // 선택으로도 막대가 떠서, 서식이 추적되지 않는 이웃까지 바꾼다 (대원칙 2).
     const inside =
@@ -476,7 +512,9 @@ export function previewAgent(): () => void {
 
   on(document, 'click', ((e: MouseEvent) => {
     // 서식 막대는 문서가 아니라 우리 물건이다. 블록 밖 클릭으로 세면 누르는 순간 편집이 끝난다.
-    if (e.target instanceof Element && e.target.closest(`[${BAR}]`)) {
+    // 속성이 아니라 **우리가 만든 그 객체**와 견준다 (spec §3) — 문서에 data-ne-bar 를
+    // 흉내 낸 조상이 있으면 그 안 블록의 클릭이 전부 여기서 삼켜져 영영 편집할 수 없다.
+    if (bar && e.target instanceof Node && bar.contains(e.target)) {
       e.stopImmediatePropagation();
       return;
     }
@@ -577,9 +615,11 @@ export function previewAgent(): () => void {
   });
 
   on(document, 'focusout', (e) => {
-    // 서식 막대로 포커스가 간 것은 편집을 끝낸 것이 아니다.
+    // 서식 막대로 포커스가 간 것은 편집을 끝낸 것이 아니다. 클릭과 같은 이유로
+    // 속성이 아니라 우리가 만든 그 객체와 견준다 (spec §3) — 흉내 낸 data-ne-bar 로
+    // 포커스가 빠지면 확정이 건너뛰어져 편집이 확정도 취소도 없이 열린 채 남는다.
     const to = (e as FocusEvent).relatedTarget;
-    if (to instanceof Element && to.closest(`[${BAR}]`)) return;
+    if (bar && to instanceof Node && bar.contains(to)) return;
     // commit 이 조합 여부를 직접 처리한다. 여기서 걸러내면 pendingCommit 이
     // 세팅되지 않아 조합 중 포커스가 빠졌을 때 편집이 통째로 사라진다.
     commit();
@@ -600,6 +640,7 @@ export function previewAgent(): () => void {
     const msg = e.data as {
       type?: string;
       ids?: number[];
+      all?: number[];
       id?: number;
       html?: string;
       labels?: Record<string, string>;
@@ -610,6 +651,8 @@ export function previewAgent(): () => void {
       verified = true;
       locked.clear();
       for (const id of msg.ids) locked.add(id);
+      // 실제 블록 id 명단 — 여기 없는 표식은 문서의 흉내라 블록으로 치지 않는다 (spec §3).
+      if (msg.all) known = new Set(msg.all);
       // 잠금 표식을 DOM 에도 붙인다. 주입된 스타일이 이걸 보고 커서와 테두리를 바꾼다.
       // 매번 전체를 다시 칠한다 — 이전 목록이 남으면 풀린 블록이 잠긴 척한다.
       //
@@ -617,6 +660,11 @@ export function previewAgent(): () => void {
       // (CSS 로 그린 막대 등)까지 금지 커서로 덮으면 문서가 통째로 "못 고침" 처럼 보인다.
       // 칠하지 않아도 잠금은 그대로라 눌러 보면 이유는 뜬다.
       for (const el of document.querySelectorAll('[' + MARKER + ']')) {
+        // 다른 마커 안의 마커는 흉내다 — 진짜 블록은 겹치지 않는다 (spec §3). 여기에
+        // 표식을 붙이거나 떼면 그 변화가 바깥 블록의 innerHTML 에 실려, 그 블록을
+        // 편집하는 순간 저장본으로 샌다 (INV-9). 블록 밖 흉내는 어느 블록의 내용도
+        // 아니라 칠해도 새지 않는다.
+        if (mimicked(el)) continue;
         const show = locked.has(Number(el.getAttribute(MARKER))) && (el.textContent ?? '').trim();
         if (show) el.setAttribute(LOCKED, '');
         else el.removeAttribute(LOCKED);
@@ -668,6 +716,9 @@ export function previewAgent(): () => void {
    */
   const paintContrast = (): void => {
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
+      // 다른 마커 안의 마커는 흉내다 — 명암 표식을 붙였다 떼면 그 변화가 바깥 블록의
+      // innerHTML 에 실려 저장본으로 샌다 (spec §3 · INV-9).
+      if (mimicked(el)) continue;
       const layers: [number, number, number, number][] = [];
       let node: HTMLElement | null = el;
       while (node) {

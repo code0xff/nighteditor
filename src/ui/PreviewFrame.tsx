@@ -66,10 +66,12 @@ export function PreviewFrame() {
   }, [t, previewDoc, scanned]);
 
   // 대조가 끝나 잠금이 확정되면 프리뷰에 알린다. UI 차단만으로는 부족하다 (INV-5).
+  // 실제 블록 id 전부(all)도 함께 보낸다 — 문서가 data-ne-id 를 흉내 낼 수 있어,
+  // 에이전트는 이 명단에 없는 표식을 블록으로 치지 않는다 (spec §3).
   useEffect(() => {
     if (!scanned) return;
     const ids = blocks.filter((b) => b.locked !== null).map((b) => b.id);
-    const msg: ToPreview = { type: 'locked', ids };
+    const msg: ToPreview = { type: 'locked', ids, all: blocks.map((b) => b.id) };
     frame.current?.contentWindow?.postMessage(msg, '*');
   }, [scanned, blocks]);
 
