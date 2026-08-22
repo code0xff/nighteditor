@@ -76,12 +76,16 @@ export function previewAgent(token = ''): () => void {
    */
   let known: Set<number> | null = null;
   /**
-   * 대조 때 훑은 id → **그 요소**. 명단(known)은 번호만 가려서, 스크립트가 대조
+   * 대조 때 훑은 id → **그 요소들**. 명단(known)은 번호만 가려서, 스크립트가 대조
    * 뒤에 같은 번호의 요소를 하나 더 만들면 번호 검사는 통과한다 — 그 가짜를 눌러
    * 확정하면 가짜의 내용이 진짜 블록의 자리에 저장된다 (spec §3). 여기 기억해 둔
    * 그 요소가 아니면 번호가 맞아도 블록으로 치지 않는다. null 이면 아직 안 훑었다.
+   *
+   * 같은 id 로 훑힌 요소가 여럿이면 **전부** 남긴다 (spec §3). 겹침은 호스트가
+   * MARKER_CLASH 로 잠그는데, 첫 요소만 남기면 겹친 나머지(대개 진짜 블록)가
+   * 블록 판정에서 떨어져 — 눌러도 잠금 안내 없이 클릭이 아티팩트 핸들러로 샌다.
    */
-  let verifiedEl: Map<number, HTMLElement> | null = null;
+  let verifiedEl: Map<number, HTMLElement[]> | null = null;
   /**
    * 대조(ADR-005)가 끝나 잠금 목록을 받았는가. 그 전에는 편집을 열지 않는다 —
    * 이때 연 편집은 대조가 그 블록을 잠그는 순간 저장에서 지워져 화면과 저장본이
@@ -90,16 +94,20 @@ export function previewAgent(token = ''): () => void {
   let verified = false;
 
   /**
-   * 지금 문서의 진짜 표식들을 id → 요소로 적어 둔다. 같은 id 가 겹치면 첫 요소를
-   * 남긴다 — 겹침은 호스트의 대조가 MARKER_CLASH 로 잠그므로 어차피 편집이 안 열린다.
+   * 지금 문서의 진짜 표식들을 id → 요소들로 적어 둔다. 같은 id 가 겹쳐도 버리지
+   * 않는다 — 겹침은 호스트가 MARKER_CLASH 로 잠그지만, 잠금 안내와 클릭 차단은
+   * 겹친 **모든** 요소에 닿아야 한다 (spec §3). 첫 요소만 남기면 나머지 요소의
+   * 클릭이 안내 없이 아티팩트 핸들러로 흘러간다.
    */
-  const snapshotMarkers = (): Map<number, HTMLElement> => {
-    const map = new Map<number, HTMLElement>();
+  const snapshotMarkers = (): Map<number, HTMLElement[]> => {
+    const map = new Map<number, HTMLElement[]>();
     for (const el of document.querySelectorAll<HTMLElement>('[' + MARKER + ']')) {
       // 다른 마커 안의 마커는 흉내다 — 진짜 블록은 겹치지 않는다 (spec §3).
       if (mimicked(el)) continue;
       const id = Number(el.getAttribute(MARKER));
-      if (!map.has(id)) map.set(id, el);
+      const seen = map.get(id);
+      if (seen) seen.push(el);
+      else map.set(id, [el]);
     }
     return map;
   };
@@ -110,7 +118,7 @@ export function previewAgent(token = ''): () => void {
    */
   const elementFor = (id: number): HTMLElement | null =>
     verifiedEl
-      ? (verifiedEl.get(id) ?? null)
+      ? (verifiedEl.get(id)?.[0] ?? null)
       : document.querySelector<HTMLElement>('[' + MARKER + '="' + id + '"]');
 
   /** 짚어둔 표시를 지운다 */
@@ -139,8 +147,10 @@ export function previewAgent(token = ''): () => void {
         const id = Number(el.getAttribute(MARKER));
         // 번호만으로는 모자란다 — 대조 뒤에 끼워 넣은 같은 번호의 요소는 명단
         // 검사를 통과한다. 대조 때 훑은 **그 요소**여야 블록이다 (spec §3).
+        // 겹친 id 로 훑힌 요소들은 전부 블록으로 친다 — 어느 쪽을 눌러도 잠금
+        // 안내(MARKER_CLASH)로 가고, 클릭이 아티팩트 핸들러로 새지 않는다.
         if (
-          (verifiedEl === null || verifiedEl.get(id) === el) &&
+          (verifiedEl === null || (verifiedEl.get(id)?.includes(el as HTMLElement) ?? false)) &&
           (known === null || known.has(id))
         ) {
           return el as HTMLElement;
@@ -745,10 +755,14 @@ export function previewAgent(token = ''): () => void {
       // 칠하는 대상은 대조 때 훑은 요소들이다. 문서 전체를 다시 뒤지면 그 사이
       // 끼워 넣은 흉내에도 표식을 칠하게 된다 — 흉내에 붙는 표식은 화면만 어지럽히지만,
       // 편집 판정과 같은 명단을 쓰는 쪽이 어긋날 자리가 없다 (spec §3).
-      for (const [id, el] of verifiedEl) {
-        const show = locked.has(id) && (el.textContent ?? '').trim();
-        if (show) el.setAttribute(LOCKED, '');
-        else el.removeAttribute(LOCKED);
+      // 겹친 id 는 훑힌 요소 전부에 칠한다 — 첫 요소만 칠하면 겹친 나머지(대개
+      // 진짜 블록)에는 잠금 표시가 없어, 잠겨 있는데 고칠 수 있어 보인다.
+      for (const [id, els] of verifiedEl) {
+        for (const el of els) {
+          const show = locked.has(id) && (el.textContent ?? '').trim();
+          if (show) el.setAttribute(LOCKED, '');
+          else el.removeAttribute(LOCKED);
+        }
       }
     } else if (msg.type === 'labels' && msg.labels) {
       labels = msg.labels;

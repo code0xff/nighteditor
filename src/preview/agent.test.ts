@@ -1394,6 +1394,26 @@ describe('previewAgent · 문서가 우리 표식을 흉내 낼 때 (spec §3)',
     expect(String(edit?.html)).toBe('본문');
   });
 
+  it('겹친 id 는 어느 요소를 눌러도 잠금 안내로 간다 — 클릭이 아티팩트로 새지 않는다', () => {
+    // 가짜가 문서 앞쪽에 있으면 첫 요소만 남기는 훑기는 가짜를 기억한다 — 진짜 요소의
+    // 클릭이 "그 요소" 검사에서 떨어져, blocked 안내도 없이 아티팩트 핸들러로 흘러간다.
+    mount(`<div ${MARKER_ATTR}="0">가짜</div><p ${MARKER_ATTR}="0">진짜</p>`, {
+      verified: false,
+    });
+    // 호스트의 대조는 겹친 id 를 MARKER_CLASH 로 잠근다 (spec §3).
+    fromHost({ type: 'locked', ids: [0], all: [0] });
+    const artifact = vi.fn();
+    document.addEventListener('click', artifact);
+    sent = [];
+
+    click(document.querySelector(`p[${MARKER_ATTR}="0"]`)!);
+
+    expect(sent).toContainEqual({ type: 'blocked', id: 0 });
+    expect(artifact).not.toHaveBeenCalled();
+    // 잠금 표식도 겹친 요소 전부에 칠한다 — 진짜 요소만 비면 고칠 수 있어 보인다.
+    expect(document.querySelector(`p[${MARKER_ATTR}="0"]`)!.hasAttribute(LOCKED_ATTR)).toBe(true);
+  });
+
   it('블록 안의 흉내에는 잠금 표식을 칠하지 않는다 — 내용에 실려 저장본으로 샌다', () => {
     // 흉내가 미리 달고 온 data-ne-locked 를 떼면 그 변화가 바깥 블록의 innerHTML 에
     // 실려, 그 블록을 편집하는 순간 저장본이 바뀐다 (INV-9).
