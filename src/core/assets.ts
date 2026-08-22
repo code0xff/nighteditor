@@ -440,23 +440,77 @@ function endOfString(css: string, at: number): number {
   return css.length;
 }
 
+/**
+ * CSS 이스케이프를 푼다 (CSS Syntax §4.3.7).
+ *
+ * `url(my\ file.png)` 의 경로는 `my file.png` 다 — 안 풀면 백슬래시째 묶음의 키를
+ * 찾아 실제로 옆에 있는 파일을 없다고 센다. 16진 이스케이프는 뒤따르는 공백
+ * 하나까지가 이스케이프다 (`\61 b` 는 `ab`).
+ */
+function decodeCssEscapes(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '\\') {
+      out += text[i];
+      i++;
+      continue;
+    }
+    const hex = /^[0-9a-f]{1,6}/i.exec(text.slice(i + 1, i + 7));
+    if (hex) {
+      const code = parseInt(hex[0], 16);
+      // 사양대로 0·서로게이트·범위 밖은 U+FFFD 다 — 지어낸 문자를 만들지 않는다.
+      out +=
+        code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
+          ? '�'
+          : String.fromCodePoint(code);
+      i += 1 + hex[0].length;
+      // 16진 뒤의 공백 하나는 이스케이프의 일부다. CRLF 는 한 덩어리로 센다.
+      if (text[i] === '\r' && text[i + 1] === '\n') i += 2;
+      else if (/[ \t\n\r\f]/.test(text[i] ?? '')) i++;
+      continue;
+    }
+    // `\` 뒤의 개행은 문자열 안의 줄 잇기다 — 아무 문자도 남기지 않는다.
+    if (/[\n\r\f]/.test(text[i + 1] ?? '')) {
+      i += text[i + 1] === '\r' && text[i + 2] === '\n' ? 3 : 2;
+      continue;
+    }
+    // 그 밖의 `\X` 는 X 그대로다. 끝에 홀로 남은 `\` 는 적힌 대로 둔다.
+    out += text[i + 1] ?? '\\';
+    i += 2;
+  }
+  return out;
+}
+
+/**
+ * 되적을 조각의 CSS 이스케이프. 풀어 둔 값을 그대로 적으면 따옴표·괄호·공백이
+ * `url()` 토큰을 끊는다 — 그 글자들만 16진으로 잠근다. 16진 뒤에 붙인 공백까지가
+ * 이스케이프라 다음 글자와 붙어 읽히지 않는다.
+ */
+function encodeCssValue(text: string): string {
+  return text.replace(/[\s"'()\\]/g, (c) => `\\${(c.codePointAt(0) ?? 0).toString(16)} `);
+}
+
 /** `url(` 다음부터 닫는 괄호까지를 뜯는다. 값 자체가 따옴표에 싸여 있을 수 있다 */
-function readUrl(css: string, at: number): { raw: string; quote: string; end: number } | null {
+function readUrl(css: string, at: number): { value: string; quote: string; end: number } | null {
   let i = at;
   while (i < css.length && /\s/.test(css[i] ?? '')) i++;
 
   const quote = css[i] === '"' || css[i] === "'" ? (css[i] as string) : '';
   if (quote) {
     const close = endOfString(css, i);
-    const raw = css.slice(i + 1, close - 1);
+    const value = decodeCssEscapes(css.slice(i + 1, close - 1));
     let j = close;
     while (j < css.length && /\s/.test(css[j] ?? '')) j++;
-    return css[j] === ')' ? { raw, quote, end: j + 1 } : null;
+    return css[j] === ')' ? { value, quote, end: j + 1 } : null;
   }
 
-  const close = css.indexOf(')', i);
-  if (close < 0) return null;
-  return { raw: css.slice(i, close).trim(), quote: '', end: close + 1 };
+  // 따옴표 없는 url 토큰은 **이스케이프되지 않은** `)` 에서 끝난다. indexOf 로 찾으면
+  // `url(foo\)bar.png)` 가 이스케이프된 괄호에서 잘려 없는 경로를 찾는다.
+  let j = i;
+  while (j < css.length && css[j] !== ')') j += css[j] === '\\' ? 2 : 1;
+  if (j >= css.length) return null;
+  return { value: decodeCssEscapes(css.slice(i, j).trim()), quote: '', end: j + 1 };
 }
 
 /**
@@ -495,11 +549,12 @@ export function rewriteCssUrls(css: string, baseDir: string, resolve: Resolve): 
       !/[-\w\u0080-\uffff]/.test(css[i - 1] ?? '')
     ) {
       const token = readUrl(css, i + 4);
-      const path = token ? resolvePath(baseDir, token.raw) : null;
+      const path = token ? resolvePath(baseDir, token.value) : null;
       const url = path === null ? undefined : resolve(path);
       if (token && url) {
-        const { suffix } = splitSuffix(token.raw.trim());
-        out += `url(${token.quote}${url}${blobSuffix(suffix)}${token.quote})`;
+        const { suffix } = splitSuffix(token.value.trim());
+        // 조각은 이스케이프를 푼 값이다 — 토큰을 끊는 글자만 다시 잠가 되적는다.
+        out += `url(${token.quote}${url}${encodeCssValue(blobSuffix(suffix))}${token.quote})`;
         i = token.end;
         continue;
       }

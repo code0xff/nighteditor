@@ -298,6 +298,40 @@ describe('rewriteCssUrls', () => {
       'a{background:red url(blob:bg.png),url(blob:bg.png)}'
     );
   });
+
+  it('이스케이프된 괄호에서 값을 끊지 않는다 — 푼 값이 경로다', () => {
+    // indexOf(')') 로 찾으면 `foo\` 까지만 읽어, 멀쩡한 CSS 의 자원이 영영 붙지 않는다.
+    expect(rewriteCssUrls('a{background:url(foo\\)bar.png)}', '', fake)).toBe(
+      'a{background:url(blob:foo)bar.png)}'
+    );
+  });
+
+  it('이스케이프를 푼 뒤에 경로로 해석한다 — 묶음의 키는 디스크의 이름이다', () => {
+    // 문자 이스케이프(`\ `)와 16진 이스케이프(`\61 `, 뒤 공백까지가 이스케이프) 모두.
+    expect(rewriteCssUrls('a{background:url(my\\ file.png)}', '', fake)).toBe(
+      'a{background:url(blob:my file.png)}'
+    );
+    expect(rewriteCssUrls('a{background:url(sp\\61 ce.png)}', '', fake)).toBe(
+      'a{background:url(blob:space.png)}'
+    );
+  });
+
+  it('따옴표 값 안의 이스케이프도 푼다', () => {
+    expect(rewriteCssUrls('a{background:url("we\\"ird.png")}', '', (path) =>
+      path === 'we"ird.png' ? 'blob:ok' : undefined
+    )).toBe('a{background:url("blob:ok")}');
+  });
+
+  it('되적는 조각은 토큰을 끊는 글자만 다시 잠근다', () => {
+    // 풀린 조각의 `)` 를 그대로 적으면 url() 이 그 자리에서 닫힌다 — 16진으로 잠근다.
+    expect(rewriteCssUrls('a{clip-path:url(s.svg\\#i\\)x)}', '', fake)).toBe(
+      'a{clip-path:url(blob:s.svg#i\\29 x)}'
+    );
+    // 평범한 조각은 그대로 나간다.
+    expect(rewriteCssUrls('a{clip-path:url(s.svg#round)}', '', fake)).toBe(
+      'a{clip-path:url(blob:s.svg#round)}'
+    );
+  });
 });
 
 describe('styleEdits', () => {
