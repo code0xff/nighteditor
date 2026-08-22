@@ -396,6 +396,13 @@ those screens get.
 JavaScript is for the cases where the answer changes behaviour — what is reachable by tab, which
 sentence is true on this device. A size is looks, so it stays a variant and never becomes state.
 
+**Height is only half of it** Below `lg` every control in the header is an icon with no label. Where
+the width was padding plus a glyph it stayed put while the height grew, and those controls stood as
+rectangles between the square icon buttons. `chrome` and the two icon-only select triggers therefore
+carry a minimum width equal to the row height; a label grows the control past it on its own. At 360px
+this leaves the row filling the window exactly, so anything added to it has to take its width from
+something already there.
+
 **Consequence** A control that opts out of the scale opts out visibly. The save button had been one
 step smaller than its neighbours and sat 4px low in the row; with `chrome` there is no size to pass
 that could do that again without saying so.

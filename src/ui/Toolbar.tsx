@@ -39,9 +39,11 @@ export function Toolbar() {
     // notice, so the flexible element is the one that gives.
     //
     // Hence the thin side padding below `sm`: with a five document bundle open
-    // — every control this row can hold — it lands within a pixel of a 320px
-    // window, and this is the pixel.
-    <header className="sticky top-0 z-10 flex h-12 items-center gap-1 border-b border-border bg-background/80 px-1.5 backdrop-blur sm:gap-3 sm:px-3">
+    // — every control this row can hold — the row lands within a pixel or two
+    // of the narrowest window each scale has to survive (320px dense, 360px
+    // grown), and this is where those pixels come from. Between the controls
+    // the gaps stay: two targets that touch are worse than a tight edge.
+    <header className="sticky top-0 z-10 flex h-12 items-center gap-1 border-b border-border bg-background/80 px-1 backdrop-blur sm:gap-3 sm:px-3">
       <Brand />
 
       <OpenButton />

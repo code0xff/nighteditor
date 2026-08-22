@@ -106,7 +106,7 @@ describe('Toolbar · the title field locks during replacement (spec §4)', () =>
   });
 });
 
-describe('Toolbar · the header row is one height (spec §4 · ADR-013)', () => {
+describe('Toolbar · the header row is one shape (spec §4 · ADR-013)', () => {
   it('every control carries the row height, and a taller step for a fingertip', () => {
     // The save button used to be one size smaller than its neighbours and sat
     // 4px low. What that costs is not obvious in the markup, so assert it here:
@@ -117,6 +117,19 @@ describe('Toolbar · the header row is one height (spec §4 · ADR-013)', () => 
     for (const control of controls) {
       expect(control.className).toMatch(/(^|\s)h-8(\s|$)/);
       expect(control.className).toMatch(/(^|\s)touch:h-10(\s|$)/);
+    }
+  });
+
+  it('carries a matching width, so an icon-only control is square', () => {
+    // Height alone is not enough. Below `lg` these controls are all icon and
+    // no label, and the ones whose width was padding plus a glyph came out
+    // narrower than they were tall — standing rectangles between the square
+    // icon buttons, which is what the grown touch sizes made obvious.
+    const controls = [...document.querySelectorAll('header button, header a')];
+
+    for (const control of controls) {
+      expect(control.className).toMatch(/(^|\s)(w-8|min-w-8)(\s|$)/);
+      expect(control.className).toMatch(/(^|\s)touch:(w-10|min-w-10)(\s|$)/);
     }
   });
 });

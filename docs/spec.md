@@ -393,8 +393,14 @@ until it is about 32px of target. This follows the pointer, not the window width
 narrow window on a desktop is still driven by a mouse, and a tablet is not however
 wide it is. One exception, and it is measured — under 360px the grown controls put
 the header 24px past the edge, so those screens keep the dense sizes (ADR-013).
-Within either scale the header row is **one height**; a control one step smaller sits
-visibly low among the icon buttons.
+Within either scale the header row is **one shape**. Height alone is not enough:
+below `lg` every control there is an icon with no label, and the ones whose width is
+only padding plus a glyph come out narrower than they are tall — standing rectangles
+between the square icon buttons, which the grown sizes make plain. So each carries a
+minimum width equal to the row height, and anything with a label grows past it on its
+own. At 360px, grown, with every control the header can hold, the row fills the window
+exactly — there is nothing left over, and something new in that row has to buy its
+width from something already there.
 
 Every toolbar item but the title field is `shrink-0`. Without that the row never
 reports an overflow at all — the controls quietly squash instead, and the 28px app

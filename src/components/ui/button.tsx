@@ -5,7 +5,7 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0 touch:[&_svg]:size-4',
   {
     variants: {
       variant: {
@@ -26,9 +26,12 @@ const buttonVariants = cva(
         sm: 'h-7 touch:h-9 rounded-md px-2.5 text-xs',
         lg: 'h-9 touch:h-11 rounded-md px-6',
         icon: 'h-8 w-8 touch:h-10 touch:w-10',
-        // The header row. Same height as `default`, `sm`'s tighter sides —
-        // below `lg` these buttons are icon-only and the width is spoken for.
-        chrome: 'h-8 touch:h-10 rounded-md px-2.5',
+        // The header row. Below `lg` these buttons carry no label, and a
+        // width that is only padding plus a glyph leaves them narrower than
+        // they are tall — a standing rectangle beside the square icon
+        // buttons. The floor is the row height, so an icon-only one comes out
+        // square; anything with a label grows past it on its own.
+        chrome: 'h-8 min-w-8 touch:h-10 touch:min-w-10 rounded-md px-2 lg:px-2.5',
       },
     },
     defaultVariants: {
