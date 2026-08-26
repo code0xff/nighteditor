@@ -53,9 +53,27 @@ export default defineConfig(({ command }) => ({
         ],
       },
       workbox: {
-        // Precache the whole app. With no backend, that is all it takes to be
-        // fully offline.
-        globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        // Precache the whole app except the fonts. With no backend, that is all it
+        // takes to be fully offline.
+        //
+        // The fonts stay out because Pretendard ships as 93 unicode-range slices
+        // totalling 3.0MB and a session touches a handful of them — precaching all
+        // of them would spend 3MB to have the few that get used. They are cached on
+        // first use instead, which leaves exactly one case seeing the fallback
+        // stack: a first visit made offline.
+        globPatterns: ['**/*.{js,css,html,png,svg}'],
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.destination === 'font',
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'fonts',
+              // The slices are content-hashed, so a cached one is never stale.
+              expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
       },
     }),
   ],

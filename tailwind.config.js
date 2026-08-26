@@ -28,6 +28,10 @@ export default {
           'sans-serif',
         ],
         mono: [
+          // The bundled face registers under the `Variable` name; the plain one is
+          // for a reader who happens to have JetBrains Mono installed. Same shape
+          // as the sans stack above.
+          'JetBrains Mono Variable',
           'JetBrains Mono',
           'ui-monospace',
           'SFMono-Regular',

@@ -43,7 +43,9 @@ Pick the UI language — **한국어 / English** — in the toolbar.
 
 The install button in the address bar installs it like an app. Once installed:
 
-- **It works offline.** There is no backend, so the entire app is pre-cached
+- **It works offline.** There is no backend, so the app is pre-cached. The fonts
+  are the one thing fetched on first use, and they come from this site too — no
+  request ever leaves for anywhere else
 - **The OS can open HTML with it directly.** Right-click a file and open it with
   nighteditor: editing starts without a file picker, and overwriting the original
   still works

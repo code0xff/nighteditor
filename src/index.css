@@ -1,5 +1,14 @@
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Self-hosted, not pulled from a CDN. A font served from someone else's host puts
+   every visitor's IP in front of a third party on load, and this is the app that
+   says the document never leaves the machine — a promise worth being able to show
+   with an empty network tab rather than only assert. Both faces ship from
+   node_modules and come out as ordinary hashed assets.
+
+   Pretendard arrives as 93 unicode-range slices (3.0MB all told), so the browser
+   fetches only the few the interface's glyphs fall into. That is also why the
+   fonts are cached on first use instead of precached — see vite.config.ts. */
+@import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
 
 @tailwind base;
 @tailwind components;

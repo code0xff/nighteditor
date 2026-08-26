@@ -16,7 +16,9 @@ Design background lives in [architecture.md](architecture.md); detection rules i
 
 Installing adds two things.
 
-- **It works offline.** There is no backend, so the entire app is pre-cached
+- **It works offline.** There is no backend, so the app is pre-cached. The fonts
+  are the one thing fetched on first use, and they come from this site too — no
+  request ever leaves for anywhere else
 - **The OS opens files with it directly.** Right-click an HTML file and open it with
   nighteditor: editing starts without a file picker, and overwriting the original
   still works

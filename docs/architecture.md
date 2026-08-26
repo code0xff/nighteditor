@@ -7,7 +7,7 @@
 | Language | TypeScript (`strict`) | Offset and range math is the core; a type error here is data corruption |
 | Build | Vite | Static output, with local `file://` execution in mind |
 | UI | React | Matches the house style of the `design-ui` skill |
-| Styling | Tailwind CSS + shadcn/ui | Use the `design-ui` skill for UI work (Pretendard / JetBrains Mono, dev-tool tone). One variant of our own, `touch:`, lives in `tailwind.config.js` — ADR-013 |
+| Styling | Tailwind CSS + shadcn/ui | Use the `design-ui` skill for UI work (Pretendard / JetBrains Mono, both shipped with the app rather than fetched — ADR-014; dev-tool tone). One variant of our own, `touch:`, lives in `tailwind.config.js` — ADR-013 |
 | State | Zustand | It is just a patch list and selection state; anything more is overkill |
 | HTML parser | **parse5** (`sourceCodeLocationInfo: true`) | A spec-compliant implementation that yields source offsets. The heart of this project |
 | Editor | **Native `contenteditable`** | See ADR-004 — rich text frameworks are banned |
@@ -212,7 +212,8 @@ with a download fallback for unsupported browsers.
 and stored XSS, origin isolation, and authentication all follow. Removing it is cheaper and safer.
 
 **Deployment** Hosted on GitHub Pages (static). HTTPS satisfies the secure-context requirement,
-so overwrite saving just works. Installed as a PWA, the whole app is precached and runs offline,
+so overwrite saving just works. Installed as a PWA, the app is precached and runs offline — every
+part but the fonts, which are same-origin and cached on first use instead (ADR-014) —
 and the manifest's `file_handlers` lets the OS open HTML with it directly. In that path `launchQueue`
 delivers a `FileSystemFileHandle`, so overwriting works without any dialog.
 
@@ -406,3 +407,31 @@ something already there.
 **Consequence** A control that opts out of the scale opts out visibly. The save button had been one
 step smaller than its neighbours and sat 4px low in the row; with `chrome` there is no size to pass
 that could do that again without saying so.
+
+### ADR-014 · The fonts ship with the app, and are cached on first use
+
+**Decision** Pretendard and JetBrains Mono come from `node_modules` and are emitted as ordinary
+hashed assets (`src/index.css`), not pulled from jsdelivr and Google Fonts as they were. They are
+the one part of the build left out of the precache; a `CacheFirst` runtime rule stores each slice
+the first time it is asked for (`vite.config.ts`).
+
+**Why not a CDN** Principle 5 says user files never leave this machine, and that held — but a
+stylesheet `@import` from someone else's host is still a request from the reader's browser to a
+third party, carrying their IP and a referrer, on every load. The promise a reader can check is
+worth more than the one they have to take on faith: with the fonts local, an empty network tab is
+the whole proof. Nothing is fetched from anywhere but this origin.
+
+**Why not precache them too** Pretendard arrives as 92 unicode-range slices totalling 3.0MB, and a
+session touches a handful — the interface's glyphs fall into only a few ranges. Precaching all of
+them would spend 3MB to have the ones that get used, on every install. The runtime rule keeps the
+precache at 644KB and pays for a slice only when a glyph needs it. The slices are content-hashed,
+so a cached one is never stale.
+
+**Consequence** One case sees the fallback stack: a first visit made offline. Every later visit,
+online or not, has what it already fetched. The cost is on the stylesheet, which grew from 6.1KB to
+23.9KB gzipped, since the 92 `@font-face` rules now ship inline.
+
+**Watch the family name** The bundled faces register as `Pretendard Variable` and
+`JetBrains Mono Variable`; the stacks in `tailwind.config.js` list the `Variable` name first and the
+plain one after it, for a reader who has the font installed. A stack naming only the plain one falls
+through to the system face without any sign that it did.
