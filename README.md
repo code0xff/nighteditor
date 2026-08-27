@@ -102,7 +102,7 @@ pnpm verify   # typecheck + lint + format + test + build
 Regression tests run against `src/__fixtures__/artifact.html`. When you create a new
 rule, first add the structure that motivated it to the fixture, then write the test.
 
-`dev` is the only branch. The working rules start at [AGENTS.md](AGENTS.md).
+The working rules start at [AGENTS.md](AGENTS.md).
 
 ```bash
 git config core.hooksPath .githooks   # once after cloning — forces verify before push
