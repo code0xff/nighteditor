@@ -1092,13 +1092,6 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   /**
-   * Switches to another document in the same bundle (spec §5.1).
-   *
-   * Uses the already-unpacked files — re-unpacking the zip is wasted work.
-   * The preview is redrawn, so edits are lost. Whether that is acceptable is
-   * asked by the caller first.
-   */
-  /**
    * Closes the open document and returns to the initial screen.
    *
    * It **changes** the document, so it walks the same road as opening — reserve
@@ -1121,6 +1114,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     }
   },
 
+  /**
+   * Switches to another document in the same bundle (spec §5.1).
+   *
+   * Uses the already-unpacked files — re-unpacking the zip is wasted work.
+   * The preview is redrawn, so edits are lost. Whether that is acceptable is
+   * asked by the caller first.
+   */
   openFromBundle: async (path) => {
     const { bundle, docPath } = get();
     if (!bundle || path === docPath) return;
