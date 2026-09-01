@@ -3,96 +3,14 @@ import {
   assetBoundary,
   assetEdits,
   assetSwaps,
-  cssAssetPaths,
-  dirOf,
   documentBaseDir,
   parseAssetRefs,
-  resolvePath,
-  rewriteCssUrls,
   styleEdits,
 } from './assets.js';
 import { applyEdits } from './edits.js';
 
 /** Turns a path into a blob impostor as-is */
 const fake = (path: string): string => `blob:${path}`;
-
-describe('resolvePath', () => {
-  it('resolves against the document location', () => {
-    expect(resolvePath('', 'deck.css')).toBe('deck.css');
-    expect(resolvePath('slides', 'deck.css')).toBe('slides/deck.css');
-    expect(resolvePath('slides/2026', '../deck.css')).toBe('slides/deck.css');
-    expect(resolvePath('slides', './img/logo.png')).toBe('slides/img/logo.png');
-  });
-
-  it('absolute paths resolve against the bundle root', () => {
-    expect(resolvePath('slides/2026', '/assets/deck.css')).toBe('assets/deck.css');
-  });
-
-  it('leaves outward references alone', () => {
-    // Either the browser can already fetch them, or they are not assets at all.
-    for (const url of [
-      'https://cdn.example.com/a.css',
-      '//cdn.example.com/a.css',
-      'data:image/png;base64,AAAA',
-      'blob:https://example.com/x',
-      'mailto:um@kdccy.com',
-      '#section',
-      '',
-      '   ',
-    ]) {
-      expect(resolvePath('', url)).toBeNull();
-    }
-  });
-
-  it('strips query strings and anchors', () => {
-    expect(resolvePath('', 'deck.css?v=3')).toBe('deck.css');
-    expect(resolvePath('', 'sprite.svg#icon')).toBe('sprite.svg');
-  });
-
-  it('turns percent-encoding back into the real file name', () => {
-    // The bundle key is the name on disk, not the spelling in the document.
-    expect(resolvePath('', 'my%20deck.css')).toBe('my deck.css');
-  });
-
-  it('collapses encoded dot segments as dots too (spec §5.1)', () => {
-    // The URL spec collapses %2e segments as dot segments. Decoding after collapsing
-    // leaves deck/sub's %2e%2e/logo.png as deck/sub/../logo.png, counting the
-    // deck/logo.png that really sits there as missing.
-    expect(resolvePath('deck/sub', '%2e%2e/logo.png')).toBe('deck/logo.png');
-    expect(resolvePath('deck/sub', '%2E%2E/logo.png')).toBe('deck/logo.png');
-    expect(resolvePath('deck/sub', '%2e/logo.png')).toBe('deck/sub/logo.png');
-  });
-
-  it('leaves badly encoded segments written as-is and decodes the rest', () => {
-    // Decoding the whole string and failing would leave even healthy segments in
-    // their spelling — decode segment by segment.
-    expect(resolvePath('', '100%/my%20deck.css')).toBe('100%/my deck.css');
-  });
-
-  it('does not decode %2F inside a segment into a separator (spec §5.1)', () => {
-    // A file name on disk cannot contain a slash — decoded, part of the name turns
-    // into a path separator, and the nonexistent a/b.png is looked up instead of the
-    // real file a%2Fb.png.
-    expect(resolvePath('', 'a%2Fb.png')).toBe('a%2Fb.png');
-    // Its spelling (case) stays as written — the bundle key is the name on disk.
-    expect(resolvePath('', 'a%2fb.png')).toBe('a%2fb.png');
-    // Other encodings in the same segment still decode.
-    expect(resolvePath('', 'img/a%2Fb%20c.png')).toBe('img/a%2Fb c.png');
-    // The %25 of %252F decodes to % — not to %2F itself.
-    expect(resolvePath('', 'a%252Fb.png')).toBe('a%2Fb.png');
-  });
-
-  it('does not escape past the root', () => {
-    expect(resolvePath('', '../../etc/passwd')).toBe('etc/passwd');
-  });
-});
-
-describe('dirOf', () => {
-  it('gives the directory the document sits in', () => {
-    expect(dirOf('slides/deck.html')).toBe('slides');
-    expect(dirOf('deck.html')).toBe('');
-  });
-});
 
 describe('parseAssetRefs', () => {
   it('finds attributes that point at assets', () => {
@@ -266,86 +184,6 @@ describe('assetEdits · encoding the decoded fragment (INV-8)', () => {
   });
 });
 
-describe('rewriteCssUrls', () => {
-  it('resolves relative paths inside a stylesheet against that file location', () => {
-    // A blob URL has no directory. Left unchanged, every font breaks.
-    const css = "@font-face{src:url('fonts/x.woff2')}";
-
-    expect(rewriteCssUrls(css, 'assets', fake)).toBe(
-      "@font-face{src:url('blob:assets/fonts/x.woff2')}"
-    );
-  });
-
-  it('preserves quoting style and whitespace', () => {
-    expect(rewriteCssUrls('a{background:url(bg.png)}', '', fake)).toBe(
-      'a{background:url(blob:bg.png)}'
-    );
-    expect(rewriteCssUrls('a{background:url( "bg.png" )}', '', fake)).toBe(
-      'a{background:url("blob:bg.png")}'
-    );
-  });
-
-  it('leaves external URLs and unfound assets alone', () => {
-    const css = 'a{background:url(https://cdn.example.com/x.png)}b{background:url(없다.png)}';
-
-    expect(rewriteCssUrls(css, '', () => undefined)).toBe(css);
-  });
-
-  it('url( in the middle of an identifier is part of the function name; do not rewrite', () => {
-    // Rewriting `--icon: myurl(x)` turns someone else's non-asset function into
-    // `myurl(blob:...)`.
-    const css = ':root{--icon: myurl(icon.png)}a{background:url(icon.png)}';
-
-    expect(rewriteCssUrls(css, '', fake)).toBe(
-      ':root{--icon: myurl(icon.png)}a{background:url(blob:icon.png)}'
-    );
-  });
-
-  it('rewrites url( after token boundaries like open parens, commas, whitespace', () => {
-    expect(rewriteCssUrls('a{background:red url(bg.png),url(bg.png)}', '', fake)).toBe(
-      'a{background:red url(blob:bg.png),url(blob:bg.png)}'
-    );
-  });
-
-  it('does not cut the value at an escaped paren — the decoded value is the path', () => {
-    // Searching with indexOf(')') reads only up to `foo\`, and the healthy CSS's
-    // asset never attaches.
-    expect(rewriteCssUrls('a{background:url(foo\\)bar.png)}', '', fake)).toBe(
-      'a{background:url(blob:foo)bar.png)}'
-    );
-  });
-
-  it('interprets the path after decoding escapes — the bundle key is the name on disk', () => {
-    // Both character escapes (`\ `) and hex escapes (`\61 `, the trailing space
-    // being part of the escape).
-    expect(rewriteCssUrls('a{background:url(my\\ file.png)}', '', fake)).toBe(
-      'a{background:url(blob:my file.png)}'
-    );
-    expect(rewriteCssUrls('a{background:url(sp\\61 ce.png)}', '', fake)).toBe(
-      'a{background:url(blob:space.png)}'
-    );
-  });
-
-  it('decodes escapes inside quoted values too', () => {
-    expect(
-      rewriteCssUrls('a{background:url("we\\"ird.png")}', '', (path) =>
-        path === 'we"ird.png' ? 'blob:ok' : undefined
-      )
-    ).toBe('a{background:url("blob:ok")}');
-  });
-
-  it('the written-back fragment re-locks only the token-breaking characters', () => {
-    // Writing the decoded fragment's `)` as-is closes url() right there — lock it as hex.
-    expect(rewriteCssUrls('a{clip-path:url(s.svg\\#i\\)x)}', '', fake)).toBe(
-      'a{clip-path:url(blob:s.svg#i\\29 x)}'
-    );
-    // An ordinary fragment goes out as it is.
-    expect(rewriteCssUrls('a{clip-path:url(s.svg#round)}', '', fake)).toBe(
-      'a{clip-path:url(blob:s.svg#round)}'
-    );
-  });
-});
-
 describe('styleEdits', () => {
   it('rewrites inside the document-embedded <style> too', () => {
     const source = '<style>body{background:url(bg.png)}</style><p>글</p>';
@@ -405,66 +243,6 @@ describe('queries and fragments of asset references', () => {
     const out = applyEdits(source, assetEdits(parseAssetRefs(source), fake));
 
     expect(out).toContain('href="blob:sprite.svg#icon"');
-  });
-
-  it('keeps fragments inside CSS too', () => {
-    expect(rewriteCssUrls('a{clip-path:url(shapes.svg#round)}', '', fake)).toBe(
-      'a{clip-path:url(blob:shapes.svg#round)}'
-    );
-  });
-
-  it('strips queries inside CSS too', () => {
-    expect(rewriteCssUrls('a{background:url("bg.png?v=3")}', '', fake)).toBe(
-      'a{background:url("blob:bg.png")}'
-    );
-    expect(rewriteCssUrls('@font-face{src:url(f.woff2?v=1#iefix)}', '', fake)).toBe(
-      '@font-face{src:url(blob:f.woff2#iefix)}'
-    );
-  });
-});
-
-describe('rewriteCssUrls · strings and comments', () => {
-  it('url( inside a string is characters, not an asset', () => {
-    // content is a value printed on screen. Changing it creates characters that
-    // were never there.
-    const css = `a::after{content:'url(icon.png)'}`;
-
-    expect(rewriteCssUrls(css, '', fake)).toBe(css);
-  });
-
-  it('does not touch the inside of comments either', () => {
-    const css = '/* url(icon.png) 는 예시다 */ a{background:url(icon.png)}';
-
-    expect(rewriteCssUrls(css, '', fake)).toBe(
-      '/* url(icon.png) 는 예시다 */ a{background:url(blob:icon.png)}'
-    );
-  });
-
-  it('rewrites quoted values and uppercase URL( too', () => {
-    expect(rewriteCssUrls('a{background:URL("bg.png")}', '', fake)).toBe(
-      'a{background:url("blob:bg.png")}'
-    );
-  });
-
-  it('leaves an unclosed url( alone', () => {
-    expect(rewriteCssUrls('a{background:url(bg.png', '', fake)).toBe('a{background:url(bg.png');
-  });
-});
-
-describe('cssAssetPaths', () => {
-  it('collects the asset paths CSS points at — counting what failed to attach needs the list', () => {
-    const css = '@font-face{src:url(fonts/x.woff2)}a{background:url("../img/bg.png")}';
-
-    expect(cssAssetPaths(css, 'assets')).toEqual(['assets/fonts/x.woff2', 'img/bg.png']);
-  });
-
-  it('does not count external URLs', () => {
-    expect(cssAssetPaths('a{background:url(https://cdn.example.com/x.png)}', '')).toEqual([]);
-  });
-
-  it("does not count url( attached to someone else's function name", () => {
-    // Counting it nags the user for a file unrelated to this document.
-    expect(cssAssetPaths(':root{--icon: myurl(icon.png)}', '')).toEqual([]);
   });
 });
 

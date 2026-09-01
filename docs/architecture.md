@@ -26,7 +26,9 @@ src/
     blocks.ts           editable-block detection rules (spec.md §2)
     markers.ts          data-ne-id injection / removal
     edits.ts            applies an offset edit list in one descending pass
-    assets.ts           finding external resource references · path resolution · the two-way boundary for preview URL swaps (ADR-011)
+    paths.ts            document-relative path resolution — the answer to "which file does this URL mean"
+    css.ts              the url() tokenizer. Rewrites what CSS points at, leaving strings and comments alone
+    assets.ts           finding external resource references · the two-way boundary for preview URL swaps (ADR-011)
     zip.ts              zip central directory parsing (extraction lives in lib/zip.ts)
     bundle.ts           rules for choosing what to open inside a bundle (folder·zip)
     patch.ts            patch list → splices into the original string

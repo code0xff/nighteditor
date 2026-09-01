@@ -5,7 +5,8 @@
  * Files never leave this machine (Principle 5). A blob URL is just a name tag
  * valid inside this tab — nothing is uploaded anywhere.
  */
-import { cssAssetPaths, dirOf, rewriteCssUrls } from '@/core/assets';
+import { cssAssetPaths, rewriteCssUrls } from '@/core/css';
+import { dirOf } from '@/core/paths';
 import type { AssetBundle } from './bundle';
 
 /** MIME type inferred from the extension */

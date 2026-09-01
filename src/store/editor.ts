@@ -30,6 +30,7 @@ import {
 import { keepEdits } from './unsaved';
 import type { AssetBoundary, AssetRef } from '@/core/assets';
 import { documentCandidates } from '@/core/bundle';
+import { dirOf } from '@/core/paths';
 
 export interface EditorState {
   file: OpenedFile | null;
@@ -450,20 +451,14 @@ async function load(
   const [
     { parseBlocks },
     { buildPreviewDocument },
-    {
-      assetBoundary,
-      assetSwaps,
-      cssAssetPaths,
-      dirOf,
-      documentBaseDir,
-      parseAssetRefs,
-      styleTexts,
-    },
+    { assetBoundary, assetSwaps, documentBaseDir, parseAssetRefs, styleTexts },
+    { cssAssetPaths },
     { buildAssets },
   ] = await Promise.all([
     import('@/core/parse'),
     import('@/lib/preview'),
     import('@/core/assets'),
+    import('@/core/css'),
     import('@/lib/assets'),
   ]);
   const docPath = member ? (file.path ?? '') : '';

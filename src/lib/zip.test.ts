@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { unzip } from './zip.js';
 import { documentCandidates, pickDocument } from '@/core/bundle';
-import { dirOf, parseAssetRefs } from '@/core/assets';
+import { parseAssetRefs } from '@/core/assets';
+import { dirOf } from '@/core/paths';
 import { fixtureBundle } from '../__fixtures__/load.js';
 
 const zip = (): Blob => new Blob([fixtureBundle() as BlobPart]);
