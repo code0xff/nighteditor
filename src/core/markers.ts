@@ -11,7 +11,7 @@ export const LOCKED_ATTR = 'data-ne-locked';
 export const DARK_ATTR = 'data-ne-dark';
 
 /** The mark attached to briefly point out a block picked from the change list */
-export const REVEALED_ATTR = 'data-ne-revealed';
+const REVEALED_ATTR = 'data-ne-revealed';
 
 export class MarkerError extends Error {}
 

@@ -266,7 +266,7 @@ export interface Picked {
   handle: FileHandle | null;
 }
 
-export const ACCEPT = '.html,.htm,.zip';
+const ACCEPT = '.html,.htm,.zip';
 
 /** Returns null when the user cancels */
 export async function pickFile(): Promise<Picked | null> {

@@ -12,7 +12,7 @@
  * emit them (§4.1), but documents made by others do contain them, and leaving one out
  * makes the whole paragraph that holds it uneditable.
  */
-export const INLINE_TAGS: ReadonlySet<string> = new Set([
+const INLINE_TAGS: ReadonlySet<string> = new Set([
   'b',
   'strong',
   'span',
@@ -55,7 +55,7 @@ export const RAW_TEXT_TAGS: ReadonlySet<string> = new Set(['script', 'style', 't
 export const RCDATA_TAGS: ReadonlySet<string> = new Set(['title']);
 
 /** Classes locked by default — manually highlighted code/JSON areas (spec §3) */
-export const CODE_BLOCK_CLASSES: readonly string[] = ['code', 'codebox'];
+const CODE_BLOCK_CLASSES: readonly string[] = ['code', 'codebox'];
 
 export function isInline(tag: string): boolean {
   return INLINE_TAGS.has(tag);
