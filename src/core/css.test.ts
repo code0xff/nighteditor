@@ -129,7 +129,7 @@ describe('cssAssetPaths', () => {
   });
 });
 
-describe('queries and fragments of asset references', () => {
+describe('queries and fragments inside CSS', () => {
   it('keeps fragments inside CSS too', () => {
     expect(rewriteCssUrls('a{clip-path:url(shapes.svg#round)}', '', fake)).toBe(
       'a{clip-path:url(blob:shapes.svg#round)}'

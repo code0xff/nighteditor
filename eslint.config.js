@@ -12,13 +12,21 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/consistent-type-imports': 'error',
       eqeqeq: ['error', 'always'],
-      // INV-2 · no whole-document re-serialization (docs/rules.md).
-      //
-      // Everywhere, not just core/. core/ cannot reach the DOM at all (INV-6), so
-      // there this could never fire; the code that *can* re-serialize is
-      // preview/agent.ts and store/editor.ts, and until now neither was watched.
-      // Reading one block's innerHTML stays allowed — the invariant is about the
-      // whole document.
+    },
+  },
+  {
+    // INV-2 · no whole-document re-serialization (docs/rules.md).
+    //
+    // The whole app, not just core/. core/ cannot reach the DOM at all (INV-6),
+    // so scoped there this could never fire; the code that *can* re-serialize is
+    // preview/agent.ts and store/editor.ts, and neither used to be watched.
+    // Reading one block's innerHTML stays allowed — the invariant is about the
+    // whole document.
+    //
+    // Build scripts are outside it. `serialize` there is whatever that script
+    // named it, not parse5's serializer.
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
       'no-restricted-syntax': [
         'error',
         {
