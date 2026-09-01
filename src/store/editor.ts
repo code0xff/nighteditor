@@ -363,6 +363,53 @@ async function replace(
   return next;
 }
 
+/**
+ * The scaffold every document-replacing flow shares (spec §5 · ADR-010).
+ *
+ * Reserve at the moment of the user's action, run, and release however it ends.
+ * Nine flows wrote this out by hand, and all nine had to get the same three
+ * things right: reserve before anything slow, keep quiet about a failure that
+ * is no longer this flow's to report, and release on every path out. A missed
+ * release leaves the screen locked with no way back.
+ *
+ * `within` carries an existing reservation instead of taking a new one. A flow
+ * that hands off to another — a drop deciding between folder and file — would
+ * displace itself by reserving again, and that gap is closed by the reservation,
+ * not by a comment (ADR-010).
+ *
+ * `fail` decides what a failure looks like, and is handed the reservation
+ * because what it may say depends on whether this flow is still the one on
+ * screen.
+ */
+async function withReplacement<T>(
+  run: (mine: Replacement) => Promise<T>,
+  fail: (e: unknown, mine: Replacement) => T,
+  within?: Replacement
+): Promise<T> {
+  const mine = within ?? reserveReplacement();
+  try {
+    return await run(mine);
+  } catch (e) {
+    return fail(e, mine);
+  } finally {
+    mine.release();
+  }
+}
+
+/**
+ * The failure most flows end in — "could not open", with whatever the browser
+ * said attached untranslated (spec §1 · UI language).
+ *
+ * A displaced flow says nothing. Its notice would be words about the screen the
+ * newest flow put up, sending the user hunting around a document that is
+ * perfectly fine (spec §5 · replacement reservation).
+ */
+const notifyOpenFailed =
+  (set: (next: Partial<EditorState>) => void) =>
+  (e: unknown, mine: Replacement): void => {
+    if (mine.current()) set({ notice: openFailedNotice(e) });
+  };
+
 function candidatesOf(files: ReadonlyMap<string, Blob>): string[] {
   return documentCandidates(files.keys());
 }
@@ -647,8 +694,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   openFile: async () => {
     set({ notice: null });
     // Reserve at the moment of the user action — before waiting on the dialog, the question, the save (spec §5).
-    const mine = reserveReplacement();
-    try {
+    await withReplacement(async (mine) => {
       // Open the dialog **first**. Opened after waiting on a save, the user gesture
       // has expired and the browser refuses the dialog (the File System Access API
       // demands a gesture). Newer flows (drop, OS launch) can start while it is
@@ -660,14 +706,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       // be pressed, leaving discard and cancel as the only choices.
       if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
       await replace(get, set, mine, openPicked(picked));
-    } catch (e) {
-      // Raw text a browser threw is attached untranslated (spec §1 · UI language).
-      // A displaced flow's failure would be words about someone else's (the newest
-      // flow's) screen — do not notify.
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    }, notifyOpenFailed(set));
   },
 
   // Receives a file the OS opened (PWA file_handlers).
@@ -677,19 +716,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     // the question, the save (spec §5). Reserved after the read, this flow would
     // displace a newer flow the user opened during it, silently discarding the
     // user's last choice.
-    const mine = reserveReplacement();
-    // Read failures are caught right where the promise is made — after a cancelled
-    // question nobody awaits this promise, so catching after the answer would let
-    // the failure vanish without a notice (unhandled rejection). A displaced
-    // flow's failure is not notified — it would be words about someone else's
-    // (the newest flow's) screen (spec §5 · replacement reservation).
-    const reading: Promise<OpenedFile | typeof readFailed> = Promise.resolve(file).catch(
-      (e: unknown) => {
-        if (mine.current()) get().failedToOpen(e);
-        return readFailed;
-      }
-    );
-    try {
+    await withReplacement(async (mine) => {
+      // Read failures are caught right where the promise is made — after a cancelled
+      // question nobody awaits this promise, so catching after the answer would let
+      // the failure vanish without a notice (unhandled rejection). A displaced
+      // flow's failure is not notified — it would be words about someone else's
+      // (the newest flow's) screen (spec §5 · replacement reservation).
+      const reading: Promise<OpenedFile | typeof readFailed> = Promise.resolve(file).catch(
+        (e: unknown) => {
+          if (mine.current()) get().failedToOpen(e);
+          return readFailed;
+        }
+      );
       // Even handed over by the OS, this is opening another file. A different way
       // in is no reason to silently discard what was being edited (spec §4 ·
       // unsaved edits).
@@ -705,56 +743,54 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (opened === readFailed) return;
       set({ notice: null });
       await replace(get, set, mine, load(opened));
-    } catch (e) {
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    }, notifyOpenFailed(set));
   },
 
   openDropped: async (file, folder) => {
     // Reserve at the moment of the drop — before waiting on the scan, the question, the save (spec §5 · replacement reservation).
-    const mine = reserveReplacement();
-    set({ notice: null });
-    // Scan failures are caught right where the promise is made — after a cancelled
-    // question nobody awaits this promise, so catching after the answer would let
-    // the failure vanish without a notice (unhandled rejection). Even after a
-    // cancel, the scan failure is reported (Principle 3 · spec §5.1). But a
-    // displaced drop's failure is not — "could not open" would appear over a
-    // document the other (newest) flow put up perfectly well (spec §5 ·
-    // replacement reservation). Cancelling creates no new reservation, so the
-    // notice for the cancelled case stays alive.
-    const scanned: Promise<FolderRead | null | typeof scanFailed> = folder.catch((e: unknown) => {
-      if (mine.current()) get().failedToOpen(e);
-      return scanFailed;
-    });
-    try {
-      // Opening a new file loses the current edits. They are not discarded silently.
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      // Lock from the moment of the answer — edits made while waiting for the scan
-      // to finish also have nowhere to go once the new state installs (spec §4 ·
-      // no edits accepted during a replacement).
-      mine.engage();
-      // Displaced while waiting on the scan, guarded retreats with Superseded —
-      // install and notices alike belong to the other (newest) flow (spec §5).
-      const read = await mine.guarded(scanned);
-      // A failed scan was already reported above. It does not fall through to
-      // opening as a file — what was dropped may have been a folder, and opening a
-      // folder as a document piles error upon error.
-      if (read === scanFailed) return;
-      // The store decides whether a folder was dropped. If not, it opens as a
-      // file. The same reservation is passed along — reserving anew would have
-      // this flow displace itself, and the gap in between must be closed by the
-      // reservation, not by a comment (ADR-010).
-      if (!(await get().loadFolder(read, mine)) && file) await get().loadDropped(file, mine);
-    } catch (e) {
-      // A displaced flow's marker means a quiet retreat (spec §5) — uncaught here
-      // it leaks past the entry point (unhandled rejection). Other failures flow to
-      // the caller as before.
-      if (!(e instanceof Superseded)) throw e;
-    } finally {
-      mine.release();
-    }
+    await withReplacement(
+      async (mine) => {
+        set({ notice: null });
+        // Scan failures are caught right where the promise is made — after a cancelled
+        // question nobody awaits this promise, so catching after the answer would let
+        // the failure vanish without a notice (unhandled rejection). Even after a
+        // cancel, the scan failure is reported (Principle 3 · spec §5.1). But a
+        // displaced drop's failure is not — "could not open" would appear over a
+        // document the other (newest) flow put up perfectly well (spec §5 ·
+        // replacement reservation). Cancelling creates no new reservation, so the
+        // notice for the cancelled case stays alive.
+        const scanned: Promise<FolderRead | null | typeof scanFailed> = folder.catch(
+          (e: unknown) => {
+            if (mine.current()) get().failedToOpen(e);
+            return scanFailed;
+          }
+        );
+        // Opening a new file loses the current edits. They are not discarded silently.
+        if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
+        // Lock from the moment of the answer — edits made while waiting for the scan
+        // to finish also have nowhere to go once the new state installs (spec §4 ·
+        // no edits accepted during a replacement).
+        mine.engage();
+        // Displaced while waiting on the scan, guarded retreats with Superseded —
+        // install and notices alike belong to the other (newest) flow (spec §5).
+        const read = await mine.guarded(scanned);
+        // A failed scan was already reported above. It does not fall through to
+        // opening as a file — what was dropped may have been a folder, and opening a
+        // folder as a document piles error upon error.
+        if (read === scanFailed) return;
+        // The store decides whether a folder was dropped. If not, it opens as a
+        // file. The same reservation is passed along — reserving anew would have
+        // this flow displace itself, and the gap in between must be closed by the
+        // reservation, not by a comment (ADR-010).
+        if (!(await get().loadFolder(read, mine)) && file) await get().loadDropped(file, mine);
+      },
+      (e) => {
+        // A displaced flow's marker means a quiet retreat (spec §5) — uncaught here
+        // it leaks past the entry point (unhandled rejection). Other failures flow to
+        // the caller as before.
+        if (!(e instanceof Superseded)) throw e;
+      }
+    );
   },
 
   // A dropped folder opens the document inside it. The legacy drop API grants no
@@ -762,34 +798,36 @@ export const useEditor = create<EditorState>((set, get) => ({
   // assets to look at.
   loadFolder: async (read, within) => {
     if (!read) return false;
-    const mine = within ?? reserveReplacement();
-    set({ notice: null });
-    try {
-      const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
-      // A retreated flow's afterword (the truncation notice) would be about a screen someone else put up — only the installer speaks.
-      if (next && read.truncated) {
-        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
-      }
-      return true;
-    } catch (e) {
-      if (mine.current()) set({ notice: folderFailedNotice(e, read) });
-      return true;
-    } finally {
-      mine.release();
-    }
+    return withReplacement(
+      async (mine) => {
+        set({ notice: null });
+        const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
+        // A retreated flow's afterword (the truncation notice) would be about a screen someone else put up — only the installer speaks.
+        if (next && read.truncated) {
+          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+        }
+        return true;
+      },
+      (e, mine) => {
+        if (mine.current()) set({ notice: folderFailedNotice(e, read) });
+        // Handled either way — the caller must not fall through to opening the
+        // drop as a single file on top of a failure already reported.
+        return true;
+      },
+      within
+    );
   },
 
   loadDropped: async (file, within) => {
-    const mine = within ?? reserveReplacement();
-    set({ notice: null });
-    try {
-      await replace(get, set, mine, openPicked(droppedFile(file)));
-    } catch (e) {
-      // Swallowing a parse failure makes dropping a file look like nothing happened.
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    // Swallowing a parse failure makes dropping a file look like nothing happened.
+    await withReplacement(
+      async (mine) => {
+        set({ notice: null });
+        await replace(get, set, mine, openPicked(droppedFile(file)));
+      },
+      notifyOpenFailed(set),
+      within
+    );
   },
 
   // Cross-checks render result against source and locks script-generated blocks (ADR-005).
@@ -985,28 +1023,29 @@ export const useEditor = create<EditorState>((set, get) => ({
       return;
     }
     set({ notice: null });
+    // The failure handler must also see whether the scan was truncated — the
+    // document may have been beyond the limit. So it is held out here, not inside
+    // the run.
+    let read: FolderRead | null = null;
     // Reserve at the moment of the user action — before waiting on the dialog,
     // the scan, the question (spec §5).
-    const mine = reserveReplacement();
-    // The catch must also see whether the scan was truncated — the document may
-    // have been beyond the limit.
-    let read: FolderRead | null = null;
-    try {
-      // The dialog comes first, for the same reason as opening a file. Displaced
-      // while it was open, guarded retreats with Superseded and never asks while
-      // displaced (spec §5).
-      read = await mine.guarded(pickFolder(null, 'readwrite'));
-      if (!read) return;
-      if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
-      const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
-      if (next && read.truncated) {
-        set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+    await withReplacement(
+      async (mine) => {
+        // The dialog comes first, for the same reason as opening a file. Displaced
+        // while it was open, guarded retreats with Superseded and never asks while
+        // displaced (spec §5).
+        read = await mine.guarded(pickFolder(null, 'readwrite'));
+        if (!read) return;
+        if (!(await keepEdits({ key: 'confirm.whyOpen' }, mine))) return;
+        const next = await replace(get, set, mine, openBundle(read.files, undefined, read.handles));
+        if (next && read.truncated) {
+          set({ notice: { key: 'notice.folderTruncated', params: { count: read.files.size } } });
+        }
+      },
+      (e, mine) => {
+        if (mine.current()) set({ notice: folderFailedNotice(e, read) });
       }
-    } catch (e) {
-      if (mine.current()) set({ notice: folderFailedNotice(e, read) });
-    } finally {
-      mine.release();
-    }
+    );
   },
 
   /**
@@ -1027,8 +1066,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     set({ notice: null });
     // Reserve at the moment of the user action — before waiting on the dialog,
     // the scan, the question (spec §5).
-    const mine = reserveReplacement();
-    try {
+    await withReplacement(async (mine) => {
       // The dialog opens where the file lived — usually that folder is the answer.
       // Displaced while it was open, guarded retreats with Superseded and never
       // asks while displaced (spec §5).
@@ -1084,11 +1122,7 @@ export const useEditor = create<EditorState>((set, get) => ({
               : { key: 'notice.assetsNotFound' },
         });
       }
-    } catch (e) {
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    }, notifyOpenFailed(set));
   },
 
   /**
@@ -1103,15 +1137,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!get().file) return;
 
     set({ notice: null });
-    const mine = reserveReplacement();
-    try {
+    await withReplacement(async (mine) => {
       if (!(await keepEdits({ key: 'confirm.whyClose' }, mine))) return;
       await replace(get, set, mine, Promise.resolve(emptyDocument()));
-    } catch (e) {
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    }, notifyOpenFailed(set));
   },
 
   /**
@@ -1127,8 +1156,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
     set({ notice: null });
     // Reserve at the moment of the user action — before waiting on the question, the save (spec §5).
-    const mine = reserveReplacement();
-    try {
+    await withReplacement(async (mine) => {
       if (!(await keepEdits({ key: 'confirm.whySwitch', params: { path } }, mine))) return;
       // Answered with save, the bundle was just swapped for that output (for a
       // download save the bundle is the only source of truth, spec §5). Using the
@@ -1137,11 +1165,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const fresh = get().bundle;
       if (!fresh) return;
       await replace(get, set, mine, openBundle(fresh, path, get().bundleHandles));
-    } catch (e) {
-      if (mine.current()) set({ notice: openFailedNotice(e) });
-    } finally {
-      mine.release();
-    }
+    }, notifyOpenFailed(set));
   },
 
   save: async () => {
