@@ -303,9 +303,12 @@ reservations).
 
 - Reserve at the moment of user action — **before** anything slow (scanning, dialogs, prompts, saves)
 - Slow steps pass through the reservation's `guarded` — after waiting, if superseded, it throws
-  `Superseded`, which the entry point's try/finally receives as a quiet retreat. Writing the check by
-  hand at each step got the same spot wrong nine times (a missed check after an await) — the check is
-  enforced by the pipeline, not by memory
+  `Superseded`, which `withReplacement` receives as a quiet retreat. Writing the check by hand at each
+  step got the same spot wrong nine times (a missed check after an await) — the check is enforced by
+  the pipeline, not by memory
+- Reserving, retreating and releasing are `withReplacement`'s job, in `store/editor.ts`. The nine
+  flows that replace the document each hand it what to run and what a failure looks like; none of
+  them writes the scaffold out itself, so there is one place for the release to be missing from
 - When reservations overlap, the last one wins. A superseded flow cleans up only what it created and
   steps aside — no installing, no notices, no unlocking
 - The lock runs from the moment the prompt is answered (`engage`) until install or failure, and the

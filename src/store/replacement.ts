@@ -19,9 +19,9 @@
  * the check cannot be forgotten — writing a manual `current()` check after each
  * step got the same spot wrong nine times (the missing check after an await).
  * `guarded` waits, then throws `Superseded` if this reservation was displaced,
- * and the entry point's try/finally turns that into a quiet retreat — a displaced
- * reservation's `current()` never becomes true again, so it cannot reach any
- * notification path gated on `current()`.
+ * and `withReplacement` (editor.ts), which wraps every one of those flows, turns
+ * that into a quiet retreat — a displaced reservation's `current()` never becomes
+ * true again, so it cannot reach any notification path gated on `current()`.
  *
  * ## What is locked — a single `replacing`
  *
