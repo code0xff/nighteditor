@@ -4,7 +4,7 @@
  * 아이콘을 바이너리로만 커밋해 두면 나중에 크기나 여백을 바꿀 때 출처가 없다.
  * 이 스크립트가 곧 그 정의다.  실행: node scripts/make-icons.mjs
  *
- * 도안은 하나다 — `scripts/mark-512.png` (검은 타일 위 흰 세리프 N).
+ * 도안은 하나다 — `scripts/mark-512.png` (밝은 타일 위 검은 까마귀, nightcrow 의 icon-512.png).
  * 파비콘(public/favicon*.ico|png, apple-touch-icon.png)도 같은 도안이라
  * 탭·홈화면·설치 아이콘이 전부 같은 마크로 보인다.
  *
