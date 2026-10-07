@@ -12,6 +12,9 @@
  *   icon-192.png           풀블리드
  *   icon-512.png           풀블리드
  *   icon-maskable-512.png  안전영역(가운데 80%) 안으로 축소 — OS 가 원형으로 잘라도 살아남는다
+ *   favicon-16x16.png      탭 아이콘. 모서리를 도안보다 더 둥글게 깎는다 (FAVICON_RADIUS)
+ *   favicon-32x32.png      〃
+ *   favicon.ico            위 두 PNG 를 그대로 담은 ICO
  */
 import { deflateSync, inflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -24,6 +27,12 @@ const OUT = join(HERE, '..', 'public');
 
 /** 마스커블 안전영역 — 도안이 차지할 비율. 나머지는 배경색 여백이다. */
 const MASKABLE_SCALE = 0.8;
+
+/**
+ * 탭 아이콘의 모서리 반지름 (한 변 대비).  도안의 모서리(약 21%)는 16px 로 줄이면
+ * 3px 남짓이라 거의 각져 보인다.  탭에서는 이만큼 깎아야 둥글게 읽힌다.
+ */
+const FAVICON_RADIUS = 0.3;
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -193,6 +202,55 @@ function compose(src, size, scale) {
   return { size, px };
 }
 
+/**
+ * 도안을 줄인 뒤 둥근 사각형 바깥을 투명하게 깎는다.  경계 픽셀은 4x4 표본으로
+ * 덮인 비율을 구해 알파에 곱한다 — 그냥 자르면 16px 에서 계단이 보인다.
+ */
+function roundCorners(src, size, radius) {
+  const art = resize(src, size);
+  const r = size * radius;
+  const coverage = (x, y) => {
+    let inside = 0;
+    for (let sy = 0; sy < 4; sy++) {
+      for (let sx = 0; sx < 4; sx++) {
+        const px = x + (sx + 0.5) / 4;
+        const py = y + (sy + 0.5) / 4;
+        const dx = Math.max(r - px, px - (size - r), 0);
+        const dy = Math.max(r - py, py - (size - r), 0);
+        if (dx * dx + dy * dy <= r * r) inside++;
+      }
+    }
+    return inside / 16;
+  };
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4 + 3;
+      art.px[i] = Math.round(art.px[i] * coverage(x, y));
+    }
+  }
+  return { size, px: art.px };
+}
+
+/** PNG 를 그대로 담는 ICO (Vista 이후 모든 브라우저가 읽는다) */
+function encodeIco(pngs) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(1, 2); // type: icon
+  header.writeUInt16LE(pngs.length, 4);
+  let offset = 6 + 16 * pngs.length;
+  const entries = pngs.map(({ size, data }) => {
+    const e = Buffer.alloc(16);
+    e[0] = size;
+    e[1] = size;
+    e.writeUInt16LE(1, 4); // planes
+    e.writeUInt16LE(32, 6); // bpp
+    e.writeUInt32LE(data.length, 8);
+    e.writeUInt32LE(offset, 12);
+    offset += data.length;
+    return e;
+  });
+  return Buffer.concat([header, ...entries, ...pngs.map((p) => p.data)]);
+}
+
 const source = decodePng(readFileSync(SOURCE));
 const files = [
   ['icon-192.png', compose(source, 192, 1)],
@@ -204,3 +262,15 @@ for (const [name, image] of files) {
   writeFileSync(join(OUT, name), data);
   console.log(`${name}  ${data.length} bytes`);
 }
+
+const favicons = [16, 32].map((size) => ({
+  size,
+  data: encodePng(roundCorners(source, size, FAVICON_RADIUS)),
+}));
+for (const { size, data } of favicons) {
+  writeFileSync(join(OUT, `favicon-${size}x${size}.png`), data);
+  console.log(`favicon-${size}x${size}.png  ${data.length} bytes`);
+}
+const ico = encodeIco(favicons);
+writeFileSync(join(OUT, 'favicon.ico'), ico);
+console.log(`favicon.ico  ${ico.length} bytes`);
